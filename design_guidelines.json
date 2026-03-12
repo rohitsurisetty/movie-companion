@@ -1,0 +1,313 @@
+{
+  "app_name": "Film Companion",
+  "version": "1.0.0",
+  "theme_mode": "dark",
+  "design_philosophy": {
+    "core_concept": "Dark Cinema",
+    "emotional_tone": "Premium, Immersive, Passionate, Intimate",
+    "visual_style": "High Contrast, Noir, Minimalist, Spotlight Effects",
+    "principles": [
+      "Cinema First: Every screen should feel like a movie poster or theatre interface.",
+      "Darkness is the Canvas: Use deep blacks and charcoals to make content pop.",
+      "Red is the Action: Use Cinema Red sparingly for primary actions only.",
+      "Motion is Emotion: Smooth, curtain-like transitions.",
+      "Content is King: Movie artwork dominates the visual hierarchy."
+    ]
+  },
+  "colors": {
+    "palette": {
+      "background": {
+        "main": "#121212",
+        "secondary": "#0A0A0A",
+        "modal": "#1E1E1E",
+        "overlay": "rgba(0, 0, 0, 0.85)"
+      },
+      "primary": {
+        "main": "#E50914",
+        "hover": "#B20710",
+        "contrastText": "#FFFFFF"
+      },
+      "secondary": {
+        "main": "#FFD700",
+        "dark": "#C5A059",
+        "contrastText": "#000000"
+      },
+      "text": {
+        "primary": "#F5F5F5",
+        "secondary": "#B3B3B3",
+        "muted": "#757575",
+        "inverse": "#121212"
+      },
+      "status": {
+        "error": "#CF6679",
+        "success": "#4CAF50",
+        "warning": "#FFC107",
+        "info": "#2196F3"
+      },
+      "border": {
+        "default": "#333333",
+        "focus": "#E50914"
+      }
+    },
+    "gradients": {
+      "cinema_fade": ["transparent", "#121212"],
+      "gold_dust": ["#FFD700", "#C5A059"],
+      "red_curtain": ["#B20710", "#E50914", "#B20710"]
+    }
+  },
+  "typography": {
+    "fonts": {
+      "heading": "Bebas Neue",
+      "body": "Lato",
+      "monospace": "Courier New"
+    },
+    "scale": {
+      "display": {
+        "fontSize": 48,
+        "lineHeight": 56,
+        "letterSpacing": 1,
+        "fontFamily": "Bebas Neue"
+      },
+      "h1": {
+        "fontSize": 32,
+        "lineHeight": 40,
+        "letterSpacing": 0.5,
+        "fontFamily": "Bebas Neue"
+      },
+      "h2": {
+        "fontSize": 24,
+        "lineHeight": 32,
+        "letterSpacing": 0.25,
+        "fontFamily": "Bebas Neue"
+      },
+      "h3": {
+        "fontSize": 20,
+        "lineHeight": 28,
+        "fontWeight": "bold",
+        "fontFamily": "Lato"
+      },
+      "body1": {
+        "fontSize": 16,
+        "lineHeight": 24,
+        "fontFamily": "Lato"
+      },
+      "body2": {
+        "fontSize": 14,
+        "lineHeight": 20,
+        "color": "#B3B3B3",
+        "fontFamily": "Lato"
+      },
+      "caption": {
+        "fontSize": 12,
+        "lineHeight": 16,
+        "color": "#757575",
+        "fontFamily": "Lato"
+      },
+      "button": {
+        "fontSize": 16,
+        "fontWeight": "bold",
+        "textTransform": "uppercase",
+        "letterSpacing": 1.25,
+        "fontFamily": "Lato"
+      }
+    }
+  },
+  "spacing": {
+    "xs": 4,
+    "s": 8,
+    "m": 16,
+    "l": 24,
+    "xl": 32,
+    "xxl": 48,
+    "xxxl": 64,
+    "container_padding": 20
+  },
+  "borders": {
+    "radius": {
+      "s": 4,
+      "m": 8,
+      "l": 16,
+      "full": 9999
+    },
+    "width": {
+      "thin": 1,
+      "medium": 2,
+      "thick": 4
+    }
+  },
+  "shadows": {
+    "soft": {
+      "shadowColor": "#000",
+      "shadowOffset": { "width": 0, "height": 2 },
+      "shadowOpacity": 0.25,
+      "shadowRadius": 3.84,
+      "elevation": 5
+    },
+    "glow": {
+      "shadowColor": "#E50914",
+      "shadowOffset": { "width": 0, "height": 0 },
+      "shadowOpacity": 0.5,
+      "shadowRadius": 10,
+      "elevation": 10
+    }
+  },
+  "assets": {
+    "images": {
+      "auth_background": "https://images.unsplash.com/photo-1766844649143-af98d71e346b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2ODh8MHwxfHNlYXJjaHw0fHxkYXJrJTIwY2luZW1hdGljJTIwbW92aWUlMjB0aGVhdGVyJTIwYmFja2dyb3VuZHxlbnwwfHx8fDE3NzMyODk3MDR8MA&ixlib=rb-4.1.0&q=85",
+      "curtain_texture": "https://images.unsplash.com/photo-1754915281161-d16814dbb60f?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1MDZ8MHwxfHNlYXJjaHwzfHxyZWQlMjB2ZWx2ZXQlMjBjdXJ0YWlucyUyMHRleHR1cmV8ZW58MHx8fHwxNzczMjg5NzI1fDA&ixlib=rb-4.1.0&q=85",
+      "placeholders": {
+        "avatar": "https://api.dicebear.com/7.x/avataaars/png?seed=Felix",
+        "movie_poster": "https://images.unsplash.com/photo-1628763228722-b11a9c545ed7?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1Nzh8MHwxfHNlYXJjaHwxfHxtb2Rlcm4lMjBjeWJlcnB1bmslMjBtb3ZpZSUyMHBvc3RlcnxlbnwwfHx8fDE3NzMyODk3NDd8MA&ixlib=rb-4.1.0&q=85"
+      }
+    },
+    "icons": {
+      "library": "lucide-react-native",
+      "mappings": {
+        "email": "Mail",
+        "password": "Lock",
+        "location": "MapPin",
+        "movie": "Film",
+        "calendar": "Calendar",
+        "gender": "User",
+        "search": "Search",
+        "star": "Star",
+        "back": "ChevronLeft",
+        "check": "Check",
+        "close": "X",
+        "edit": "Edit2",
+        "visibility": "Eye",
+        "visibility_off": "EyeOff"
+      }
+    }
+  },
+  "components": {
+    "PrimaryButton": {
+      "style": {
+        "backgroundColor": "#E50914",
+        "paddingVertical": 16,
+        "borderRadius": 9999,
+        "alignItems": "center",
+        "justifyContent": "center",
+        "width": "100%",
+        "elevation": 5
+      },
+      "textStyle": {
+        "color": "#FFFFFF",
+        "fontSize": 16,
+        "fontWeight": "bold",
+        "textTransform": "uppercase",
+        "letterSpacing": 1
+      }
+    },
+    "SecondaryButton": {
+      "style": {
+        "backgroundColor": "transparent",
+        "borderWidth": 1,
+        "borderColor": "#F5F5F5",
+        "paddingVertical": 14,
+        "borderRadius": 9999,
+        "alignItems": "center",
+        "justifyContent": "center",
+        "width": "100%"
+      },
+      "textStyle": {
+        "color": "#F5F5F5",
+        "fontSize": 16,
+        "fontWeight": "600"
+      }
+    },
+    "Input": {
+      "containerStyle": {
+        "backgroundColor": "#2C2C2C",
+        "borderRadius": 8,
+        "paddingHorizontal": 16,
+        "paddingVertical": 14,
+        "borderBottomWidth": 2,
+        "borderBottomColor": "transparent",
+        "marginBottom": 16
+      },
+      "textStyle": {
+        "color": "#FFFFFF",
+        "fontSize": 16,
+        "fontFamily": "Lato"
+      },
+      "placeholderTextColor": "#757575",
+      "focusStyle": {
+        "borderBottomColor": "#E50914"
+      }
+    },
+    "Card": {
+      "style": {
+        "backgroundColor": "#1E1E1E",
+        "borderRadius": 12,
+        "padding": 16,
+        "shadowColor": "#000",
+        "shadowOffset": { "width": 0, "height": 2 },
+        "shadowOpacity": 0.25,
+        "shadowRadius": 3.84,
+        "elevation": 5
+      }
+    }
+  },
+  "layout_strategies": {
+    "onboarding_flow": {
+      "structure": "Single View with Animated Transitions",
+      "progress_indicator": "FilmStrip (Horizontal scrolling dots styled as film frames)",
+      "animation": "SlideInRight / SlideOutLeft"
+    },
+    "movie_selection": {
+      "grid": "3 columns",
+      "aspect_ratio": "2:3",
+      "selection_effect": "Border glow + Checkmark overlay"
+    },
+    "chips": {
+      "container": "Flex Wrap",
+      "item": "Pill shape, outline default, filled red active"
+    }
+  },
+  "animations": {
+    "library": "react-native-reanimated",
+    "presets": {
+      "fadeIn": {
+        "from": { "opacity": 0 },
+        "to": { "opacity": 1 },
+        "duration": 500
+      },
+      "slideUp": {
+        "from": { "translateY": 100, "opacity": 0 },
+        "to": { "translateY": 0, "opacity": 1 },
+        "duration": 400
+      },
+      "curtainOpen": {
+        "description": "Two panels sliding outwards (left and right) revealing the content behind"
+      }
+    }
+  },
+  "implementation_rules": {
+    "react_native": {
+      "style_system": "StyleSheet.create",
+      "safe_area": "react-native-safe-area-context",
+      "icons": "lucide-react-native",
+      "fonts": "expo-font",
+      "navigation": "expo-router or react-navigation"
+    },
+    "testing": {
+      "attribute": "testID",
+      "format": "kebab-case (e.g., login-button, email-input)"
+    }
+  },
+  "universal_guidelines": [
+    "DO NOT use gradients on text unless absolutely necessary for a title effect.",
+    "Dark colors look good when used independently without gradients. DO NOT use dark colors as gradients.",
+    "Don't make generic centered layouts, simplistic gradients, and uniform styling.",
+    "Create depth through layered design elements with z-index hierarchy.",
+    "You MUST NOT apply universal transition. Eg: transition: all.",
+    "You MUST NOT center align the app container implicitly.",
+    "Always use modern button styles like pill-shaped.",
+    "NEVER: use AI assistant Emoji characters for icons.",
+    "All interactive and key informational elements MUST include a data-testid attribute (for web) or testID (for native).",
+    "Ensure minimum touch target size of 44x44px for all interactive elements.",
+    "Use StyleSheet.create() for all style definitions. Do NOT use inline styles.",
+    "Avoid transparency on backgrounds that overlay content to prevent readability issues."
+  ]
+}
