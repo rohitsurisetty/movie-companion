@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Dimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, {
   useSharedValue, useAnimatedStyle, withTiming, withDelay,
@@ -11,6 +12,7 @@ import { COLORS, SPACING, BORDER_RADIUS } from '../src/theme';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export default function SuccessScreen() {
+  const router = useRouter();
   const leftCurtain = useSharedValue(0);
   const rightCurtain = useSharedValue(0);
   const contentOpacity = useSharedValue(0);
@@ -73,7 +75,7 @@ export default function SuccessScreen() {
         </Animated.View>
 
         <Animated.View style={[styles.buttonContainer, buttonStyle]}>
-          <TouchableOpacity style={styles.enterBtn} testID="enter-app-btn" activeOpacity={0.8}>
+          <TouchableOpacity style={styles.enterBtn} testID="enter-app-btn" activeOpacity={0.8} onPress={() => router.replace('/filters')}>
             <Ionicons name="play" size={20} color={COLORS.white} />
             <Text style={styles.enterBtnText}>Enter Film Companion</Text>
           </TouchableOpacity>

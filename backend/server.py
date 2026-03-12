@@ -182,6 +182,130 @@ async def reverse_geocode(lat: float, lng: float):
     return {"location": "", "formatted_address": ""}
 
 
+TMDB_GENRE_IDS = {
+    'Action': 28, 'Romance': 10749, 'Comedy': 35, 'Thriller': 53,
+    'Horror': 27, 'Sci-Fi': 878, 'Drama': 18, 'Documentary': 99,
+}
+
+TMDB_LANG_CODES = {
+    'Hindi': 'hi', 'English': 'en', 'Telugu': 'te', 'Tamil': 'ta',
+    'Malayalam': 'ml', 'Kannada': 'kn', 'Korean': 'ko', 'Bengali': 'bn',
+    'Marathi': 'mr', 'Gujarati': 'gu',
+}
+
+
+@api_router.get("/tmdb/feed")
+async def get_movie_feed(
+    genres: str = "",
+    languages: str = "",
+    page: int = 1,
+    exclude: str = "",
+    seed_movie_id: int = 0,
+    liked_genres: str = "",
+):
+    """Get movie feed based on user preferences with adaptive learning"""
+    exclude_ids = set(int(x) for x in exclude.split(',') if x.strip())
+    genre_names = [g.strip() for g in genres.split(',') if g.strip()]
+    liked_genre_ids = [int(x) for x in liked_genres.split(',') if x.strip()]
+
+    # Build genre list: prioritize liked genres
+    genre_id_list = []
+    if liked_genre_ids:
+        genre_id_list = liked_genre_ids[:3]
+    elif genre_names:
+        genre_id_list = [TMDB_GENRE_IDS[g] for g in genre_names if g in TMDB_GENRE_IDS]
+
+    all_movies = []
+    async with httpx.AsyncClient(timeout=10.0) as http_client:
+        # 1. Discover by genre
+        if genre_id_list:
+            genre_str = ','.join(str(g) for g in genre_id_list[:3])
+            resp = await http_client.get(
+                "https://api.themoviedb.org/3/discover/movie",
+                params={"with_genres": genre_str, "sort_by": "vote_average.desc",
+                        "vote_count.gte": 100, "page": page},
+                headers={"Authorization": f"Bearer {TMDB_ACCESS_TOKEN}"}
+            )
+            if resp.status_code == 200:
+                all_movies.extend(resp.json().get("results", []))
+
+        # 2. Recommendations from seed movie
+        if seed_movie_id > 0:
+            resp = await http_client.get(
+                f"https://api.themoviedb.org/3/movie/{seed_movie_id}/recommendations",
+                params={"page": 1},
+                headers={"Authorization": f"Bearer {TMDB_ACCESS_TOKEN}"}
+            )
+            if resp.status_code == 200:
+                all_movies.extend(resp.json().get("results", []))
+
+        # 3. Popular fallback
+        if len(all_movies) < 10:
+            resp = await http_client.get(
+                "https://api.themoviedb.org/3/movie/popular",
+                params={"page": page},
+                headers={"Authorization": f"Bearer {TMDB_ACCESS_TOKEN}"}
+            )
+            if resp.status_code == 200:
+                all_movies.extend(resp.json().get("results", []))
+
+        # 4. Top rated fallback
+        if len(all_movies) < 15:
+            resp = await http_client.get(
+                "https://api.themoviedb.org/3/movie/top_rated",
+                params={"page": page},
+                headers={"Authorization": f"Bearer {TMDB_ACCESS_TOKEN}"}
+            )
+            if resp.status_code == 200:
+                all_movies.extend(resp.json().get("results", []))
+
+    # Deduplicate, exclude swiped, require poster
+    seen = set()
+    results = []
+    for m in all_movies:
+        mid = m["id"]
+        if mid not in seen and mid not in exclude_ids and m.get("poster_path"):
+            seen.add(mid)
+            results.append({
+                "id": mid, "title": m["title"],
+                "poster_path": m.get("poster_path", ""),
+                "backdrop_path": m.get("backdrop_path", ""),
+                "release_date": m.get("release_date", ""),
+                "overview": m.get("overview", ""),
+                "vote_average": m.get("vote_average", 0),
+                "genre_ids": m.get("genre_ids", []),
+            })
+    return {"results": results[:20], "page": page}
+
+
+@api_router.get("/tmdb/movie/{movie_id}")
+async def get_movie_details(movie_id: int):
+    """Get detailed movie info including cast and crew"""
+    async with httpx.AsyncClient(timeout=10.0) as http_client:
+        resp = await http_client.get(
+            f"https://api.themoviedb.org/3/movie/{movie_id}",
+            params={"append_to_response": "credits"},
+            headers={"Authorization": f"Bearer {TMDB_ACCESS_TOKEN}"}
+        )
+    if resp.status_code != 200:
+        raise HTTPException(status_code=resp.status_code, detail="TMDB error")
+    movie = resp.json()
+    credits = movie.get("credits", {})
+    cast = [{"name": c["name"], "character": c.get("character", "")}
+            for c in credits.get("cast", [])[:10]]
+    directors = [c["name"] for c in credits.get("crew", []) if c.get("job") == "Director"]
+    genres = [g["name"] for g in movie.get("genres", [])]
+    return {
+        "id": movie["id"], "title": movie["title"],
+        "poster_path": movie.get("poster_path", ""),
+        "overview": movie.get("overview", ""),
+        "release_date": movie.get("release_date", ""),
+        "vote_average": movie.get("vote_average", 0),
+        "runtime": movie.get("runtime", 0),
+        "genres": genres, "cast": cast, "directors": directors,
+    }
+
+
 app.include_router(api_router)
 
 app.add_middleware(
