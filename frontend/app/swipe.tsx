@@ -16,17 +16,16 @@ import {
   FeedMovie, SwipeState, SwipeRecord, initialSwipeState, TMDB_GENRE_MAP,
 } from '../src/types';
 import { saveSwipeState, getSwipeState, getFilters, getProfile } from '../src/store';
-import Constants from 'expo-constants';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const CARD_WIDTH = SCREEN_WIDTH * 0.88;
-const CARD_HEIGHT = SCREEN_HEIGHT * 0.65;
+const CARD_HEIGHT = SCREEN_HEIGHT * 0.58;
 const SWIPE_THRESHOLD = SCREEN_WIDTH * 0.25;
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
 const REQUIRED_SWIPES = 20;
 
-const BACKEND_URL = Constants.expoConfig?.extra?.EXPO_BACKEND_URL || '';
+const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 function RatingModal({
   visible, onClose, onSubmit, movieTitle,
