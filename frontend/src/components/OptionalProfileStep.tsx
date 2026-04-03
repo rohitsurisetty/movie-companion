@@ -28,6 +28,9 @@ const ZODIAC_SIGNS = ['Aries', 'Taurus', 'Gemini', 'Cancer', 'Leo', 'Virgo', 'Li
 const PETS_OPTS = ['Dog lover', 'Cat lover', 'Both', 'No pets', 'Other'];
 const FAMILY_OPTS = ['Want kids', 'Don\'t want kids', 'Open to kids', 'Have kids'];
 const SIBLINGS_OPTS = ['Only child', 'Have siblings'];
+const EDUCATION_OPTS = ['High School', 'Bachelor\'s', 'Master\'s', 'PhD', 'Other'];
+const TRAVEL_OPTS = ['Frequently', 'Occasionally', 'Rarely', 'Never'];
+const WORK_PROFILE_OPTS = ['IT/Software', 'Business Owner', 'Lawyer', 'Teacher', 'Others'];
 
 type DropdownConfig = { field: string; label: string; options: string[] };
 
@@ -41,6 +44,9 @@ export default function OptionalProfileStep({ data, onUpdate, onNext }: Props) {
   const [activeDropdown, setActiveDropdown] = useState<DropdownConfig | null>(null);
 
   const dropdowns: DropdownConfig[] = [
+    { field: 'education', label: 'Education', options: EDUCATION_OPTS },
+    { field: 'workProfile', label: 'Work Profile', options: WORK_PROFILE_OPTS },
+    { field: 'travel', label: 'How Often Do You Travel?', options: TRAVEL_OPTS },
     { field: 'religion', label: 'Religion', options: RELIGIONS },
     { field: 'maritalStatus', label: 'Marital Status', options: MARITAL_STATUSES },
     { field: 'smoking', label: 'Smoking Habit', options: SMOKING_OPTS },

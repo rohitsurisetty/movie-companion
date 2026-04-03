@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, Dimensions, Image, TouchableOpacity,
-  ActivityIndicator, Modal, Pressable,
+  ActivityIndicator, Modal, Pressable, ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -11,15 +11,18 @@ import Animated, {
   runOnJS, interpolate, Extrapolation,
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { COLORS, SPACING, BORDER_RADIUS } from '../src/theme';
+import {
+  SPACING, BORDER_RADIUS, getThemeColors,
+  LEFT_SWIPE_REASONS, RIGHT_SWIPE_REASONS,
+} from '../src/theme';
 import {
   FeedMovie, SwipeState, SwipeRecord, initialSwipeState, TMDB_GENRE_MAP,
 } from '../src/types';
-import { saveSwipeState, getSwipeState, getFilters, getProfile } from '../src/store';
+import { saveSwipeState, getSwipeState, getFilters, getProfile, saveMode, getMode, AppMode } from '../src/store';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const CARD_WIDTH = SCREEN_WIDTH * 0.88;
-const CARD_HEIGHT = SCREEN_HEIGHT * 0.58;
+const CARD_HEIGHT = SCREEN_HEIGHT * 0.55;
 const SWIPE_THRESHOLD = SCREEN_WIDTH * 0.25;
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
@@ -27,31 +30,114 @@ const REQUIRED_SWIPES = 20;
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
-function RatingModal({
-  visible, onClose, onSubmit, movieTitle,
+// Left Swipe Reason Modal
+function LeftSwipeModal({
+  visible, onClose, onSubmit, movieTitle, colors,
 }: {
   visible: boolean;
   onClose: () => void;
-  onSubmit: (rating: number) => void;
+  onSubmit: (reasons: string[]) => void;
   movieTitle: string;
+  colors: ReturnType<typeof getThemeColors>;
 }) {
-  const [rating, setRating] = useState(3);
+  const [selectedReasons, setSelectedReasons] = useState<string[]>([]);
+
+  const toggleReason = (id: string) => {
+    setSelectedReasons(prev =>
+      prev.includes(id) ? prev.filter(r => r !== id) : [...prev, id]
+    );
+  };
 
   const handleSubmit = () => {
-    onSubmit(rating);
-    setRating(3);
+    onSubmit(selectedReasons);
+    setSelectedReasons([]);
   };
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={modalStyles.overlay} onPress={onClose}>
-        <Pressable style={modalStyles.container} onPress={(e) => e.stopPropagation()}>
+        <Pressable style={[modalStyles.container, { backgroundColor: colors.bgCard }]} onPress={(e) => e.stopPropagation()}>
           <View style={modalStyles.header}>
-            <Ionicons name="heart" size={28} color={COLORS.primary} />
-            <Text style={modalStyles.title}>You liked it!</Text>
+            <Ionicons name="close-circle" size={28} color="#FF6B6B" />
+            <Text style={[modalStyles.title, { color: colors.text }]}>Not for you?</Text>
           </View>
-          <Text style={modalStyles.movieTitle} numberOfLines={2}>{movieTitle}</Text>
-          <Text style={modalStyles.subtitle}>Rate this movie</Text>
+          <Text style={[modalStyles.movieTitle, { color: colors.gold }]} numberOfLines={2}>{movieTitle}</Text>
+          <Text style={[modalStyles.subtitle, { color: colors.textSecondary }]}>Tell us why (optional)</Text>
+
+          <View style={modalStyles.reasonsContainer}>
+            {LEFT_SWIPE_REASONS.map((reason) => (
+              <TouchableOpacity
+                key={reason.id}
+                style={[
+                  modalStyles.reasonChip,
+                  { borderColor: colors.border },
+                  selectedReasons.includes(reason.id) && { borderColor: '#FF6B6B', backgroundColor: 'rgba(255,107,107,0.15)' }
+                ]}
+                onPress={() => toggleReason(reason.id)}
+                testID={`left-reason-${reason.id}`}
+              >
+                <Ionicons
+                  name={reason.icon as any}
+                  size={18}
+                  color={selectedReasons.includes(reason.id) ? '#FF6B6B' : colors.textMuted}
+                />
+                <Text style={[
+                  modalStyles.reasonText,
+                  { color: selectedReasons.includes(reason.id) ? '#FF6B6B' : colors.textSecondary }
+                ]}>{reason.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <TouchableOpacity
+            style={[modalStyles.submitBtn, { backgroundColor: '#FF6B6B' }]}
+            onPress={handleSubmit}
+            testID="left-swipe-submit-btn"
+            activeOpacity={0.8}
+          >
+            <Text style={modalStyles.submitBtnText}>Skip Movie</Text>
+          </TouchableOpacity>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+// Right Swipe Rating Modal with Reasons
+function RatingModal({
+  visible, onClose, onSubmit, movieTitle, colors,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onSubmit: (rating: number, reasons: string[]) => void;
+  movieTitle: string;
+  colors: ReturnType<typeof getThemeColors>;
+}) {
+  const [rating, setRating] = useState(3);
+  const [selectedReasons, setSelectedReasons] = useState<string[]>([]);
+
+  const toggleReason = (id: string) => {
+    setSelectedReasons(prev =>
+      prev.includes(id) ? prev.filter(r => r !== id) : [...prev, id]
+    );
+  };
+
+  const handleSubmit = () => {
+    onSubmit(rating, selectedReasons);
+    setRating(3);
+    setSelectedReasons([]);
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={modalStyles.overlay} onPress={onClose}>
+        <Pressable style={[modalStyles.container, { backgroundColor: colors.bgCard }]} onPress={(e) => e.stopPropagation()}>
+          <View style={modalStyles.header}>
+            <Ionicons name="heart" size={28} color={colors.primary} />
+            <Text style={[modalStyles.title, { color: colors.text }]}>You liked it!</Text>
+          </View>
+          <Text style={[modalStyles.movieTitle, { color: colors.gold }]} numberOfLines={2}>{movieTitle}</Text>
+          <Text style={[modalStyles.subtitle, { color: colors.textSecondary }]}>Rate this movie</Text>
 
           <View style={modalStyles.starsContainer}>
             {[1, 2, 3, 4, 5].map((star) => (
@@ -64,13 +150,13 @@ function RatingModal({
               >
                 <Ionicons
                   name={star <= rating ? 'star' : 'star-outline'}
-                  size={44}
-                  color={star <= rating ? COLORS.gold : COLORS.border}
+                  size={40}
+                  color={star <= rating ? colors.gold : colors.border}
                 />
               </TouchableOpacity>
             ))}
           </View>
-          <Text style={modalStyles.ratingLabel}>
+          <Text style={[modalStyles.ratingLabel, { color: colors.textMuted }]}>
             {rating === 1 && 'Not for me'}
             {rating === 2 && 'It was okay'}
             {rating === 3 && 'Liked it'}
@@ -78,8 +164,34 @@ function RatingModal({
             {rating === 5 && 'Masterpiece!'}
           </Text>
 
+          <Text style={[modalStyles.optionalLabel, { color: colors.textSecondary }]}>What did you love? (optional)</Text>
+          <View style={modalStyles.reasonsContainer}>
+            {RIGHT_SWIPE_REASONS.map((reason) => (
+              <TouchableOpacity
+                key={reason.id}
+                style={[
+                  modalStyles.reasonChip,
+                  { borderColor: colors.border },
+                  selectedReasons.includes(reason.id) && { borderColor: colors.primary, backgroundColor: `${colors.primary}20` }
+                ]}
+                onPress={() => toggleReason(reason.id)}
+                testID={`right-reason-${reason.id}`}
+              >
+                <Ionicons
+                  name={reason.icon as any}
+                  size={16}
+                  color={selectedReasons.includes(reason.id) ? colors.primary : colors.textMuted}
+                />
+                <Text style={[
+                  modalStyles.reasonText,
+                  { color: selectedReasons.includes(reason.id) ? colors.primary : colors.textSecondary }
+                ]}>{reason.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
           <TouchableOpacity
-            style={modalStyles.submitBtn}
+            style={[modalStyles.submitBtn, { backgroundColor: colors.primary }]}
             onPress={handleSubmit}
             testID="rating-submit-btn"
             activeOpacity={0.8}
@@ -92,37 +204,110 @@ function RatingModal({
   );
 }
 
+// Mode Switcher Drawer
+function ModeSwitcher({
+  visible, onClose, currentMode, onModeChange, colors,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  currentMode: AppMode;
+  onModeChange: (mode: AppMode) => void;
+  colors: ReturnType<typeof getThemeColors>;
+}) {
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={drawerStyles.overlay} onPress={onClose}>
+        <Pressable style={[drawerStyles.container, { backgroundColor: colors.bgCard }]} onPress={(e) => e.stopPropagation()}>
+          <View style={drawerStyles.handle} />
+          <Text style={[drawerStyles.title, { color: colors.text }]}>Switch Mode</Text>
+          
+          <TouchableOpacity
+            style={[
+              drawerStyles.modeOption,
+              currentMode === 'date' && { borderColor: '#E50914', backgroundColor: 'rgba(229,9,20,0.1)' }
+            ]}
+            onPress={() => { onModeChange('date'); onClose(); }}
+            testID="mode-date-btn"
+          >
+            <View style={[drawerStyles.modeIcon, { backgroundColor: 'rgba(229,9,20,0.2)' }]}>
+              <Ionicons name="heart" size={28} color="#E50914" />
+            </View>
+            <View style={drawerStyles.modeInfo}>
+              <Text style={[drawerStyles.modeName, { color: colors.text }]}>Movie Date</Text>
+              <Text style={[drawerStyles.modeDesc, { color: colors.textSecondary }]}>Find romantic movie partners</Text>
+            </View>
+            {currentMode === 'date' && (
+              <Ionicons name="checkmark-circle" size={24} color="#E50914" />
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              drawerStyles.modeOption,
+              currentMode === 'buddy' && { borderColor: '#2196F3', backgroundColor: 'rgba(33,150,243,0.1)' }
+            ]}
+            onPress={() => { onModeChange('buddy'); onClose(); }}
+            testID="mode-buddy-btn"
+          >
+            <View style={[drawerStyles.modeIcon, { backgroundColor: 'rgba(33,150,243,0.2)' }]}>
+              <Ionicons name="people" size={28} color="#2196F3" />
+            </View>
+            <View style={drawerStyles.modeInfo}>
+              <Text style={[drawerStyles.modeName, { color: colors.text }]}>Movie Buddy</Text>
+              <Text style={[drawerStyles.modeDesc, { color: colors.textSecondary }]}>Find friends to watch with</Text>
+            </View>
+            {currentMode === 'buddy' && (
+              <Ionicons name="checkmark-circle" size={24} color="#2196F3" />
+            )}
+          </TouchableOpacity>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+const drawerStyles = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  container: { borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: SPACING.l, paddingBottom: SPACING.xxl },
+  handle: { width: 40, height: 4, backgroundColor: '#555', borderRadius: 2, alignSelf: 'center', marginBottom: SPACING.l },
+  title: { fontSize: 22, fontWeight: 'bold', marginBottom: SPACING.l, textAlign: 'center' },
+  modeOption: {
+    flexDirection: 'row', alignItems: 'center', padding: SPACING.m,
+    borderRadius: BORDER_RADIUS.l, borderWidth: 2, borderColor: '#333', marginBottom: SPACING.m,
+  },
+  modeIcon: { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', marginRight: SPACING.m },
+  modeInfo: { flex: 1 },
+  modeName: { fontSize: 18, fontWeight: '600', marginBottom: 2 },
+  modeDesc: { fontSize: 13 },
+});
+
 const modalStyles = StyleSheet.create({
-  overlay: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.85)',
-    justifyContent: 'center', alignItems: 'center', padding: SPACING.l,
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center', padding: SPACING.l },
+  container: { borderRadius: BORDER_RADIUS.xl, padding: SPACING.l, width: '100%', maxWidth: 360, maxHeight: '85%' },
+  header: { flexDirection: 'row', alignItems: 'center', gap: SPACING.s, marginBottom: SPACING.s, justifyContent: 'center' },
+  title: { fontSize: 22, fontWeight: 'bold' },
+  movieTitle: { fontSize: 16, fontWeight: '600', textAlign: 'center', marginBottom: SPACING.m },
+  subtitle: { fontSize: 14, marginBottom: SPACING.m, textAlign: 'center' },
+  starsContainer: { flexDirection: 'row', gap: SPACING.s, marginBottom: SPACING.s, justifyContent: 'center' },
+  ratingLabel: { fontSize: 14, marginBottom: SPACING.m, textAlign: 'center' },
+  optionalLabel: { fontSize: 13, marginBottom: SPACING.s, textAlign: 'center' },
+  reasonsContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.s, marginBottom: SPACING.l, justifyContent: 'center' },
+  reasonChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8,
+    borderRadius: BORDER_RADIUS.full, borderWidth: 1.5,
   },
-  container: {
-    backgroundColor: COLORS.bgCard, borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.xl, width: '100%', maxWidth: 340, alignItems: 'center',
-  },
-  header: { flexDirection: 'row', alignItems: 'center', gap: SPACING.s, marginBottom: SPACING.s },
-  title: { fontSize: 22, fontWeight: 'bold', color: COLORS.text },
-  movieTitle: {
-    fontSize: 16, color: COLORS.gold, fontWeight: '600',
-    textAlign: 'center', marginBottom: SPACING.m,
-  },
-  subtitle: { fontSize: 14, color: COLORS.textSecondary, marginBottom: SPACING.m },
-  starsContainer: { flexDirection: 'row', gap: SPACING.s, marginBottom: SPACING.s },
-  ratingLabel: { fontSize: 14, color: COLORS.textMuted, marginBottom: SPACING.l },
-  submitBtn: {
-    backgroundColor: COLORS.primary, paddingVertical: 14, paddingHorizontal: 40,
-    borderRadius: BORDER_RADIUS.full, width: '100%',
-  },
-  submitBtnText: { fontSize: 16, fontWeight: 'bold', color: COLORS.white, textAlign: 'center' },
+  reasonText: { fontSize: 12, fontWeight: '500' },
+  submitBtn: { paddingVertical: 14, borderRadius: BORDER_RADIUS.full, width: '100%' },
+  submitBtnText: { fontSize: 16, fontWeight: 'bold', color: '#FFF', textAlign: 'center' },
 });
 
 function SwipeCard({
-  movie, isTop, onSwipe,
+  movie, isTop, onSwipe, colors,
 }: {
   movie: FeedMovie;
   isTop: boolean;
   onSwipe: (direction: 'left' | 'right') => void;
+  colors: ReturnType<typeof getThemeColors>;
 }) {
   const translateX = useSharedValue(0);
   const translateY = useSharedValue(0);
@@ -180,11 +365,7 @@ function SwipeCard({
   if (!isTop) {
     return (
       <View style={[styles.card, styles.cardBehind]} testID={`card-behind-${movie.id}`}>
-        <Image
-          source={{ uri: `${TMDB_IMAGE_BASE}${movie.poster_path}` }}
-          style={styles.poster}
-          resizeMode="cover"
-        />
+        <Image source={{ uri: `${TMDB_IMAGE_BASE}${movie.poster_path}` }} style={styles.poster} resizeMode="cover" />
       </View>
     );
   }
@@ -192,33 +373,23 @@ function SwipeCard({
   return (
     <GestureDetector gesture={panGesture}>
       <Animated.View style={[styles.card, cardStyle]} testID={`swipe-card-${movie.id}`}>
-        <Image
-          source={{ uri: `${TMDB_IMAGE_BASE}${movie.poster_path}` }}
-          style={styles.poster}
-          resizeMode="cover"
-        />
+        <Image source={{ uri: `${TMDB_IMAGE_BASE}${movie.poster_path}` }} style={styles.poster} resizeMode="cover" />
 
-        {/* Gradient overlay for text */}
-        <View style={styles.gradientOverlay} />
-
-        {/* LIKE stamp */}
-        <Animated.View style={[styles.stamp, styles.likeStamp, likeStyle]}>
-          <Text style={[styles.stampText, styles.likeText]}>LIKED</Text>
+        <Animated.View style={[styles.stamp, styles.likeStamp, { borderColor: colors.primary }, likeStyle]}>
+          <Text style={[styles.stampText, { color: colors.primary }]}>LIKED</Text>
         </Animated.View>
 
-        {/* NOPE stamp */}
         <Animated.View style={[styles.stamp, styles.nopeStamp, nopeStyle]}>
           <Text style={[styles.stampText, styles.nopeText]}>NOPE</Text>
         </Animated.View>
 
-        {/* Movie info at bottom */}
         <View style={styles.infoContainer}>
           <Text style={styles.movieTitle} numberOfLines={2}>{movie.title}</Text>
           <View style={styles.metaRow}>
             {year ? <Text style={styles.year}>{year}</Text> : null}
             {movie.vote_average > 0 && (
               <View style={styles.ratingBadge}>
-                <Ionicons name="star" size={14} color={COLORS.gold} />
+                <Ionicons name="star" size={14} color="#FFD700" />
                 <Text style={styles.ratingText}>{movie.vote_average.toFixed(1)}</Text>
               </View>
             )}
@@ -236,22 +407,30 @@ export default function SwipeScreen() {
   const [swipeState, setSwipeState] = useState<SwipeState>(initialSwipeState);
   const [loading, setLoading] = useState(true);
   const [showRatingModal, setShowRatingModal] = useState(false);
+  const [showLeftModal, setShowLeftModal] = useState(false);
+  const [showModeDrawer, setShowModeDrawer] = useState(false);
   const [pendingMovie, setPendingMovie] = useState<FeedMovie | null>(null);
   const [page, setPage] = useState(1);
+  const [mode, setMode] = useState<AppMode>('date');
   const fetchingRef = useRef(false);
 
+  const colors = getThemeColors(mode);
   const remainingSwipes = Math.max(0, REQUIRED_SWIPES - swipeState.totalSwipes);
   const isProfileComplete = swipeState.totalSwipes >= REQUIRED_SWIPES;
 
-  // Load saved swipe state
+  // Load saved state
   useEffect(() => {
     (async () => {
-      const saved = await getSwipeState();
-      if (saved) {
-        setSwipeState(saved);
-      }
+      const [savedSwipes, savedMode] = await Promise.all([getSwipeState(), getMode()]);
+      if (savedSwipes) setSwipeState(savedSwipes);
+      if (savedMode) setMode(savedMode);
     })();
   }, []);
+
+  const handleModeChange = async (newMode: AppMode) => {
+    setMode(newMode);
+    await saveMode(newMode);
+  };
 
   // Fetch movie feed
   const fetchMovies = useCallback(async (pageNum: number) => {
@@ -260,13 +439,10 @@ export default function SwipeScreen() {
 
     try {
       const [filters, profile] = await Promise.all([getFilters(), getProfile()]);
-
-      // Build query params based on user preferences and swipe history
       const excludeIds = swipeState.swipedMovieIds.join(',');
       const genres = filters?.genres?.selected?.join(',') || profile?.genres?.join(',') || '';
       const languages = filters?.languages?.selected?.join(',') || '';
 
-      // Get liked genre IDs from swipe history to bias recommendations
       const likedGenres: number[] = [];
       swipeState.swipes
         .filter((s) => s.direction === 'right' && s.rating >= 4)
@@ -276,19 +452,14 @@ export default function SwipeScreen() {
           });
         });
 
-      // Get a recent highly-rated movie for recommendations
       const recentLiked = swipeState.swipes
         .filter((s) => s.direction === 'right' && s.rating >= 4)
         .slice(-1)[0];
       const seedMovieId = recentLiked?.movieId || 0;
 
       const params = new URLSearchParams({
-        genres,
-        languages,
-        page: String(pageNum),
-        exclude: excludeIds,
-        seed_movie_id: String(seedMovieId),
-        liked_genres: likedGenres.slice(0, 5).join(','),
+        genres, languages, page: String(pageNum), exclude: excludeIds,
+        seed_movie_id: String(seedMovieId), liked_genres: likedGenres.slice(0, 5).join(','),
       });
 
       const res = await fetch(`${BACKEND_URL}/api/tmdb/feed?${params.toString()}`);
@@ -312,39 +483,28 @@ export default function SwipeScreen() {
     }
   }, [swipeState.swipedMovieIds, swipeState.swipes]);
 
-  useEffect(() => {
-    fetchMovies(page);
-  }, [page]);
+  useEffect(() => { fetchMovies(page); }, [page]);
 
-  // Fetch more when running low
   useEffect(() => {
-    if (movies.length < 5 && !loading) {
-      setPage((p) => p + 1);
-    }
+    if (movies.length < 5 && !loading) setPage((p) => p + 1);
   }, [movies.length, loading]);
 
   const handleSwipe = useCallback((direction: 'left' | 'right', movie: FeedMovie) => {
+    setPendingMovie(movie);
     if (direction === 'right') {
-      // Show rating modal
-      setPendingMovie(movie);
       setShowRatingModal(true);
     } else {
-      // Left swipe - dislike or not watched
-      recordSwipe(movie, direction, 0);
+      setShowLeftModal(true);
     }
-    // Remove card from stack
     setMovies((prev) => prev.filter((m) => m.id !== movie.id));
   }, []);
 
-  const recordSwipe = useCallback(async (movie: FeedMovie, direction: 'left' | 'right', rating: number) => {
+  const recordSwipe = useCallback(async (
+    movie: FeedMovie, direction: 'left' | 'right', rating: number, reasons: string[]
+  ) => {
     const record: SwipeRecord = {
-      movieId: movie.id,
-      title: movie.title,
-      direction,
-      rating,
-      reasons: [],
-      genreIds: movie.genre_ids || [],
-      timestamp: new Date().toISOString(),
+      movieId: movie.id, title: movie.title, direction, rating, reasons,
+      genreIds: movie.genre_ids || [], timestamp: new Date().toISOString(),
     };
 
     const newState: SwipeState = {
@@ -357,42 +517,53 @@ export default function SwipeScreen() {
     await saveSwipeState(newState);
   }, [swipeState]);
 
-  const handleRatingSubmit = useCallback((rating: number) => {
+  const handleRatingSubmit = useCallback((rating: number, reasons: string[]) => {
     if (pendingMovie) {
-      recordSwipe(pendingMovie, 'right', rating);
+      recordSwipe(pendingMovie, 'right', rating, reasons);
       setPendingMovie(null);
     }
     setShowRatingModal(false);
   }, [pendingMovie, recordSwipe]);
 
-  const handleContinue = useCallback(() => {
-    // Navigate to the main app / discovery feed
-    // For now just show alert since we don't have that screen yet
-    router.replace('/');
-  }, [router]);
+  const handleLeftSubmit = useCallback((reasons: string[]) => {
+    if (pendingMovie) {
+      recordSwipe(pendingMovie, 'left', 0, reasons);
+      setPendingMovie(null);
+    }
+    setShowLeftModal(false);
+  }, [pendingMovie, recordSwipe]);
 
   const currentMovie = movies[0];
   const nextMovie = movies[1];
 
+  const dynamicStyles = StyleSheet.create({
+    container: { flex: 1, backgroundColor: colors.bg },
+    headerBorder: { borderBottomColor: colors.border },
+    counterBadge: { backgroundColor: colors.primary },
+    progressFill: { backgroundColor: colors.gold },
+    likeBtn: { borderColor: `${colors.primary}60`, backgroundColor: `${colors.primary}15` },
+    dislikeBtn: { borderColor: 'rgba(255,107,107,0.4)', backgroundColor: 'rgba(255,107,107,0.1)' },
+  });
+
   return (
-    <SafeAreaView style={styles.container} testID="swipe-screen">
+    <SafeAreaView style={dynamicStyles.container} testID="swipe-screen">
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, dynamicStyles.headerBorder]}>
         <TouchableOpacity
-          style={styles.backBtn}
-          onPress={() => router.back()}
-          testID="swipe-back-btn"
+          style={styles.menuBtn}
+          onPress={() => setShowModeDrawer(true)}
+          testID="menu-btn"
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
-          <Ionicons name="chevron-back" size={24} color={COLORS.text} />
+          <Ionicons name="menu" size={26} color={colors.text} />
         </TouchableOpacity>
         <View style={styles.headerCenter}>
-          <Ionicons name="film" size={22} color={COLORS.gold} />
-          <Text style={styles.headerTitle}>Discover Movies</Text>
+          <Ionicons name={colors.modeIcon} size={22} color={colors.primary} />
+          <Text style={[styles.headerTitle, { color: colors.text }]}>{colors.modeName}</Text>
         </View>
         <View style={styles.headerRight}>
           {!isProfileComplete && (
-            <View style={styles.counterBadge}>
+            <View style={[styles.counterBadge, dynamicStyles.counterBadge]}>
               <Text style={styles.counterText}>{remainingSwipes}</Text>
             </View>
           )}
@@ -402,16 +573,11 @@ export default function SwipeScreen() {
       {/* Progress indicator */}
       {!isProfileComplete && (
         <View style={styles.progressContainer}>
-          <Text style={styles.progressText}>
+          <Text style={[styles.progressText, { color: colors.textSecondary }]}>
             Swipe {remainingSwipes} more to build your taste profile
           </Text>
-          <View style={styles.progressBar}>
-            <View
-              style={[
-                styles.progressFill,
-                { width: `${(swipeState.totalSwipes / REQUIRED_SWIPES) * 100}%` },
-              ]}
-            />
+          <View style={[styles.progressBar, { backgroundColor: colors.border }]}>
+            <View style={[styles.progressFill, dynamicStyles.progressFill, { width: `${(swipeState.totalSwipes / REQUIRED_SWIPES) * 100}%` }]} />
           </View>
         </View>
       )}
@@ -420,20 +586,16 @@ export default function SwipeScreen() {
       <View style={styles.cardsContainer}>
         {loading && movies.length === 0 ? (
           <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color={COLORS.primary} />
-            <Text style={styles.loadingText}>Loading movies...</Text>
+            <ActivityIndicator size="large" color={colors.primary} />
+            <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Loading movies...</Text>
           </View>
         ) : movies.length === 0 ? (
           <View style={styles.emptyContainer}>
-            <Ionicons name="film-outline" size={64} color={COLORS.textMuted} />
-            <Text style={styles.emptyText}>No more movies to show</Text>
+            <Ionicons name="film-outline" size={64} color={colors.textMuted} />
+            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No more movies to show</Text>
             <TouchableOpacity
-              style={styles.refreshBtn}
-              onPress={() => {
-                setPage(1);
-                setLoading(true);
-                fetchMovies(1);
-              }}
+              style={[styles.refreshBtn, { backgroundColor: colors.primary }]}
+              onPress={() => { setPage(1); setLoading(true); fetchMovies(1); }}
               testID="refresh-movies-btn"
             >
               <Text style={styles.refreshBtnText}>Refresh</Text>
@@ -441,22 +603,8 @@ export default function SwipeScreen() {
           </View>
         ) : (
           <>
-            {nextMovie && (
-              <SwipeCard
-                key={nextMovie.id}
-                movie={nextMovie}
-                isTop={false}
-                onSwipe={() => {}}
-              />
-            )}
-            {currentMovie && (
-              <SwipeCard
-                key={currentMovie.id}
-                movie={currentMovie}
-                isTop={true}
-                onSwipe={(dir) => handleSwipe(dir, currentMovie)}
-              />
-            )}
+            {nextMovie && <SwipeCard key={nextMovie.id} movie={nextMovie} isTop={false} onSwipe={() => {}} colors={colors} />}
+            {currentMovie && <SwipeCard key={currentMovie.id} movie={currentMovie} isTop={true} onSwipe={(dir) => handleSwipe(dir, currentMovie)} colors={colors} />}
           </>
         )}
       </View>
@@ -465,7 +613,7 @@ export default function SwipeScreen() {
       {movies.length > 0 && (
         <View style={styles.actionsContainer}>
           <TouchableOpacity
-            style={[styles.actionBtn, styles.dislikeBtn]}
+            style={[styles.actionBtn, dynamicStyles.dislikeBtn]}
             onPress={() => currentMovie && handleSwipe('left', currentMovie)}
             testID="swipe-left-btn"
             activeOpacity={0.8}
@@ -474,12 +622,12 @@ export default function SwipeScreen() {
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.actionBtn, styles.likeBtn]}
+            style={[styles.actionBtn, dynamicStyles.likeBtn]}
             onPress={() => currentMovie && handleSwipe('right', currentMovie)}
             testID="swipe-right-btn"
             activeOpacity={0.8}
           >
-            <Ionicons name="heart" size={28} color={COLORS.primary} />
+            <Ionicons name="heart" size={28} color={colors.primary} />
           </TouchableOpacity>
         </View>
       )}
@@ -487,312 +635,81 @@ export default function SwipeScreen() {
       {/* Instructions */}
       <View style={styles.instructionsContainer}>
         <View style={styles.instructionItem}>
-          <Ionicons name="arrow-back" size={16} color={COLORS.textMuted} />
-          <Text style={styles.instructionText}>Not interested</Text>
+          <Ionicons name="arrow-back" size={16} color={colors.textMuted} />
+          <Text style={[styles.instructionText, { color: colors.textMuted }]}>Not interested</Text>
         </View>
         <View style={styles.instructionItem}>
-          <Text style={styles.instructionText}>Liked it!</Text>
-          <Ionicons name="arrow-forward" size={16} color={COLORS.textMuted} />
+          <Text style={[styles.instructionText, { color: colors.textMuted }]}>Liked it!</Text>
+          <Ionicons name="arrow-forward" size={16} color={colors.textMuted} />
         </View>
       </View>
 
-      {/* Continue button (when profile is complete) */}
-      {isProfileComplete && (
-        <View style={styles.continueContainer}>
-          <View style={styles.completeMessage}>
-            <Ionicons name="checkmark-circle" size={20} color={COLORS.success} />
-            <Text style={styles.completeText}>Taste profile complete!</Text>
-          </View>
-          <TouchableOpacity
-            style={styles.continueBtn}
-            onPress={handleContinue}
-            testID="continue-btn"
-            activeOpacity={0.8}
-          >
-            <Text style={styles.continueBtnText}>Find Movie Companions</Text>
-            <Ionicons name="arrow-forward" size={20} color={COLORS.white} />
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {/* Rating Modal */}
+      {/* Modals */}
       <RatingModal
         visible={showRatingModal}
-        onClose={() => {
-          setShowRatingModal(false);
-          setPendingMovie(null);
-        }}
+        onClose={() => { setShowRatingModal(false); setPendingMovie(null); }}
         onSubmit={handleRatingSubmit}
         movieTitle={pendingMovie?.title || ''}
+        colors={colors}
+      />
+      <LeftSwipeModal
+        visible={showLeftModal}
+        onClose={() => { setShowLeftModal(false); setPendingMovie(null); }}
+        onSubmit={handleLeftSubmit}
+        movieTitle={pendingMovie?.title || ''}
+        colors={colors}
+      />
+      <ModeSwitcher
+        visible={showModeDrawer}
+        onClose={() => setShowModeDrawer(false)}
+        currentMode={mode}
+        onModeChange={handleModeChange}
+        colors={colors}
       />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.bg,
-  },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: SPACING.m,
-    paddingVertical: SPACING.s,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: SPACING.m, paddingVertical: SPACING.s, borderBottomWidth: 1,
   },
-  backBtn: {
-    width: 44,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerCenter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.s,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: COLORS.text,
-  },
-  headerRight: {
-    width: 44,
-    alignItems: 'flex-end',
-  },
-  counterBadge: {
-    backgroundColor: COLORS.primary,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: BORDER_RADIUS.full,
-    minWidth: 32,
-    alignItems: 'center',
-  },
-  counterText: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: COLORS.white,
-  },
-  progressContainer: {
-    paddingHorizontal: SPACING.l,
-    paddingVertical: SPACING.m,
-  },
-  progressText: {
-    fontSize: 13,
-    color: COLORS.textSecondary,
-    textAlign: 'center',
-    marginBottom: SPACING.s,
-  },
-  progressBar: {
-    height: 4,
-    backgroundColor: COLORS.border,
-    borderRadius: 2,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: COLORS.gold,
-    borderRadius: 2,
-  },
-  cardsContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  card: {
-    position: 'absolute',
-    width: CARD_WIDTH,
-    height: CARD_HEIGHT,
-    borderRadius: BORDER_RADIUS.xl,
-    overflow: 'hidden',
-    backgroundColor: COLORS.bgCard,
-  },
-  cardBehind: {
-    transform: [{ scale: 0.95 }],
-    opacity: 0.7,
-  },
-  poster: {
-    width: '100%',
-    height: '100%',
-  },
-  gradientOverlay: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: '45%',
-    backgroundColor: 'transparent',
-  },
-  stamp: {
-    position: 'absolute',
-    top: 40,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderWidth: 4,
-    borderRadius: 8,
-  },
-  likeStamp: {
-    right: 20,
-    borderColor: '#4CAF50',
-    transform: [{ rotate: '15deg' }],
-  },
-  nopeStamp: {
-    left: 20,
-    borderColor: '#FF6B6B',
-    transform: [{ rotate: '-15deg' }],
-  },
-  stampText: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    letterSpacing: 2,
-  },
-  likeText: {
-    color: '#4CAF50',
-  },
-  nopeText: {
-    color: '#FF6B6B',
-  },
-  infoContainer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    padding: SPACING.l,
-    backgroundColor: 'rgba(0,0,0,0.75)',
-  },
-  movieTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: COLORS.white,
-    marginBottom: SPACING.xs,
-  },
-  metaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.m,
-    marginBottom: SPACING.xs,
-  },
-  year: {
-    fontSize: 16,
-    color: COLORS.textSecondary,
-    fontWeight: '500',
-  },
-  ratingBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(255,215,0,0.15)',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: BORDER_RADIUS.s,
-  },
-  ratingText: {
-    fontSize: 14,
-    color: COLORS.gold,
-    fontWeight: '600',
-  },
-  genres: {
-    fontSize: 13,
-    color: COLORS.textMuted,
-  },
-  actionsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: SPACING.xl,
-    paddingVertical: SPACING.m,
-  },
-  actionBtn: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-  },
-  dislikeBtn: {
-    borderColor: 'rgba(255,107,107,0.4)',
-    backgroundColor: 'rgba(255,107,107,0.1)',
-  },
-  likeBtn: {
-    borderColor: 'rgba(229,9,20,0.4)',
-    backgroundColor: 'rgba(229,9,20,0.1)',
-  },
-  instructionsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingHorizontal: SPACING.xxl,
-    paddingBottom: SPACING.m,
-  },
-  instructionItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.xs,
-  },
-  instructionText: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-  },
-  loadingContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: SPACING.m,
-  },
-  loadingText: {
-    fontSize: 16,
-    color: COLORS.textSecondary,
-  },
-  emptyContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: SPACING.m,
-  },
-  emptyText: {
-    fontSize: 16,
-    color: COLORS.textSecondary,
-  },
-  refreshBtn: {
-    backgroundColor: COLORS.primary,
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: BORDER_RADIUS.full,
-  },
-  refreshBtnText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.white,
-  },
-  continueContainer: {
-    paddingHorizontal: SPACING.l,
-    paddingBottom: SPACING.l,
-    gap: SPACING.m,
-  },
-  completeMessage: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: SPACING.s,
-  },
-  completeText: {
-    fontSize: 14,
-    color: COLORS.success,
-    fontWeight: '600',
-  },
-  continueBtn: {
-    backgroundColor: COLORS.primary,
-    paddingVertical: 16,
-    borderRadius: BORDER_RADIUS.full,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: SPACING.s,
-  },
-  continueBtnText: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: COLORS.white,
-  },
+  menuBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  headerCenter: { flexDirection: 'row', alignItems: 'center', gap: SPACING.s },
+  headerTitle: { fontSize: 18, fontWeight: 'bold' },
+  headerRight: { width: 44, alignItems: 'flex-end' },
+  counterBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: BORDER_RADIUS.full, minWidth: 32, alignItems: 'center' },
+  counterText: { fontSize: 14, fontWeight: 'bold', color: '#FFF' },
+  progressContainer: { paddingHorizontal: SPACING.l, paddingVertical: SPACING.m },
+  progressText: { fontSize: 13, textAlign: 'center', marginBottom: SPACING.s },
+  progressBar: { height: 4, borderRadius: 2, overflow: 'hidden' },
+  progressFill: { height: '100%', borderRadius: 2 },
+  cardsContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  card: { position: 'absolute', width: CARD_WIDTH, height: CARD_HEIGHT, borderRadius: BORDER_RADIUS.xl, overflow: 'hidden', backgroundColor: '#1E1E1E' },
+  cardBehind: { transform: [{ scale: 0.95 }], opacity: 0.7 },
+  poster: { width: '100%', height: '100%' },
+  stamp: { position: 'absolute', top: 40, paddingHorizontal: 16, paddingVertical: 8, borderWidth: 4, borderRadius: 8 },
+  likeStamp: { right: 20, transform: [{ rotate: '15deg' }] },
+  nopeStamp: { left: 20, borderColor: '#FF6B6B', transform: [{ rotate: '-15deg' }] },
+  stampText: { fontSize: 28, fontWeight: 'bold', letterSpacing: 2 },
+  nopeText: { color: '#FF6B6B' },
+  infoContainer: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: SPACING.l, backgroundColor: 'rgba(0,0,0,0.75)' },
+  movieTitle: { fontSize: 22, fontWeight: 'bold', color: '#FFF', marginBottom: SPACING.xs },
+  metaRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.m, marginBottom: SPACING.xs },
+  year: { fontSize: 15, color: '#B3B3B3', fontWeight: '500' },
+  ratingBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(255,215,0,0.15)', paddingHorizontal: 8, paddingVertical: 3, borderRadius: BORDER_RADIUS.s },
+  ratingText: { fontSize: 14, color: '#FFD700', fontWeight: '600' },
+  genres: { fontSize: 13, color: '#757575' },
+  actionsContainer: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: SPACING.xl, paddingVertical: SPACING.m },
+  actionBtn: { width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center', borderWidth: 2 },
+  instructionsContainer: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: SPACING.xxl, paddingBottom: SPACING.m },
+  instructionItem: { flexDirection: 'row', alignItems: 'center', gap: SPACING.xs },
+  instructionText: { fontSize: 12 },
+  loadingContainer: { alignItems: 'center', justifyContent: 'center', gap: SPACING.m },
+  loadingText: { fontSize: 16 },
+  emptyContainer: { alignItems: 'center', justifyContent: 'center', gap: SPACING.m },
+  emptyText: { fontSize: 16 },
+  refreshBtn: { paddingVertical: 12, paddingHorizontal: 24, borderRadius: BORDER_RADIUS.full },
+  refreshBtnText: { fontSize: 14, fontWeight: '600', color: '#FFF' },
 });

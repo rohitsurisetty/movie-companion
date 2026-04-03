@@ -35,6 +35,9 @@ export type ProfileData = {
   pets: string;
   familyPlanning: string;
   siblings: string;
+  education: string;
+  workProfile: string;
+  travel: string;
   visibilityToggles: Record<string, boolean>;
   movieBuddyMode: boolean;
   movieDateMode: boolean;
@@ -69,6 +72,9 @@ export const initialProfileData: ProfileData = {
   pets: '',
   familyPlanning: '',
   siblings: '',
+  education: '',
+  workProfile: '',
+  travel: '',
   visibilityToggles: {
     name: true, gender: true, age: true, location: true,
     relationshipIntent: true, partnerPreference: true,
@@ -78,6 +84,7 @@ export const initialProfileData: ProfileData = {
     foodPreference: false, bio: true, smoking: false,
     drinking: false, exercise: false, zodiac: false,
     pets: false, familyPlanning: false, siblings: false,
+    education: false, workProfile: false, travel: false,
   },
   movieBuddyMode: false,
   movieDateMode: false,
@@ -91,8 +98,29 @@ export type FilterSection = {
   expandIfRunOut: boolean;
 };
 
+export type HeightFilter = {
+  minFeet: number;
+  minInches: number;
+  maxFeet: number;
+  maxInches: number;
+  minCm: number;
+  maxCm: number;
+  unit: 'imperial' | 'metric';
+  exclusive: boolean;
+  expandIfRunOut: boolean;
+};
+
+export type AgeFilter = {
+  min: number;
+  max: number;
+  exclusive: boolean;
+  expandIfRunOut: boolean;
+};
+
 export type FiltersData = {
   distance: { radius: number; exclusive: boolean; expandIfRunOut: boolean };
+  age: AgeFilter;
+  height: HeightFilter;
   languages: FilterSection;
   genres: FilterSection;
   smoking: FilterSection;
@@ -103,6 +131,14 @@ export type FiltersData = {
   maritalStatus: FilterSection;
   foodPreference: FilterSection;
   intent: FilterSection;
+  // New filters
+  ottTheatre: FilterSection;
+  filmLanguages: FilterSection;
+  religion: FilterSection;
+  zodiac: FilterSection;
+  siblings: FilterSection;
+  education: FilterSection;
+  travel: FilterSection;
 };
 
 const makeFilter = (opts: string[]): FilterSection => ({
@@ -113,6 +149,12 @@ const makeFilter = (opts: string[]): FilterSection => ({
 
 export const initialFiltersData: FiltersData = {
   distance: { radius: -1, exclusive: false, expandIfRunOut: true },
+  age: { min: 18, max: 60, exclusive: false, expandIfRunOut: true },
+  height: {
+    minFeet: 4, minInches: 6, maxFeet: 7, maxInches: 0,
+    minCm: 137, maxCm: 213, unit: 'imperial',
+    exclusive: false, expandIfRunOut: true,
+  },
   languages: makeFilter(['English', 'Hindi', 'Telugu', 'Tamil', 'Kannada', 'Malayalam', 'Bengali', 'Marathi', 'Gujarati', 'Punjabi', 'Urdu']),
   genres: makeFilter(['Action', 'Romance', 'Comedy', 'Thriller', 'Horror', 'Sci-Fi', 'Drama', 'Documentary']),
   smoking: makeFilter(['Non-smoker', 'Occasional smoker', 'Regular smoker']),
@@ -123,6 +165,14 @@ export const initialFiltersData: FiltersData = {
   maritalStatus: makeFilter(['Single', 'Divorced', 'Separated', 'Widowed']),
   foodPreference: makeFilter(['Vegetarian', 'Non-vegetarian', 'Vegan', 'Eggetarian', 'Jain']),
   intent: makeFilter(['Casual', 'Friendship', 'Serious relationship', 'Exploring']),
+  // New filters - all selected by default
+  ottTheatre: makeFilter(['OTT Lover', 'Theatre Enthusiast', 'Both']),
+  filmLanguages: makeFilter(['English', 'Hindi', 'Telugu', 'Tamil', 'Kannada', 'Malayalam', 'Korean', 'Japanese', 'Spanish', 'French']),
+  religion: makeFilter(['Hindu', 'Muslim', 'Christian', 'Sikh', 'Buddhist', 'Jain', 'Other', 'Prefer not to say']),
+  zodiac: makeFilter(['Aries', 'Taurus', 'Gemini', 'Cancer', 'Leo', 'Virgo', 'Libra', 'Scorpio', 'Sagittarius', 'Capricorn', 'Aquarius', 'Pisces']),
+  siblings: makeFilter(['Only child', 'Has siblings']),
+  education: makeFilter(['High School', 'Bachelor\'s', 'Master\'s', 'PhD', 'Other']),
+  travel: makeFilter(['Frequently', 'Occasionally', 'Rarely', 'Never']),
 };
 
 export type SwipeRecord = {

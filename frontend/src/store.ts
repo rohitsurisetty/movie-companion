@@ -6,6 +6,18 @@ const PROFILE_KEY = '@film_companion_profile';
 const ONBOARDING_KEY = '@film_companion_onboarding_complete';
 const FILTERS_KEY = '@film_companion_filters';
 const SWIPES_KEY = '@film_companion_swipes';
+const MODE_KEY = '@film_companion_mode';
+
+export type AppMode = 'buddy' | 'date';
+
+export const saveMode = async (mode: AppMode) => {
+  await AsyncStorage.setItem(MODE_KEY, mode);
+};
+
+export const getMode = async (): Promise<AppMode> => {
+  const mode = await AsyncStorage.getItem(MODE_KEY);
+  return (mode as AppMode) || 'date';
+};
 
 export const saveAuth = async (data: any) => {
   await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(data));
