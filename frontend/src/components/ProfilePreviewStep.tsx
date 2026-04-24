@@ -27,7 +27,7 @@ const FIELDS: FieldDef[] = [
   { key: 'age', label: 'Age', type: 'text', mandatory: true },
   { key: 'location', label: 'Location', type: 'text' },
   { key: 'relationshipIntent', label: 'Looking For', type: 'array' },
-  { key: 'partnerPreference', label: 'Want to Meet', type: 'text', mandatory: true },
+  { key: 'partnerPreference', label: 'Want to Meet', type: 'text' },
   { key: 'languagesSpoken', label: 'Languages', type: 'array' },
   { key: 'movieFrequency', label: 'Movie Frequency', type: 'text' },
   { key: 'ottTheatre', label: 'Preference', type: 'text' },
@@ -72,8 +72,17 @@ export default function ProfilePreviewStep({ data, onUpdate, onNext }: Props) {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-      <Text style={styles.title}>Profile Preview</Text>
-      <Text style={styles.subtitle}>Toggle visibility for each field</Text>
+      {/* Header with Continue button */}
+      <View style={styles.headerRow}>
+        <View style={styles.headerLeft}>
+          <Text style={styles.title}>Profile Preview</Text>
+          <Text style={styles.subtitle}>Toggle visibility for each field</Text>
+        </View>
+        <TouchableOpacity style={styles.continueBtnTop} onPress={onNext} testID="preview-continue-top">
+          <Text style={styles.continueBtnTopText}>Done</Text>
+          <Ionicons name="chevron-forward" size={16} color={COLORS.white} />
+        </TouchableOpacity>
+      </View>
 
       {/* Avatar & Name Header */}
       <View style={styles.profileHeader}>
@@ -133,8 +142,15 @@ export default function ProfilePreviewStep({ data, onUpdate, onNext }: Props) {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   scrollContent: { paddingBottom: SPACING.xxl },
+  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: SPACING.m },
+  headerLeft: { flex: 1 },
   title: { fontSize: 26, fontWeight: 'bold', color: COLORS.text, marginBottom: SPACING.s },
-  subtitle: { fontSize: 15, color: COLORS.textSecondary, marginBottom: SPACING.l },
+  subtitle: { fontSize: 15, color: COLORS.textSecondary },
+  continueBtnTop: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: COLORS.primary, paddingHorizontal: 16, paddingVertical: 8, borderRadius: BORDER_RADIUS.full,
+  },
+  continueBtnTopText: { fontSize: 14, fontWeight: '600', color: COLORS.white },
   profileHeader: { alignItems: 'center', marginBottom: SPACING.xl },
   avatarLarge: { width: 80, height: 80, borderRadius: 40, alignItems: 'center', justifyContent: 'center', marginBottom: SPACING.m },
   profileName: { fontSize: 22, fontWeight: 'bold', color: COLORS.text },

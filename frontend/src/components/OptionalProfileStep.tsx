@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView,
   Modal, Platform, KeyboardAvoidingView,
@@ -14,8 +14,6 @@ const AVATAR_OPTIONS = [
   { id: 'av4', color: '#2196F3', icon: 'planet' as const },
   { id: 'av5', color: '#9C27B0', icon: 'star' as const },
   { id: 'av6', color: '#FF9800', icon: 'sunny' as const },
-  { id: 'av7', color: '#00BCD4', icon: 'water' as const },
-  { id: 'av8', color: '#F44336', icon: 'heart' as const },
 ];
 
 const RELIGIONS = ['Hindu', 'Muslim', 'Christian', 'Sikh', 'Buddhist', 'Jain', 'Other', 'Prefer not to say'];
@@ -48,8 +46,8 @@ type Props = {
 export default function OptionalProfileStep({ data, onUpdate, onNext }: Props) {
   const [activeDropdown, setActiveDropdown] = useState<DropdownConfig | null>(null);
   const [heightUnit, setHeightUnit] = useState<'imperial' | 'metric'>('imperial');
-  const [showHeightPicker, setShowHeightPicker] = useState(false);
-  const [heightPickerType, setHeightPickerType] = useState<'feet' | 'inches' | 'cm'>('feet');
+  
+  // Height state
   const [selectedFeet, setSelectedFeet] = useState(5);
   const [selectedInches, setSelectedInches] = useState(4);
   const [selectedCm, setSelectedCm] = useState(160);
@@ -58,7 +56,6 @@ export default function OptionalProfileStep({ data, onUpdate, onNext }: Props) {
   React.useEffect(() => {
     if (data.height) {
       if (data.height.includes("'")) {
-        // Imperial format like 5'4"
         const parts = data.height.match(/(\d+)'(\d+)/);
         if (parts) {
           setSelectedFeet(parseInt(parts[1]));
@@ -66,7 +63,6 @@ export default function OptionalProfileStep({ data, onUpdate, onNext }: Props) {
           setHeightUnit('imperial');
         }
       } else if (data.height.includes('cm')) {
-        // Metric format
         const cm = parseInt(data.height);
         if (cm) {
           setSelectedCm(cm);
@@ -91,38 +87,38 @@ export default function OptionalProfileStep({ data, onUpdate, onNext }: Props) {
     { field: 'siblings', label: 'Siblings', options: SIBLINGS_OPTS },
   ];
 
-  const openHeightPicker = (type: 'feet' | 'inches' | 'cm') => {
-    setHeightPickerType(type);
-    setShowHeightPicker(true);
+  const updateHeight = (feet: number, inches: number, cm: number, unit: 'imperial' | 'metric') => {
+    if (unit === 'imperial') {
+      onUpdate('height', `${feet}'${inches}"`);
+    } else {
+      onUpdate('height', `${cm} cm`);
+    }
   };
 
-  const selectHeightValue = (value: number) => {
-    if (heightPickerType === 'feet') {
-      setSelectedFeet(value);
-      const heightStr = `${value}'${selectedInches}"`;
-      onUpdate('height', heightStr);
-    } else if (heightPickerType === 'inches') {
-      setSelectedInches(value);
-      const heightStr = `${selectedFeet}'${value}"`;
-      onUpdate('height', heightStr);
-    } else {
-      setSelectedCm(value);
-      onUpdate('height', `${value} cm`);
-    }
-    setShowHeightPicker(false);
+  const handleFeetChange = (feet: number) => {
+    setSelectedFeet(feet);
+    updateHeight(feet, selectedInches, selectedCm, 'imperial');
+  };
+
+  const handleInchesChange = (inches: number) => {
+    setSelectedInches(inches);
+    updateHeight(selectedFeet, inches, selectedCm, 'imperial');
+  };
+
+  const handleCmChange = (cm: number) => {
+    setSelectedCm(cm);
+    updateHeight(selectedFeet, selectedInches, cm, 'metric');
   };
 
   const toggleHeightUnit = () => {
     const newUnit = heightUnit === 'imperial' ? 'metric' : 'imperial';
     setHeightUnit(newUnit);
     if (newUnit === 'metric') {
-      // Convert current ft/in to cm
       const totalInches = selectedFeet * 12 + selectedInches;
       const cm = Math.round(totalInches * 2.54);
       setSelectedCm(cm);
       onUpdate('height', `${cm} cm`);
     } else {
-      // Convert cm to ft/in
       const totalInches = Math.round(selectedCm / 2.54);
       const feet = Math.floor(totalInches / 12);
       const inches = totalInches % 12;
@@ -140,7 +136,6 @@ export default function OptionalProfileStep({ data, onUpdate, onNext }: Props) {
       ? current.filter(p => p !== pref)
       : [...current, pref];
     onUpdate('foodPreferences', updated);
-    // Also update single foodPreference for backward compatibility
     onUpdate('foodPreference', updated.join(', '));
   };
 
@@ -157,7 +152,7 @@ export default function OptionalProfileStep({ data, onUpdate, onNext }: Props) {
 
       <ScrollView style={styles.flex} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <Text style={styles.title}>Almost there!</Text>
-        <Text style={styles.subtitle}>Just a few more optional fields before we go into action</Text>
+        <Text style={styles.subtitle}>Just a few more optional fields</Text>
 
         {/* Avatar Selection */}
         <Text style={styles.sectionTitle}>Choose an Avatar</Text>
@@ -176,7 +171,7 @@ export default function OptionalProfileStep({ data, onUpdate, onNext }: Props) {
           ))}
         </View>
 
-        {/* Height with scrollable picker */}
+        {/* Height with embedded scrollable picker */}
         <Text style={styles.label}>Height</Text>
         <View style={styles.heightUnitToggle}>
           <TouchableOpacity
@@ -193,35 +188,71 @@ export default function OptionalProfileStep({ data, onUpdate, onNext }: Props) {
           </TouchableOpacity>
         </View>
 
-        {heightUnit === 'imperial' ? (
-          <View style={styles.heightPickerRow}>
-            <TouchableOpacity 
-              style={styles.heightPickerBtn} 
-              onPress={() => openHeightPicker('feet')}
-              testID="height-feet-picker"
-            >
-              <Text style={styles.heightPickerValue}>{selectedFeet}'</Text>
-              <Ionicons name="chevron-down" size={16} color={COLORS.textMuted} />
-            </TouchableOpacity>
-            <TouchableOpacity 
-              style={styles.heightPickerBtn} 
-              onPress={() => openHeightPicker('inches')}
-              testID="height-inches-picker"
-            >
-              <Text style={styles.heightPickerValue}>{selectedInches}"</Text>
-              <Ionicons name="chevron-down" size={16} color={COLORS.textMuted} />
-            </TouchableOpacity>
+        {/* Embedded height scrollers */}
+        <View style={styles.heightContainer}>
+          {heightUnit === 'imperial' ? (
+            <View style={styles.heightScrollRow}>
+              {/* Feet */}
+              <View style={styles.heightColumn}>
+                <Text style={styles.heightLabel}>Feet</Text>
+                <ScrollView style={styles.heightScroll} showsVerticalScrollIndicator={false} nestedScrollEnabled>
+                  {FEET_OPTIONS.map(f => (
+                    <TouchableOpacity
+                      key={f}
+                      style={[styles.heightItem, selectedFeet === f && styles.heightItemSelected]}
+                      onPress={() => handleFeetChange(f)}
+                    >
+                      <Text style={[styles.heightItemText, selectedFeet === f && styles.heightItemTextSelected]}>
+                        {f}'
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+              {/* Inches */}
+              <View style={styles.heightColumn}>
+                <Text style={styles.heightLabel}>Inches</Text>
+                <ScrollView style={styles.heightScroll} showsVerticalScrollIndicator={false} nestedScrollEnabled>
+                  {INCHES_OPTIONS.map(i => (
+                    <TouchableOpacity
+                      key={i}
+                      style={[styles.heightItem, selectedInches === i && styles.heightItemSelected]}
+                      onPress={() => handleInchesChange(i)}
+                    >
+                      <Text style={[styles.heightItemText, selectedInches === i && styles.heightItemTextSelected]}>
+                        {i}"
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            </View>
+          ) : (
+            <View style={styles.heightScrollRow}>
+              <View style={[styles.heightColumn, { flex: 1 }]}>
+                <Text style={styles.heightLabel}>Centimeters</Text>
+                <ScrollView style={styles.heightScroll} showsVerticalScrollIndicator={false} nestedScrollEnabled>
+                  {CM_OPTIONS.map(c => (
+                    <TouchableOpacity
+                      key={c}
+                      style={[styles.heightItem, selectedCm === c && styles.heightItemSelected]}
+                      onPress={() => handleCmChange(c)}
+                    >
+                      <Text style={[styles.heightItemText, selectedCm === c && styles.heightItemTextSelected]}>
+                        {c} cm
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            </View>
+          )}
+          <View style={styles.heightDisplay}>
+            <Text style={styles.heightDisplayText}>
+              {heightUnit === 'imperial' ? `${selectedFeet}'${selectedInches}"` : `${selectedCm} cm`}
+            </Text>
           </View>
-        ) : (
-          <TouchableOpacity 
-            style={styles.heightPickerBtnFull} 
-            onPress={() => openHeightPicker('cm')}
-            testID="height-cm-picker"
-          >
-            <Text style={styles.heightPickerValue}>{selectedCm} cm</Text>
-            <Ionicons name="chevron-down" size={16} color={COLORS.textMuted} />
-          </TouchableOpacity>
-        )}
+        </View>
 
         {/* Food Preference - Multi-select */}
         <Text style={styles.label}>Food Preference (Select all that apply)</Text>
@@ -293,49 +324,8 @@ export default function OptionalProfileStep({ data, onUpdate, onNext }: Props) {
                   key={opt}
                   style={[styles.pickerItem, (data as any)[activeDropdown.field] === opt && styles.pickerItemActive]}
                   onPress={() => { onUpdate(activeDropdown.field, opt); setActiveDropdown(null); }}
-                  testID={`picker-${opt.toLowerCase().replace(/[\s']+/g, '-')}`}
                 >
                   <Text style={[styles.pickerItemText, (data as any)[activeDropdown.field] === opt && styles.pickerItemTextActive]}>{opt}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        </TouchableOpacity>
-      </Modal>
-
-      {/* Height Picker Modal */}
-      <Modal visible={showHeightPicker} transparent animationType="fade">
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowHeightPicker(false)}>
-          <View style={styles.pickerContent}>
-            <Text style={styles.pickerTitle}>
-              {heightPickerType === 'feet' ? 'Select Feet' : heightPickerType === 'inches' ? 'Select Inches' : 'Select Height (cm)'}
-            </Text>
-            <ScrollView style={styles.pickerScroll}>
-              {heightPickerType === 'feet' && FEET_OPTIONS.map(f => (
-                <TouchableOpacity
-                  key={f}
-                  style={[styles.pickerItem, selectedFeet === f && styles.pickerItemActive]}
-                  onPress={() => selectHeightValue(f)}
-                >
-                  <Text style={[styles.pickerItemText, selectedFeet === f && styles.pickerItemTextActive]}>{f} feet</Text>
-                </TouchableOpacity>
-              ))}
-              {heightPickerType === 'inches' && INCHES_OPTIONS.map(i => (
-                <TouchableOpacity
-                  key={i}
-                  style={[styles.pickerItem, selectedInches === i && styles.pickerItemActive]}
-                  onPress={() => selectHeightValue(i)}
-                >
-                  <Text style={[styles.pickerItemText, selectedInches === i && styles.pickerItemTextActive]}>{i} inches</Text>
-                </TouchableOpacity>
-              ))}
-              {heightPickerType === 'cm' && CM_OPTIONS.map(c => (
-                <TouchableOpacity
-                  key={c}
-                  style={[styles.pickerItem, selectedCm === c && styles.pickerItemActive]}
-                  onPress={() => selectHeightValue(c)}
-                >
-                  <Text style={[styles.pickerItemText, selectedCm === c && styles.pickerItemTextActive]}>{c} cm</Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -380,7 +370,7 @@ const styles = StyleSheet.create({
   avatarItem: { borderRadius: BORDER_RADIUS.full, borderWidth: 3, borderColor: 'transparent', padding: 3 },
   avatarActive: { borderColor: COLORS.gold },
   avatarCircle: { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center' },
-  // Height picker styles
+  // Height embedded picker styles
   heightUnitToggle: { flexDirection: 'row', gap: SPACING.s, marginBottom: SPACING.m },
   unitBtn: {
     paddingHorizontal: 20, paddingVertical: 10, borderRadius: BORDER_RADIUS.full,
@@ -389,18 +379,22 @@ const styles = StyleSheet.create({
   unitBtnActive: { borderColor: COLORS.primary, backgroundColor: COLORS.primary },
   unitBtnText: { fontSize: 14, color: COLORS.textSecondary, fontWeight: '500' },
   unitBtnTextActive: { color: COLORS.white, fontWeight: '600' },
-  heightPickerRow: { flexDirection: 'row', gap: SPACING.m },
-  heightPickerBtn: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    backgroundColor: COLORS.bgInput, borderRadius: BORDER_RADIUS.m,
-    paddingHorizontal: SPACING.m, paddingVertical: 14,
+  heightContainer: {
+    backgroundColor: COLORS.bgCard, borderRadius: BORDER_RADIUS.l, padding: SPACING.m,
+    borderWidth: 1, borderColor: COLORS.border,
   },
-  heightPickerBtnFull: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    backgroundColor: COLORS.bgInput, borderRadius: BORDER_RADIUS.m,
-    paddingHorizontal: SPACING.m, paddingVertical: 14,
+  heightScrollRow: { flexDirection: 'row', gap: SPACING.m },
+  heightColumn: { flex: 1 },
+  heightLabel: { fontSize: 11, color: COLORS.textMuted, textAlign: 'center', marginBottom: SPACING.xs },
+  heightScroll: { height: 140 },
+  heightItem: { paddingVertical: 10, alignItems: 'center', borderRadius: BORDER_RADIUS.s, marginVertical: 2 },
+  heightItemSelected: { backgroundColor: COLORS.primary },
+  heightItemText: { fontSize: 16, color: COLORS.textSecondary },
+  heightItemTextSelected: { color: COLORS.white, fontWeight: '600' },
+  heightDisplay: {
+    marginTop: SPACING.m, paddingTop: SPACING.m, borderTopWidth: 1, borderTopColor: COLORS.border, alignItems: 'center',
   },
-  heightPickerValue: { fontSize: 18, color: COLORS.text, fontWeight: '600' },
+  heightDisplayText: { fontSize: 24, fontWeight: 'bold', color: COLORS.gold },
   chipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.s },
   chip: {
     paddingHorizontal: 16, paddingVertical: 10, borderRadius: BORDER_RADIUS.full,

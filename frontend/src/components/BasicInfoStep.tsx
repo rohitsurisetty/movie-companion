@@ -1,7 +1,8 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, Modal,
   ScrollView, Alert, ActivityIndicator, Platform, KeyboardAvoidingView,
+  FlatList,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
@@ -16,13 +17,96 @@ const GENDER_IDENTITIES = ['Bisexual', 'Gay', 'Lesbian', 'Pansexual', 'Asexual',
 // Generate arrays for date picker
 const DAYS = Array.from({ length: 31 }, (_, i) => i + 1);
 const MONTHS = [
-  { value: 1, label: 'January' }, { value: 2, label: 'February' }, { value: 3, label: 'March' },
-  { value: 4, label: 'April' }, { value: 5, label: 'May' }, { value: 6, label: 'June' },
-  { value: 7, label: 'July' }, { value: 8, label: 'August' }, { value: 9, label: 'September' },
-  { value: 10, label: 'October' }, { value: 11, label: 'November' }, { value: 12, label: 'December' },
+  { value: 1, label: 'Jan', full: 'January' }, { value: 2, label: 'Feb', full: 'February' }, 
+  { value: 3, label: 'Mar', full: 'March' }, { value: 4, label: 'Apr', full: 'April' }, 
+  { value: 5, label: 'May', full: 'May' }, { value: 6, label: 'Jun', full: 'June' },
+  { value: 7, label: 'Jul', full: 'July' }, { value: 8, label: 'Aug', full: 'August' }, 
+  { value: 9, label: 'Sep', full: 'September' }, { value: 10, label: 'Oct', full: 'October' }, 
+  { value: 11, label: 'Nov', full: 'November' }, { value: 12, label: 'Dec', full: 'December' },
 ];
 const currentYear = new Date().getFullYear();
-const YEARS = Array.from({ length: 100 }, (_, i) => currentYear - 18 - i); // Start from 18 years ago
+const YEARS = Array.from({ length: 82 }, (_, i) => currentYear - 18 - i); // 18 to 100 years ago
+
+// Check if a year is a leap year
+const isLeapYear = (year: number): boolean => {
+  return (year % 4 === 0 && year % 100 !== 0) || (year % 400 === 0);
+};
+
+// Get max days in a month
+const getMaxDays = (month: number, year: number): number => {
+  if (month === 2) return isLeapYear(year) ? 29 : 28;
+  if ([4, 6, 9, 11].includes(month)) return 30;
+  return 31;
+};
+
+// Inline Scroll Picker Component
+function InlineScrollPicker({ 
+  data, 
+  selectedValue, 
+  onSelect, 
+  label,
+  renderItem,
+  itemWidth = 60,
+}: {
+  data: any[];
+  selectedValue: any;
+  onSelect: (val: any) => void;
+  label: string;
+  renderItem: (item: any, isSelected: boolean) => React.ReactNode;
+  itemWidth?: number;
+}) {
+  const scrollRef = useRef<ScrollView>(null);
+  const selectedIndex = data.findIndex(item => 
+    typeof item === 'object' ? item.value === selectedValue : item === selectedValue
+  );
+
+  useEffect(() => {
+    if (scrollRef.current && selectedIndex >= 0) {
+      setTimeout(() => {
+        scrollRef.current?.scrollTo({ x: selectedIndex * itemWidth - 60, animated: false });
+      }, 100);
+    }
+  }, []);
+
+  return (
+    <View style={pickerStyles.container}>
+      <Text style={pickerStyles.label}>{label}</Text>
+      <ScrollView
+        ref={scrollRef}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={pickerStyles.scrollContent}
+        snapToInterval={itemWidth}
+        decelerationRate="fast"
+      >
+        {data.map((item, index) => {
+          const value = typeof item === 'object' ? item.value : item;
+          const isSelected = value === selectedValue;
+          return (
+            <TouchableOpacity
+              key={index}
+              style={[pickerStyles.item, { width: itemWidth }, isSelected && pickerStyles.itemSelected]}
+              onPress={() => onSelect(value)}
+            >
+              {renderItem(item, isSelected)}
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
+}
+
+const pickerStyles = StyleSheet.create({
+  container: { marginBottom: SPACING.m },
+  label: { fontSize: 12, color: COLORS.textMuted, marginBottom: SPACING.xs, textAlign: 'center' },
+  scrollContent: { paddingHorizontal: SPACING.m },
+  item: {
+    height: 48, alignItems: 'center', justifyContent: 'center',
+    borderRadius: BORDER_RADIUS.m, marginHorizontal: 4,
+  },
+  itemSelected: { backgroundColor: COLORS.primary },
+});
 
 type Props = {
   data: ProfileData;
@@ -33,109 +117,79 @@ type Props = {
 export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
   const [showGenderPicker, setShowGenderPicker] = useState(false);
   const [showIdentityPicker, setShowIdentityPicker] = useState(false);
-  const [showDOBPicker, setShowDOBPicker] = useState(false);
-  const [dobPickerType, setDobPickerType] = useState<'day' | 'month' | 'year'>('day');
   const [showAgeConfirm, setShowAgeConfirm] = useState(false);
-  const [ageConfirmed, setAgeConfirmed] = useState(false);
+  const [ageConfirmed, setAgeConfirmed] = useState(!!data.age && data.age >= 18);
   const [underAge, setUnderAge] = useState(false);
-  const [calculatedAge, setCalculatedAge] = useState(0);
-  const [locationSearch, setLocationSearch] = useState('');
+  const [calculatedAge, setCalculatedAge] = useState(data.age || 0);
+  const [dateError, setDateError] = useState('');
+  const [locationSearch, setLocationSearch] = useState(data.location || '');
   const [predictions, setPredictions] = useState<any[]>([]);
   const [searchingLocation, setSearchingLocation] = useState(false);
   const [gettingCurrentLoc, setGettingCurrentLoc] = useState(false);
 
   const showsGenderIdentity = data.gender === 'Non-binary' || data.gender === 'Other';
 
-  const calculateAge = useCallback(() => {
-    const d = parseInt(data.dobDay);
-    const m = parseInt(data.dobMonth);
-    const y = parseInt(data.dobYear);
-    if (!d || !m || !y || d > 31 || m > 12 || y < 1900) return 0;
-    const today = new Date();
-    const birthDate = new Date(y, m - 1, d);
+  // Selected DOB values
+  const [selectedDay, setSelectedDay] = useState(data.dobDay ? parseInt(data.dobDay) : 15);
+  const [selectedMonth, setSelectedMonth] = useState(data.dobMonth ? parseInt(data.dobMonth) : 6);
+  const [selectedYear, setSelectedYear] = useState(data.dobYear ? parseInt(data.dobYear) : currentYear - 25);
+
+  // Validate date and calculate age
+  const validateAndSetDate = useCallback((day: number, month: number, year: number) => {
+    const maxDays = getMaxDays(month, year);
     
-    // Validate the date
-    if (birthDate.getDate() !== d || birthDate.getMonth() !== m - 1) {
-      return 0; // Invalid date (e.g., Feb 30)
+    if (day > maxDays) {
+      setDateError(`${MONTHS[month - 1].full} ${year} has only ${maxDays} days`);
+      return false;
     }
     
+    setDateError('');
+    
+    // Calculate age
+    const today = new Date();
+    const birthDate = new Date(year, month - 1, day);
     let age = today.getFullYear() - birthDate.getFullYear();
     const monthDiff = today.getMonth() - birthDate.getMonth();
     if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
       age--;
     }
-    return age > 0 && age < 150 ? age : 0;
-  }, [data.dobDay, data.dobMonth, data.dobYear]);
-
-  // Auto-trigger age confirmation when DOB is complete
-  const checkAndShowAgeConfirm = useCallback(() => {
-    if (data.dobDay && data.dobMonth && data.dobYear && !ageConfirmed) {
-      const age = calculateAge();
-      if (age > 0) {
-        setCalculatedAge(age);
-        setShowAgeConfirm(true);
-      }
-    }
-  }, [data.dobDay, data.dobMonth, data.dobYear, ageConfirmed, calculateAge]);
-
-  const handleAgeConfirm = (confirmed: boolean) => {
-    setShowAgeConfirm(false);
-    if (confirmed) {
-      if (calculatedAge < 18) {
-        setUnderAge(true);
-      } else {
-        setAgeConfirmed(true);
-        onUpdate('age', calculatedAge);
-      }
-    } else {
-      // Reset DOB fields when user says "No"
-      onUpdate('dobDay', '');
-      onUpdate('dobMonth', '');
-      onUpdate('dobYear', '');
-    }
-  };
-
-  const openDOBPicker = (type: 'day' | 'month' | 'year') => {
-    setDobPickerType(type);
-    setShowDOBPicker(true);
-  };
-
-  const selectDOBValue = (value: number) => {
-    if (dobPickerType === 'day') {
-      onUpdate('dobDay', String(value).padStart(2, '0'));
-    } else if (dobPickerType === 'month') {
-      onUpdate('dobMonth', String(value).padStart(2, '0'));
-    } else {
-      onUpdate('dobYear', String(value));
-    }
-    setShowDOBPicker(false);
     
-    // Check if all fields are filled after this selection
-    setTimeout(() => {
-      const newDay = dobPickerType === 'day' ? String(value).padStart(2, '0') : data.dobDay;
-      const newMonth = dobPickerType === 'month' ? String(value).padStart(2, '0') : data.dobMonth;
-      const newYear = dobPickerType === 'year' ? String(value) : data.dobYear;
-      
-      if (newDay && newMonth && newYear && !ageConfirmed) {
-        const d = parseInt(newDay);
-        const m = parseInt(newMonth);
-        const y = parseInt(newYear);
-        const today = new Date();
-        const birthDate = new Date(y, m - 1, d);
-        
-        if (birthDate.getDate() === d && birthDate.getMonth() === m - 1) {
-          let age = today.getFullYear() - birthDate.getFullYear();
-          const monthDiff = today.getMonth() - birthDate.getMonth();
-          if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
-            age--;
-          }
-          if (age > 0 && age < 150) {
-            setCalculatedAge(age);
-            setShowAgeConfirm(true);
-          }
-        }
-      }
-    }, 100);
+    if (age >= 18 && age < 120) {
+      setCalculatedAge(age);
+      setAgeConfirmed(true);
+      onUpdate('age', age);
+      onUpdate('dobDay', String(day).padStart(2, '0'));
+      onUpdate('dobMonth', String(month).padStart(2, '0'));
+      onUpdate('dobYear', String(year));
+      return true;
+    } else if (age < 18) {
+      setUnderAge(true);
+      return false;
+    }
+    return false;
+  }, [onUpdate]);
+
+  const handleDayChange = (day: number) => {
+    setSelectedDay(day);
+    validateAndSetDate(day, selectedMonth, selectedYear);
+  };
+
+  const handleMonthChange = (month: number) => {
+    setSelectedMonth(month);
+    // Auto-adjust day if needed
+    const maxDays = getMaxDays(month, selectedYear);
+    const adjustedDay = Math.min(selectedDay, maxDays);
+    setSelectedDay(adjustedDay);
+    validateAndSetDate(adjustedDay, month, selectedYear);
+  };
+
+  const handleYearChange = (year: number) => {
+    setSelectedYear(year);
+    // Auto-adjust day if needed (for Feb 29)
+    const maxDays = getMaxDays(selectedMonth, year);
+    const adjustedDay = Math.min(selectedDay, maxDays);
+    setSelectedDay(adjustedDay);
+    validateAndSetDate(adjustedDay, selectedMonth, year);
   };
 
   const searchLocation = useCallback(async (text: string) => {
@@ -184,7 +238,7 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
     }
   };
 
-  const isValid = data.name.trim() && data.gender && ageConfirmed && !underAge && data.location;
+  const isValid = data.name.trim().length > 0 && data.gender && ageConfirmed && !underAge && data.location;
 
   if (underAge) {
     return (
@@ -199,10 +253,7 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
   }
 
   return (
-    <KeyboardAvoidingView
-      style={styles.flex}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
+    <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView style={styles.flex} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <Text style={styles.title}>Tell us about yourself</Text>
         <Text style={styles.subtitle}>Let's start with the basics</Text>
@@ -249,92 +300,113 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
         )}
 
         <Text style={styles.label}>Date of Birth *</Text>
-        <View style={styles.dobRow}>
-          <TouchableOpacity 
-            style={[styles.dobPicker, data.dobDay && styles.dobPickerFilled]} 
-            onPress={() => openDOBPicker('day')}
-            testID="dob-day-picker"
-          >
-            <Text style={[styles.dobPickerText, !data.dobDay && styles.placeholder]}>
-              {data.dobDay || 'DD'}
-            </Text>
-            <Ionicons name="chevron-down" size={16} color={COLORS.textMuted} />
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={[styles.dobPicker, styles.dobPickerMonth, data.dobMonth && styles.dobPickerFilled]} 
-            onPress={() => openDOBPicker('month')}
-            testID="dob-month-picker"
-          >
-            <Text style={[styles.dobPickerText, !data.dobMonth && styles.placeholder]}>
-              {data.dobMonth ? MONTHS[parseInt(data.dobMonth) - 1]?.label : 'Month'}
-            </Text>
-            <Ionicons name="chevron-down" size={16} color={COLORS.textMuted} />
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={[styles.dobPicker, data.dobYear && styles.dobPickerFilled]} 
-            onPress={() => openDOBPicker('year')}
-            testID="dob-year-picker"
-          >
-            <Text style={[styles.dobPickerText, !data.dobYear && styles.placeholder]}>
-              {data.dobYear || 'YYYY'}
-            </Text>
-            <Ionicons name="chevron-down" size={16} color={COLORS.textMuted} />
-          </TouchableOpacity>
+        <View style={[styles.dobContainer, dateError && styles.dobContainerError]}>
+          <View style={styles.dobScrollRow}>
+            {/* Day Picker */}
+            <View style={styles.dobColumn}>
+              <Text style={styles.dobLabel}>Day</Text>
+              <ScrollView style={styles.dobScroll} showsVerticalScrollIndicator={false} nestedScrollEnabled>
+                {DAYS.map(d => (
+                  <TouchableOpacity
+                    key={d}
+                    style={[styles.dobItem, selectedDay === d && styles.dobItemSelected]}
+                    onPress={() => handleDayChange(d)}
+                  >
+                    <Text style={[styles.dobItemText, selectedDay === d && styles.dobItemTextSelected]}>
+                      {String(d).padStart(2, '0')}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+
+            {/* Month Picker */}
+            <View style={[styles.dobColumn, styles.dobColumnWide]}>
+              <Text style={styles.dobLabel}>Month</Text>
+              <ScrollView style={styles.dobScroll} showsVerticalScrollIndicator={false} nestedScrollEnabled>
+                {MONTHS.map(m => (
+                  <TouchableOpacity
+                    key={m.value}
+                    style={[styles.dobItem, selectedMonth === m.value && styles.dobItemSelected]}
+                    onPress={() => handleMonthChange(m.value)}
+                  >
+                    <Text style={[styles.dobItemText, selectedMonth === m.value && styles.dobItemTextSelected]}>
+                      {m.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+
+            {/* Year Picker */}
+            <View style={styles.dobColumn}>
+              <Text style={styles.dobLabel}>Year</Text>
+              <ScrollView style={styles.dobScroll} showsVerticalScrollIndicator={false} nestedScrollEnabled>
+                {YEARS.map(y => (
+                  <TouchableOpacity
+                    key={y}
+                    style={[styles.dobItem, selectedYear === y && styles.dobItemSelected]}
+                    onPress={() => handleYearChange(y)}
+                  >
+                    <Text style={[styles.dobItemText, selectedYear === y && styles.dobItemTextSelected]}>
+                      {y}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          </View>
         </View>
 
-        {ageConfirmed && (
+        {dateError ? (
+          <Text style={styles.dateError}>{dateError}</Text>
+        ) : ageConfirmed && (
           <View style={styles.ageConfirmedBadge}>
             <Ionicons name="checkmark-circle" size={18} color={COLORS.success} />
             <Text style={styles.ageConfirmedText}>Age verified: {calculatedAge} years old</Text>
           </View>
         )}
 
-        {ageConfirmed && (
-          <>
-            <Text style={styles.label}>Location *</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Search your city"
-              placeholderTextColor={COLORS.textMuted}
-              value={locationSearch}
-              onChangeText={searchLocation}
-              testID="basic-location-input"
-            />
-            {searchingLocation && <ActivityIndicator size="small" color={COLORS.primary} style={styles.loadingIndicator} />}
+        <Text style={styles.label}>Location *</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Search your city"
+          placeholderTextColor={COLORS.textMuted}
+          value={locationSearch}
+          onChangeText={searchLocation}
+          testID="basic-location-input"
+        />
+        {searchingLocation && <ActivityIndicator size="small" color={COLORS.primary} style={styles.loadingIndicator} />}
 
-            {predictions.length > 0 && (
-              <View style={styles.predictionsContainer}>
-                {predictions.map((p: any, i: number) => (
-                  <TouchableOpacity
-                    key={i}
-                    style={styles.predictionItem}
-                    onPress={() => selectLocation(p.description)}
-                    testID={`location-prediction-${i}`}
-                  >
-                    <Ionicons name="location-outline" size={18} color={COLORS.textSecondary} />
-                    <Text style={styles.predictionText}>{p.description}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
-
-            <TouchableOpacity
-              style={styles.currentLocBtn}
-              onPress={getCurrentLocation}
-              disabled={gettingCurrentLoc}
-              testID="current-location-btn"
-            >
-              {gettingCurrentLoc ? (
-                <ActivityIndicator size="small" color={COLORS.primary} />
-              ) : (
-                <Ionicons name="navigate-outline" size={20} color={COLORS.primary} />
-              )}
-              <Text style={styles.currentLocText}>Use My Current Location</Text>
-            </TouchableOpacity>
-          </>
+        {predictions.length > 0 && (
+          <View style={styles.predictionsContainer}>
+            {predictions.map((p: any, i: number) => (
+              <TouchableOpacity
+                key={i}
+                style={styles.predictionItem}
+                onPress={() => selectLocation(p.description)}
+                testID={`location-prediction-${i}`}
+              >
+                <Ionicons name="location-outline" size={18} color={COLORS.textSecondary} />
+                <Text style={styles.predictionText}>{p.description}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
         )}
+
+        <TouchableOpacity
+          style={styles.currentLocBtn}
+          onPress={getCurrentLocation}
+          disabled={gettingCurrentLoc}
+          testID="current-location-btn"
+        >
+          {gettingCurrentLoc ? (
+            <ActivityIndicator size="small" color={COLORS.primary} />
+          ) : (
+            <Ionicons name="navigate-outline" size={20} color={COLORS.primary} />
+          )}
+          <Text style={styles.currentLocText}>Use My Current Location</Text>
+        </TouchableOpacity>
 
         <TouchableOpacity
           style={[styles.continueBtn, !isValid && styles.continueBtnDisabled]}
@@ -348,11 +420,7 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
 
       {/* Gender Picker Modal */}
       <Modal visible={showGenderPicker} transparent animationType="fade">
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setShowGenderPicker(false)}
-        >
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowGenderPicker(false)}>
           <View style={styles.pickerContent}>
             <Text style={styles.pickerTitle}>Select Gender</Text>
             {GENDERS.map(g => (
@@ -371,11 +439,7 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
 
       {/* Gender Identity Picker Modal */}
       <Modal visible={showIdentityPicker} transparent animationType="fade">
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setShowIdentityPicker(false)}
-        >
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowIdentityPicker(false)}>
           <View style={styles.pickerContent}>
             <Text style={styles.pickerTitle}>Select Identity</Text>
             <ScrollView style={styles.pickerScroll}>
@@ -392,72 +456,6 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
             </ScrollView>
           </View>
         </TouchableOpacity>
-      </Modal>
-
-      {/* DOB Picker Modal */}
-      <Modal visible={showDOBPicker} transparent animationType="fade">
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setShowDOBPicker(false)}
-        >
-          <View style={styles.pickerContent}>
-            <Text style={styles.pickerTitle}>
-              {dobPickerType === 'day' ? 'Select Day' : dobPickerType === 'month' ? 'Select Month' : 'Select Year'}
-            </Text>
-            <ScrollView style={styles.pickerScroll}>
-              {dobPickerType === 'day' && DAYS.map(d => (
-                <TouchableOpacity
-                  key={d}
-                  style={[styles.pickerItem, data.dobDay === String(d).padStart(2, '0') && styles.pickerItemActive]}
-                  onPress={() => selectDOBValue(d)}
-                  testID={`dob-day-${d}`}
-                >
-                  <Text style={[styles.pickerItemText, data.dobDay === String(d).padStart(2, '0') && styles.pickerItemTextActive]}>{d}</Text>
-                </TouchableOpacity>
-              ))}
-              {dobPickerType === 'month' && MONTHS.map(m => (
-                <TouchableOpacity
-                  key={m.value}
-                  style={[styles.pickerItem, data.dobMonth === String(m.value).padStart(2, '0') && styles.pickerItemActive]}
-                  onPress={() => selectDOBValue(m.value)}
-                  testID={`dob-month-${m.value}`}
-                >
-                  <Text style={[styles.pickerItemText, data.dobMonth === String(m.value).padStart(2, '0') && styles.pickerItemTextActive]}>{m.label}</Text>
-                </TouchableOpacity>
-              ))}
-              {dobPickerType === 'year' && YEARS.map(y => (
-                <TouchableOpacity
-                  key={y}
-                  style={[styles.pickerItem, data.dobYear === String(y) && styles.pickerItemActive]}
-                  onPress={() => selectDOBValue(y)}
-                  testID={`dob-year-${y}`}
-                >
-                  <Text style={[styles.pickerItemText, data.dobYear === String(y) && styles.pickerItemTextActive]}>{y}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        </TouchableOpacity>
-      </Modal>
-
-      {/* Age Confirmation Modal */}
-      <Modal visible={showAgeConfirm} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.ageConfirmContent}>
-            <Ionicons name="calendar-outline" size={48} color={COLORS.gold} style={{ marginBottom: SPACING.m }} />
-            <Text style={styles.ageConfirmTitle}>Age Confirmation</Text>
-            <Text style={styles.ageConfirmText}>Are you {calculatedAge} years old?</Text>
-            <View style={styles.ageConfirmBtns}>
-              <TouchableOpacity style={styles.ageConfirmYes} onPress={() => handleAgeConfirm(true)} testID="age-confirm-yes">
-                <Text style={styles.btnTextWhite}>Yes</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.ageConfirmNo} onPress={() => handleAgeConfirm(false)} testID="age-confirm-no">
-                <Text style={styles.btnTextWhite}>No</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
       </Modal>
     </KeyboardAvoidingView>
   );
@@ -481,15 +479,24 @@ const styles = StyleSheet.create({
   },
   dropdownText: { fontSize: 16, color: COLORS.text },
   placeholder: { color: COLORS.textMuted },
-  dobRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.s },
-  dobPicker: {
-    flex: 1, backgroundColor: COLORS.bgInput, borderRadius: BORDER_RADIUS.m,
-    paddingHorizontal: SPACING.s, paddingVertical: 14, flexDirection: 'row',
-    alignItems: 'center', justifyContent: 'space-between',
+  // DOB embedded scroll styles
+  dobContainer: {
+    backgroundColor: COLORS.bgCard, borderRadius: BORDER_RADIUS.l, padding: SPACING.m,
+    borderWidth: 1, borderColor: COLORS.border,
   },
-  dobPickerMonth: { flex: 1.8 },
-  dobPickerFilled: { borderWidth: 1, borderColor: COLORS.primary },
-  dobPickerText: { fontSize: 14, color: COLORS.text },
+  dobContainerError: { borderColor: COLORS.error, borderWidth: 2 },
+  dobScrollRow: { flexDirection: 'row', gap: SPACING.s },
+  dobColumn: { flex: 1 },
+  dobColumnWide: { flex: 1.3 },
+  dobLabel: { fontSize: 11, color: COLORS.textMuted, textAlign: 'center', marginBottom: SPACING.xs },
+  dobScroll: { height: 150 },
+  dobItem: {
+    paddingVertical: 10, alignItems: 'center', borderRadius: BORDER_RADIUS.s, marginVertical: 2,
+  },
+  dobItemSelected: { backgroundColor: COLORS.primary },
+  dobItemText: { fontSize: 16, color: COLORS.textSecondary },
+  dobItemTextSelected: { color: COLORS.white, fontWeight: '600' },
+  dateError: { fontSize: 13, color: COLORS.error, marginTop: SPACING.s },
   ageConfirmedBadge: {
     flexDirection: 'row', alignItems: 'center', gap: SPACING.s, marginTop: SPACING.m,
     backgroundColor: 'rgba(76,175,80,0.1)', padding: SPACING.m, borderRadius: BORDER_RADIUS.m,
@@ -527,28 +534,11 @@ const styles = StyleSheet.create({
   pickerTitle: { fontSize: 20, fontWeight: 'bold', color: COLORS.text, marginBottom: SPACING.m, textAlign: 'center' },
   pickerScroll: { maxHeight: 350 },
   pickerItem: {
-    paddingVertical: 14, paddingHorizontal: SPACING.m, borderRadius: BORDER_RADIUS.m,
-    marginBottom: SPACING.xs,
+    paddingVertical: 14, paddingHorizontal: SPACING.m, borderRadius: BORDER_RADIUS.m, marginBottom: SPACING.xs,
   },
   pickerItemActive: { backgroundColor: 'rgba(229,9,20,0.15)' },
   pickerItemText: { fontSize: 16, color: COLORS.textSecondary },
   pickerItemTextActive: { color: COLORS.primary, fontWeight: '600' },
-  ageConfirmContent: {
-    backgroundColor: COLORS.bgCard, borderRadius: BORDER_RADIUS.l, padding: SPACING.xl,
-    width: '100%', maxWidth: 320, alignItems: 'center',
-  },
-  ageConfirmTitle: { fontSize: 22, fontWeight: 'bold', color: COLORS.text, marginBottom: SPACING.s },
-  ageConfirmText: { fontSize: 18, color: COLORS.textSecondary, marginBottom: SPACING.l },
-  ageConfirmBtns: { flexDirection: 'row', gap: SPACING.m, width: '100%' },
-  ageConfirmYes: {
-    flex: 1, backgroundColor: COLORS.primary, paddingVertical: 14,
-    borderRadius: BORDER_RADIUS.full, alignItems: 'center',
-  },
-  ageConfirmNo: {
-    flex: 1, backgroundColor: COLORS.border, paddingVertical: 14,
-    borderRadius: BORDER_RADIUS.full, alignItems: 'center',
-  },
-  btnTextWhite: { fontSize: 16, fontWeight: '600', color: COLORS.white },
   underAgeTitle: { fontSize: 28, fontWeight: 'bold', color: COLORS.text, marginTop: SPACING.l },
   underAgeText: { fontSize: 16, color: COLORS.textSecondary, textAlign: 'center', marginTop: SPACING.m, lineHeight: 24 },
 });
