@@ -484,13 +484,14 @@ const drawerStyles = StyleSheet.create({
 
 // Profile Drawer Component
 function ProfileDrawer({
-  visible, onClose, onLogout, colors, onFilters,
+  visible, onClose, onLogout, colors, onFilters, onViewProfile,
 }: {
   visible: boolean;
   onClose: () => void;
   onLogout: () => void;
   colors: ReturnType<typeof getThemeColors>;
   onFilters: () => void;
+  onViewProfile: () => void;
 }) {
   const [profile, setProfile] = useState<ProfileData | null>(null);
 
@@ -508,8 +509,8 @@ function ProfileDrawer({
         <Pressable style={[profileStyles.container, { backgroundColor: colors.bgCard }]} onPress={(e) => e.stopPropagation()}>
           <View style={profileStyles.handle} />
           
-          {/* Header */}
-          <View style={profileStyles.header}>
+          {/* Header - Clickable to view full profile */}
+          <TouchableOpacity style={profileStyles.header} onPress={onViewProfile} activeOpacity={0.8}>
             <View style={[profileStyles.avatarCircle, { backgroundColor: colors.primary }]}>
               <Ionicons name="person" size={32} color="#FFF" />
             </View>
@@ -518,8 +519,9 @@ function ProfileDrawer({
               <Text style={[profileStyles.subInfo, { color: colors.textSecondary }]}>
                 {profile?.age ? `${profile.age} years` : ''}{profile?.location ? ` • ${profile.location}` : ''}
               </Text>
+              <Text style={[profileStyles.viewProfileText, { color: colors.primary }]}>View & Edit Profile →</Text>
             </View>
-          </View>
+          </TouchableOpacity>
 
           {/* Profile Details */}
           <ScrollView style={profileStyles.scroll} showsVerticalScrollIndicator={false}>
@@ -579,6 +581,17 @@ function ProfileDrawer({
             )}
           </ScrollView>
 
+          {/* View Full Profile Button */}
+          <TouchableOpacity
+            style={[profileStyles.viewProfileBtn, { backgroundColor: colors.primary }]}
+            onPress={onViewProfile}
+            testID="view-profile-btn"
+            activeOpacity={0.8}
+          >
+            <Ionicons name="person-circle-outline" size={20} color="#FFF" />
+            <Text style={profileStyles.viewProfileBtnText}>View & Edit Full Profile</Text>
+          </TouchableOpacity>
+
           {/* Preferences & Filters Button */}
           <TouchableOpacity
             style={[profileStyles.filtersBtn, { borderColor: colors.primary }]}
@@ -615,7 +628,8 @@ const profileStyles = StyleSheet.create({
   headerInfo: { flex: 1 },
   name: { fontSize: 22, fontWeight: 'bold', marginBottom: 2 },
   subInfo: { fontSize: 14 },
-  scroll: { maxHeight: 400 },
+  viewProfileText: { fontSize: 12, fontWeight: '600', marginTop: SPACING.xs },
+  scroll: { maxHeight: 300 },
   section: { marginBottom: SPACING.l },
   sectionTitle: { fontSize: 13, fontWeight: '600', marginBottom: SPACING.s, textTransform: 'uppercase', letterSpacing: 1 },
   tagsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.s },
@@ -629,6 +643,11 @@ const profileStyles = StyleSheet.create({
   ratingText: { fontSize: 11, fontWeight: '600' },
   infoRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.s, marginBottom: SPACING.s },
   infoText: { fontSize: 14 },
+  viewProfileBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SPACING.s,
+    paddingVertical: 14, borderRadius: BORDER_RADIUS.full, marginTop: SPACING.m,
+  },
+  viewProfileBtnText: { fontSize: 16, fontWeight: '600', color: '#FFF' },
   filtersBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SPACING.s,
     paddingVertical: 14, borderRadius: BORDER_RADIUS.full, borderWidth: 2, marginTop: SPACING.m,
@@ -1076,6 +1095,7 @@ export default function SwipeScreen() {
         onClose={() => setShowProfileDrawer(false)}
         onLogout={handleLogout}
         onFilters={() => { setShowProfileDrawer(false); router.push('/filters'); }}
+        onViewProfile={() => { setShowProfileDrawer(false); router.push('/profile'); }}
         colors={colors}
       />
       <MovieDetailsModal
