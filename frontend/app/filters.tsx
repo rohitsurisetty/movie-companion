@@ -1,7 +1,7 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  PanResponder, Platform,
+  PanResponder, Platform, Animated, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -38,17 +38,18 @@ const FILTER_CONFIGS: FilterConfig[] = [
   { key: 'intent', title: 'Intent Preference', options: ['Casual', 'Friendship', 'Serious relationship', 'Exploring'] },
 ];
 
-// Distance Slider Component
+// Distance Slider Component with proper dragging
 function DistanceSlider({ value, onChange }: { value: number; onChange: (v: number) => void }) {
   const [trackWidth, setTrackWidth] = useState(0);
-  const trackRef = useRef<View>(null);
+  const translateX = useRef(new Animated.Value(0)).current;
+  const lastValue = useRef(value);
 
-  const getPercent = () => {
-    if (value < 0) return 1;
+  const getPercent = useCallback(() => {
+    if (value < 0) return 1; // Infinite
     return Math.min(value / MAX_KM, 0.95);
-  };
+  }, [value]);
 
-  const handleTouch = (locationX: number) => {
+  const updateValue = useCallback((locationX: number) => {
     if (trackWidth === 0) return;
     const percent = Math.max(0, Math.min(1, locationX / trackWidth));
     if (percent > 0.95) {
@@ -56,30 +57,38 @@ function DistanceSlider({ value, onChange }: { value: number; onChange: (v: numb
     } else {
       onChange(Math.max(1, Math.round(percent * MAX_KM)));
     }
-  };
+  }, [trackWidth, onChange]);
 
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: (evt) => handleTouch(evt.nativeEvent.locationX),
-      onPanResponderMove: (evt) => handleTouch(evt.nativeEvent.locationX),
+      onPanResponderGrant: (evt) => {
+        updateValue(evt.nativeEvent.locationX);
+      },
+      onPanResponderMove: (evt) => {
+        updateValue(evt.nativeEvent.locationX);
+      },
     })
   ).current;
 
-  const label = value < 0 ? 'Infinite distance' : `Within ${value} km`;
+  const label = value < 0 ? 'Upto: Infinite distance' : `Upto: ${value} kms`;
+  const thumbPosition = `${getPercent() * 100}%`;
 
   return (
     <View style={sliderStyles.container}>
       <Text style={sliderStyles.label}>{label}</Text>
       <View
-        ref={trackRef}
-        style={sliderStyles.track}
+        style={sliderStyles.trackContainer}
         onLayout={(e) => setTrackWidth(e.nativeEvent.layout.width)}
         {...panResponder.panHandlers}
       >
-        <View style={[sliderStyles.fill, { width: `${getPercent() * 100}%` }]} />
-        <View style={[sliderStyles.thumb, { left: `${Math.max(0, getPercent() * 100 - 3)}%` }]} />
+        <View style={sliderStyles.track}>
+          <View style={[sliderStyles.fill, { width: thumbPosition }]} />
+        </View>
+        <View style={[sliderStyles.thumbContainer, { left: thumbPosition }]}>
+          <View style={sliderStyles.thumb} />
+        </View>
       </View>
       <View style={sliderStyles.labels}>
         <Text style={sliderStyles.minLabel}>0 km</Text>
@@ -89,9 +98,10 @@ function DistanceSlider({ value, onChange }: { value: number; onChange: (v: numb
   );
 }
 
-// Age Range Slider Component
+// Age Range Slider Component with proper dual thumbs
 function AgeRangeSlider({ value, onChange }: { value: AgeFilter; onChange: (v: AgeFilter) => void }) {
   const [trackWidth, setTrackWidth] = useState(0);
+  const [activeThumb, setActiveThumb] = useState<'min' | 'max' | null>(null);
   const MIN_AGE = 18;
   const MAX_AGE = 60;
   const RANGE = MAX_AGE - MIN_AGE;
@@ -99,42 +109,43 @@ function AgeRangeSlider({ value, onChange }: { value: AgeFilter; onChange: (v: A
   const getMinPercent = () => ((value.min - MIN_AGE) / RANGE) * 100;
   const getMaxPercent = () => ((value.max - MIN_AGE) / RANGE) * 100;
 
-  const handleMinTouch = (locationX: number) => {
+  const handleTouch = useCallback((locationX: number) => {
     if (trackWidth === 0) return;
     const percent = Math.max(0, Math.min(1, locationX / trackWidth));
-    const newMin = Math.round(MIN_AGE + percent * RANGE);
-    if (newMin < value.max - 1) {
-      onChange({ ...value, min: Math.max(MIN_AGE, newMin) });
+    const newAge = Math.round(MIN_AGE + percent * RANGE);
+    
+    // Determine which thumb to move based on proximity
+    const minPos = (value.min - MIN_AGE) / RANGE;
+    const maxPos = (value.max - MIN_AGE) / RANGE;
+    const distToMin = Math.abs(percent - minPos);
+    const distToMax = Math.abs(percent - maxPos);
+    
+    if (activeThumb === 'min' || (activeThumb === null && distToMin < distToMax)) {
+      if (newAge < value.max - 1) {
+        onChange({ ...value, min: Math.max(MIN_AGE, newAge) });
+      }
+      setActiveThumb('min');
+    } else {
+      if (newAge > value.min + 1) {
+        onChange({ ...value, max: Math.min(MAX_AGE, newAge) });
+      }
+      setActiveThumb('max');
     }
-  };
+  }, [trackWidth, value, onChange, activeThumb]);
 
-  const handleMaxTouch = (locationX: number) => {
-    if (trackWidth === 0) return;
-    const percent = Math.max(0, Math.min(1, locationX / trackWidth));
-    const newMax = Math.round(MIN_AGE + percent * RANGE);
-    if (newMax > value.min + 1) {
-      onChange({ ...value, max: Math.min(MAX_AGE, newMax) });
-    }
-  };
-
-  const minPanResponder = useRef(
+  const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
-      onPanResponderMove: (evt, gestureState) => {
-        const locationX = gestureState.moveX - 40; // Approximate offset
-        handleMinTouch(locationX);
+      onPanResponderGrant: (evt) => {
+        setActiveThumb(null);
+        handleTouch(evt.nativeEvent.locationX);
       },
-    })
-  ).current;
-
-  const maxPanResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderMove: (evt, gestureState) => {
-        const locationX = gestureState.moveX - 40;
-        handleMaxTouch(locationX);
+      onPanResponderMove: (evt) => {
+        handleTouch(evt.nativeEvent.locationX);
+      },
+      onPanResponderRelease: () => {
+        setActiveThumb(null);
       },
     })
   ).current;
@@ -143,12 +154,22 @@ function AgeRangeSlider({ value, onChange }: { value: AgeFilter; onChange: (v: A
     <View style={sliderStyles.container}>
       <Text style={sliderStyles.label}>{value.min} - {value.max} years</Text>
       <View
-        style={sliderStyles.track}
+        style={sliderStyles.trackContainer}
         onLayout={(e) => setTrackWidth(e.nativeEvent.layout.width)}
+        {...panResponder.panHandlers}
       >
-        <View style={[sliderStyles.rangeFill, { left: `${getMinPercent()}%`, width: `${getMaxPercent() - getMinPercent()}%` }]} />
-        <View style={[sliderStyles.thumb, { left: `${getMinPercent() - 3}%` }]} {...minPanResponder.panHandlers} />
-        <View style={[sliderStyles.thumb, { left: `${getMaxPercent() - 3}%` }]} {...maxPanResponder.panHandlers} />
+        <View style={sliderStyles.track}>
+          <View style={[
+            sliderStyles.rangeFill, 
+            { left: `${getMinPercent()}%`, width: `${getMaxPercent() - getMinPercent()}%` }
+          ]} />
+        </View>
+        <View style={[sliderStyles.thumbContainer, { left: `${getMinPercent()}%` }]}>
+          <View style={[sliderStyles.thumb, activeThumb === 'min' && sliderStyles.thumbActive]} />
+        </View>
+        <View style={[sliderStyles.thumbContainer, { left: `${getMaxPercent()}%` }]}>
+          <View style={[sliderStyles.thumb, activeThumb === 'max' && sliderStyles.thumbActive]} />
+        </View>
       </View>
       <View style={sliderStyles.labels}>
         <Text style={sliderStyles.minLabel}>{MIN_AGE}</Text>
@@ -158,7 +179,7 @@ function AgeRangeSlider({ value, onChange }: { value: AgeFilter; onChange: (v: A
   );
 }
 
-// Height Picker Component
+// Height Picker Component with embedded scrollable
 function HeightPicker({ value, onChange }: { value: HeightFilter; onChange: (v: HeightFilter) => void }) {
   const [unit, setUnit] = useState<'imperial' | 'metric'>(value.unit);
 
@@ -166,16 +187,13 @@ function HeightPicker({ value, onChange }: { value: HeightFilter; onChange: (v: 
   const inchOptions = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
   const cmOptions = Array.from({ length: 77 }, (_, i) => 137 + i); // 137cm to 213cm
 
-  const toggleUnit = () => {
-    const newUnit = unit === 'imperial' ? 'metric' : 'imperial';
-    setUnit(newUnit);
-    onChange({ ...value, unit: newUnit });
-  };
-
-  const formatHeight = (feet: number, inches: number, cm: number) => {
+  const getDisplayHeight = (type: 'min' | 'max') => {
     if (unit === 'imperial') {
+      const feet = type === 'min' ? value.minFeet : value.maxFeet;
+      const inches = type === 'min' ? value.minInches : value.maxInches;
       return `${feet}'${inches}"`;
     }
+    const cm = type === 'min' ? value.minCm : value.maxCm;
     return `${cm} cm`;
   };
 
@@ -196,89 +214,109 @@ function HeightPicker({ value, onChange }: { value: HeightFilter; onChange: (v: 
         </TouchableOpacity>
       </View>
 
-      <View style={heightStyles.rangeRow}>
-        <View style={heightStyles.rangePart}>
-          <Text style={heightStyles.rangeLabel}>Min Height</Text>
-          {unit === 'imperial' ? (
-            <View style={heightStyles.pickerRow}>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={heightStyles.picker}>
-                {feetOptions.map((ft) => (
+      {/* Current Selection Display */}
+      <View style={heightStyles.selectionDisplay}>
+        <View style={heightStyles.selectionItem}>
+          <Text style={heightStyles.selectionLabel}>Min</Text>
+          <Text style={heightStyles.selectionValue}>{getDisplayHeight('min')}</Text>
+        </View>
+        <Text style={heightStyles.selectionSeparator}>-</Text>
+        <View style={heightStyles.selectionItem}>
+          <Text style={heightStyles.selectionLabel}>Max</Text>
+          <Text style={heightStyles.selectionValue}>{getDisplayHeight('max')}</Text>
+        </View>
+      </View>
+
+      {/* Embedded Scrollable Pickers */}
+      <View style={heightStyles.pickersContainer}>
+        {/* Min Height */}
+        <View style={heightStyles.pickerColumn}>
+          <Text style={heightStyles.pickerLabel}>Min Height</Text>
+          <View style={heightStyles.scrollContainer}>
+            {unit === 'imperial' ? (
+              <View style={heightStyles.imperialRow}>
+                <ScrollView style={heightStyles.scrollPicker} showsVerticalScrollIndicator={false} nestedScrollEnabled>
+                  {feetOptions.map((ft) => (
+                    <TouchableOpacity
+                      key={ft}
+                      style={[heightStyles.scrollItem, value.minFeet === ft && heightStyles.scrollItemActive]}
+                      onPress={() => onChange({ ...value, minFeet: ft })}
+                    >
+                      <Text style={[heightStyles.scrollItemText, value.minFeet === ft && heightStyles.scrollItemTextActive]}>{ft}'</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+                <ScrollView style={heightStyles.scrollPicker} showsVerticalScrollIndicator={false} nestedScrollEnabled>
+                  {inchOptions.map((inch) => (
+                    <TouchableOpacity
+                      key={inch}
+                      style={[heightStyles.scrollItem, value.minInches === inch && heightStyles.scrollItemActive]}
+                      onPress={() => onChange({ ...value, minInches: inch })}
+                    >
+                      <Text style={[heightStyles.scrollItemText, value.minInches === inch && heightStyles.scrollItemTextActive]}>{inch}"</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            ) : (
+              <ScrollView style={heightStyles.scrollPickerFull} showsVerticalScrollIndicator={false} nestedScrollEnabled>
+                {cmOptions.map((cm) => (
                   <TouchableOpacity
-                    key={ft}
-                    style={[heightStyles.pickerItem, value.minFeet === ft && heightStyles.pickerItemActive]}
-                    onPress={() => onChange({ ...value, minFeet: ft })}
+                    key={cm}
+                    style={[heightStyles.scrollItem, value.minCm === cm && heightStyles.scrollItemActive]}
+                    onPress={() => onChange({ ...value, minCm: cm })}
                   >
-                    <Text style={[heightStyles.pickerText, value.minFeet === ft && heightStyles.pickerTextActive]}>{ft}'</Text>
+                    <Text style={[heightStyles.scrollItemText, value.minCm === cm && heightStyles.scrollItemTextActive]}>{cm} cm</Text>
                   </TouchableOpacity>
                 ))}
               </ScrollView>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={heightStyles.picker}>
-                {inchOptions.map((inch) => (
-                  <TouchableOpacity
-                    key={inch}
-                    style={[heightStyles.pickerItem, value.minInches === inch && heightStyles.pickerItemActive]}
-                    onPress={() => onChange({ ...value, minInches: inch })}
-                  >
-                    <Text style={[heightStyles.pickerText, value.minInches === inch && heightStyles.pickerTextActive]}>{inch}"</Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
-          ) : (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={heightStyles.picker}>
-              {cmOptions.map((cm) => (
-                <TouchableOpacity
-                  key={cm}
-                  style={[heightStyles.pickerItem, value.minCm === cm && heightStyles.pickerItemActive]}
-                  onPress={() => onChange({ ...value, minCm: cm })}
-                >
-                  <Text style={[heightStyles.pickerText, value.minCm === cm && heightStyles.pickerTextActive]}>{cm}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          )}
+            )}
+          </View>
         </View>
 
-        <View style={heightStyles.rangePart}>
-          <Text style={heightStyles.rangeLabel}>Max Height</Text>
-          {unit === 'imperial' ? (
-            <View style={heightStyles.pickerRow}>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={heightStyles.picker}>
-                {feetOptions.map((ft) => (
+        {/* Max Height */}
+        <View style={heightStyles.pickerColumn}>
+          <Text style={heightStyles.pickerLabel}>Max Height</Text>
+          <View style={heightStyles.scrollContainer}>
+            {unit === 'imperial' ? (
+              <View style={heightStyles.imperialRow}>
+                <ScrollView style={heightStyles.scrollPicker} showsVerticalScrollIndicator={false} nestedScrollEnabled>
+                  {feetOptions.map((ft) => (
+                    <TouchableOpacity
+                      key={ft}
+                      style={[heightStyles.scrollItem, value.maxFeet === ft && heightStyles.scrollItemActive]}
+                      onPress={() => onChange({ ...value, maxFeet: ft })}
+                    >
+                      <Text style={[heightStyles.scrollItemText, value.maxFeet === ft && heightStyles.scrollItemTextActive]}>{ft}'</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+                <ScrollView style={heightStyles.scrollPicker} showsVerticalScrollIndicator={false} nestedScrollEnabled>
+                  {inchOptions.map((inch) => (
+                    <TouchableOpacity
+                      key={inch}
+                      style={[heightStyles.scrollItem, value.maxInches === inch && heightStyles.scrollItemActive]}
+                      onPress={() => onChange({ ...value, maxInches: inch })}
+                    >
+                      <Text style={[heightStyles.scrollItemText, value.maxInches === inch && heightStyles.scrollItemTextActive]}>{inch}"</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            ) : (
+              <ScrollView style={heightStyles.scrollPickerFull} showsVerticalScrollIndicator={false} nestedScrollEnabled>
+                {cmOptions.map((cm) => (
                   <TouchableOpacity
-                    key={ft}
-                    style={[heightStyles.pickerItem, value.maxFeet === ft && heightStyles.pickerItemActive]}
-                    onPress={() => onChange({ ...value, maxFeet: ft })}
+                    key={cm}
+                    style={[heightStyles.scrollItem, value.maxCm === cm && heightStyles.scrollItemActive]}
+                    onPress={() => onChange({ ...value, maxCm: cm })}
                   >
-                    <Text style={[heightStyles.pickerText, value.maxFeet === ft && heightStyles.pickerTextActive]}>{ft}'</Text>
+                    <Text style={[heightStyles.scrollItemText, value.maxCm === cm && heightStyles.scrollItemTextActive]}>{cm} cm</Text>
                   </TouchableOpacity>
                 ))}
               </ScrollView>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={heightStyles.picker}>
-                {inchOptions.map((inch) => (
-                  <TouchableOpacity
-                    key={inch}
-                    style={[heightStyles.pickerItem, value.maxInches === inch && heightStyles.pickerItemActive]}
-                    onPress={() => onChange({ ...value, maxInches: inch })}
-                  >
-                    <Text style={[heightStyles.pickerText, value.maxInches === inch && heightStyles.pickerTextActive]}>{inch}"</Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
-          ) : (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={heightStyles.picker}>
-              {cmOptions.map((cm) => (
-                <TouchableOpacity
-                  key={cm}
-                  style={[heightStyles.pickerItem, value.maxCm === cm && heightStyles.pickerItemActive]}
-                  onPress={() => onChange({ ...value, maxCm: cm })}
-                >
-                  <Text style={[heightStyles.pickerText, value.maxCm === cm && heightStyles.pickerTextActive]}>{cm}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          )}
+            )}
+          </View>
         </View>
       </View>
     </View>
@@ -295,30 +333,84 @@ const heightStyles = StyleSheet.create({
   unitBtnActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
   unitText: { fontSize: 14, color: COLORS.textSecondary, fontWeight: '500' },
   unitTextActive: { color: COLORS.white },
-  rangeRow: { gap: SPACING.m },
-  rangePart: { marginBottom: SPACING.m },
-  rangeLabel: { fontSize: 13, color: COLORS.textSecondary, marginBottom: SPACING.s },
-  pickerRow: { gap: SPACING.s },
-  picker: { flexDirection: 'row' },
-  pickerItem: {
-    paddingHorizontal: 16, paddingVertical: 10, borderRadius: BORDER_RADIUS.m,
-    borderWidth: 1, borderColor: COLORS.border, marginRight: SPACING.s, minWidth: 48, alignItems: 'center',
+  selectionDisplay: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    backgroundColor: COLORS.bgInput, padding: SPACING.m, borderRadius: BORDER_RADIUS.m,
+    marginBottom: SPACING.m,
   },
-  pickerItemActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
-  pickerText: { fontSize: 14, color: COLORS.textSecondary },
-  pickerTextActive: { color: COLORS.white, fontWeight: '600' },
+  selectionItem: { alignItems: 'center' },
+  selectionLabel: { fontSize: 11, color: COLORS.textMuted, marginBottom: 2 },
+  selectionValue: { fontSize: 20, fontWeight: 'bold', color: COLORS.gold },
+  selectionSeparator: { fontSize: 24, color: COLORS.textMuted, marginHorizontal: SPACING.l },
+  pickersContainer: { flexDirection: 'row', gap: SPACING.m },
+  pickerColumn: { flex: 1 },
+  pickerLabel: { fontSize: 12, color: COLORS.textSecondary, marginBottom: SPACING.s, textAlign: 'center' },
+  scrollContainer: {
+    backgroundColor: COLORS.bgCard, borderRadius: BORDER_RADIUS.m,
+    borderWidth: 1, borderColor: COLORS.border, height: 140, overflow: 'hidden',
+  },
+  imperialRow: { flexDirection: 'row', flex: 1 },
+  scrollPicker: { flex: 1 },
+  scrollPickerFull: { flex: 1 },
+  scrollItem: {
+    height: 40, alignItems: 'center', justifyContent: 'center',
+    borderRadius: BORDER_RADIUS.s, marginVertical: 2, marginHorizontal: 4,
+  },
+  scrollItemActive: { backgroundColor: COLORS.primary },
+  scrollItemText: { fontSize: 14, color: COLORS.textSecondary },
+  scrollItemTextActive: { color: COLORS.white, fontWeight: '600' },
 });
 
 const sliderStyles = StyleSheet.create({
   container: { marginTop: SPACING.s },
-  label: { fontSize: 15, color: COLORS.gold, fontWeight: '600', marginBottom: SPACING.m },
-  track: { height: 6, backgroundColor: COLORS.border, borderRadius: 3, position: 'relative', justifyContent: 'center' },
+  label: { fontSize: 16, color: COLORS.gold, fontWeight: '600', marginBottom: SPACING.m },
+  trackContainer: { height: 40, justifyContent: 'center', position: 'relative' },
+  track: { height: 6, backgroundColor: COLORS.border, borderRadius: 3, position: 'absolute', left: 0, right: 0 },
   fill: { height: '100%', backgroundColor: COLORS.primary, borderRadius: 3, position: 'absolute', left: 0 },
   rangeFill: { height: '100%', backgroundColor: COLORS.primary, borderRadius: 3, position: 'absolute' },
-  thumb: { position: 'absolute', width: 24, height: 24, borderRadius: 12, backgroundColor: COLORS.primary, borderWidth: 3, borderColor: COLORS.white, top: -9 },
+  thumbContainer: { position: 'absolute', marginLeft: -12, top: 8 },
+  thumb: { 
+    width: 24, height: 24, borderRadius: 12, backgroundColor: COLORS.primary, 
+    borderWidth: 3, borderColor: COLORS.white,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 4,
+    elevation: 4,
+  },
+  thumbActive: { transform: [{ scale: 1.2 }] },
   labels: { flexDirection: 'row', justifyContent: 'space-between', marginTop: SPACING.s },
   minLabel: { fontSize: 12, color: COLORS.textMuted },
   maxLabel: { fontSize: 12, color: COLORS.textMuted },
+});
+
+// Info Tooltip Modal
+function InfoTooltip({ visible, onClose, title, description }: {
+  visible: boolean; onClose: () => void; title: string; description: string;
+}) {
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <TouchableOpacity style={infoStyles.overlay} activeOpacity={1} onPress={onClose}>
+        <View style={infoStyles.container}>
+          <View style={infoStyles.header}>
+            <Ionicons name="information-circle" size={24} color={COLORS.gold} />
+            <Text style={infoStyles.title}>{title}</Text>
+          </View>
+          <Text style={infoStyles.description}>{description}</Text>
+          <TouchableOpacity style={infoStyles.closeBtn} onPress={onClose}>
+            <Text style={infoStyles.closeBtnText}>Got it</Text>
+          </TouchableOpacity>
+        </View>
+      </TouchableOpacity>
+    </Modal>
+  );
+}
+
+const infoStyles = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center', padding: SPACING.l },
+  container: { backgroundColor: COLORS.bgCard, borderRadius: BORDER_RADIUS.l, padding: SPACING.l, width: '100%', maxWidth: 320 },
+  header: { flexDirection: 'row', alignItems: 'center', gap: SPACING.s, marginBottom: SPACING.m },
+  title: { fontSize: 18, fontWeight: 'bold', color: COLORS.text },
+  description: { fontSize: 14, color: COLORS.textSecondary, lineHeight: 22, marginBottom: SPACING.l },
+  closeBtn: { backgroundColor: COLORS.primary, paddingVertical: 12, borderRadius: BORDER_RADIUS.full, alignItems: 'center' },
+  closeBtnText: { fontSize: 14, fontWeight: '600', color: COLORS.white },
 });
 
 function FilterSectionView({
@@ -329,7 +421,8 @@ function FilterSectionView({
   onUpdate: (s: FilterSection) => void;
   options: string[];
 }) {
-  const [showTooltip, setShowTooltip] = useState(false);
+  const [showExclusiveInfo, setShowExclusiveInfo] = useState(false);
+  const [showExpandInfo, setShowExpandInfo] = useState(false);
 
   const toggleChip = (opt: string) => {
     const sel = section.selected.includes(opt)
@@ -368,8 +461,11 @@ function FilterSectionView({
             {section.exclusive && <Ionicons name="checkmark" size={12} color={COLORS.white} />}
           </View>
           <Text style={fStyles.checkLabel}>Exclusive</Text>
-          <TouchableOpacity onPress={() => setShowTooltip(!showTooltip)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-            <Ionicons name="information-circle-outline" size={16} color={COLORS.textMuted} />
+          <TouchableOpacity 
+            onPress={() => setShowExclusiveInfo(true)} 
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Ionicons name="information-circle-outline" size={18} color={COLORS.gold} />
           </TouchableOpacity>
         </TouchableOpacity>
 
@@ -382,16 +478,14 @@ function FilterSectionView({
             {section.expandIfRunOut && <Ionicons name="checkmark" size={12} color={COLORS.white} />}
           </View>
           <Text style={fStyles.checkLabel}>Expand if I run out</Text>
+          <TouchableOpacity 
+            onPress={() => setShowExpandInfo(true)} 
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Ionicons name="information-circle-outline" size={18} color={COLORS.gold} />
+          </TouchableOpacity>
         </TouchableOpacity>
       </View>
-
-      {showTooltip && (
-        <View style={fStyles.tooltip}>
-          <Text style={fStyles.tooltipText}>
-            If enabled, you will only see profiles that exactly match the selected preferences.
-          </Text>
-        </View>
-      )}
 
       <View style={fStyles.chipsContainer}>
         {options.map(opt => (
@@ -406,6 +500,19 @@ function FilterSectionView({
           </TouchableOpacity>
         ))}
       </View>
+
+      <InfoTooltip
+        visible={showExclusiveInfo}
+        onClose={() => setShowExclusiveInfo(false)}
+        title="Exclusive Filter"
+        description="When enabled, you will only see profiles that exactly match the selected preferences. This creates a strict filter."
+      />
+      <InfoTooltip
+        visible={showExpandInfo}
+        onClose={() => setShowExpandInfo(false)}
+        title="Expand If Run Out"
+        description="When enabled, if we run out of matches with your current filters, we'll automatically expand to show more profiles that closely match your preferences."
+      />
     </View>
   );
 }
@@ -417,13 +524,11 @@ const fStyles = StyleSheet.create({
   headerRight: { flexDirection: 'row', gap: SPACING.s },
   selectAllBtn: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: BORDER_RADIUS.full, backgroundColor: COLORS.bgInput },
   selectAllText: { fontSize: 12, color: COLORS.textSecondary, fontWeight: '600' },
-  checkboxRow: { flexDirection: 'row', gap: SPACING.l, marginBottom: SPACING.m },
+  checkboxRow: { flexDirection: 'row', gap: SPACING.l, marginBottom: SPACING.m, flexWrap: 'wrap' },
   checkItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   checkBox: { width: 20, height: 20, borderRadius: 4, borderWidth: 1.5, borderColor: COLORS.border, alignItems: 'center', justifyContent: 'center' },
   checkBoxChecked: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
   checkLabel: { fontSize: 13, color: COLORS.textSecondary },
-  tooltip: { backgroundColor: COLORS.bgInput, padding: SPACING.m, borderRadius: BORDER_RADIUS.m, marginBottom: SPACING.s },
-  tooltipText: { fontSize: 12, color: COLORS.textSecondary, lineHeight: 18 },
   chipsContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.s },
   chip: {
     paddingHorizontal: 16, paddingVertical: 10, borderRadius: BORDER_RADIUS.full,
@@ -438,6 +543,9 @@ const fStyles = StyleSheet.create({
 export default function FiltersScreen() {
   const router = useRouter();
   const [filters, setFilters] = useState<FiltersData>(initialFiltersData);
+  const [showDistanceInfo, setShowDistanceInfo] = useState(false);
+  const [showAgeInfo, setShowAgeInfo] = useState(false);
+  const [showHeightInfo, setShowHeightInfo] = useState(false);
 
   const updateFilter = (key: keyof FiltersData, section: FilterSection) => {
     setFilters(prev => ({ ...prev, [key]: section }));
@@ -454,20 +562,23 @@ export default function FiltersScreen() {
         <View style={styles.headerLeft}>
           <Ionicons name="options-outline" size={24} color={COLORS.gold} />
           <Text style={styles.headerTitle}>Preferences & Filters</Text>
-          <Text style={styles.optionalLabel}>(Optional)</Text>
         </View>
+        <Text style={styles.optionalLabel}>(Optional)</Text>
+      </View>
+
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        {/* Let's Start Button - Below Header */}
         <TouchableOpacity
           style={styles.startBtnTop}
           onPress={handleStart}
           testID="filters-start-btn-top"
           activeOpacity={0.8}
         >
+          <Ionicons name="film-outline" size={20} color={COLORS.white} />
           <Text style={styles.startBtnTopText}>Let's Start</Text>
-          <Ionicons name="arrow-forward" size={16} color={COLORS.white} />
+          <Ionicons name="arrow-forward" size={18} color={COLORS.white} />
         </TouchableOpacity>
-      </View>
 
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <Text style={styles.intro}>
           Set your preferences to find the perfect movie companions. These are all optional and can be changed later.
         </Text>
@@ -476,6 +587,9 @@ export default function FiltersScreen() {
         <View style={fStyles.section}>
           <View style={fStyles.header}>
             <Text style={fStyles.title}>Distance Radius</Text>
+            <TouchableOpacity onPress={() => setShowDistanceInfo(true)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Ionicons name="information-circle-outline" size={20} color={COLORS.gold} />
+            </TouchableOpacity>
           </View>
           <View style={fStyles.checkboxRow}>
             <TouchableOpacity
@@ -515,6 +629,9 @@ export default function FiltersScreen() {
         <View style={fStyles.section}>
           <View style={fStyles.header}>
             <Text style={fStyles.title}>Age Range</Text>
+            <TouchableOpacity onPress={() => setShowAgeInfo(true)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Ionicons name="information-circle-outline" size={20} color={COLORS.gold} />
+            </TouchableOpacity>
           </View>
           <View style={fStyles.checkboxRow}>
             <TouchableOpacity
@@ -554,6 +671,9 @@ export default function FiltersScreen() {
         <View style={fStyles.section}>
           <View style={fStyles.header}>
             <Text style={fStyles.title}>Height Preference</Text>
+            <TouchableOpacity onPress={() => setShowHeightInfo(true)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Ionicons name="information-circle-outline" size={20} color={COLORS.gold} />
+            </TouchableOpacity>
           </View>
           <View style={fStyles.checkboxRow}>
             <TouchableOpacity
@@ -610,6 +730,26 @@ export default function FiltersScreen() {
           <Text style={styles.startBtnText}>Let's Start</Text>
         </TouchableOpacity>
       </ScrollView>
+
+      {/* Info Tooltips for Distance, Age, Height */}
+      <InfoTooltip
+        visible={showDistanceInfo}
+        onClose={() => setShowDistanceInfo(false)}
+        title="Distance Radius"
+        description="Set the maximum distance for potential matches. Drag the slider to adjust. Select 'Infinite' to see matches from anywhere."
+      />
+      <InfoTooltip
+        visible={showAgeInfo}
+        onClose={() => setShowAgeInfo(false)}
+        title="Age Range"
+        description="Set your preferred age range for matches. Drag the left thumb for minimum age and right thumb for maximum age."
+      />
+      <InfoTooltip
+        visible={showHeightInfo}
+        onClose={() => setShowHeightInfo(false)}
+        title="Height Preference"
+        description="Set your preferred height range. Switch between feet/inches and centimeters using the toggle. Scroll to select minimum and maximum heights."
+      />
     </SafeAreaView>
   );
 }
@@ -624,14 +764,14 @@ const styles = StyleSheet.create({
   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: SPACING.s },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: COLORS.text },
   optionalLabel: { fontSize: 12, color: COLORS.textMuted, fontStyle: 'italic' },
-  startBtnTop: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: COLORS.primary, paddingHorizontal: 16, paddingVertical: 8,
-    borderRadius: BORDER_RADIUS.full,
-  },
-  startBtnTopText: { fontSize: 14, fontWeight: '600', color: COLORS.white },
   scroll: { flex: 1 },
   scrollContent: { padding: SPACING.l, paddingBottom: SPACING.xxl },
+  startBtnTop: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SPACING.s,
+    backgroundColor: COLORS.primary, paddingVertical: 14,
+    borderRadius: BORDER_RADIUS.full, marginBottom: SPACING.l,
+  },
+  startBtnTopText: { fontSize: 16, fontWeight: '600', color: COLORS.white },
   intro: { fontSize: 15, color: COLORS.textSecondary, marginBottom: SPACING.l, lineHeight: 22 },
   startBtn: {
     backgroundColor: COLORS.primary, paddingVertical: 18, borderRadius: BORDER_RADIUS.full,

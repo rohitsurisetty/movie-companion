@@ -16,7 +16,7 @@ import {
   LEFT_SWIPE_REASONS, RIGHT_SWIPE_REASONS,
 } from '../src/theme';
 import {
-  FeedMovie, SwipeState, SwipeRecord, initialSwipeState, TMDB_GENRE_MAP, ProfileData,
+  FeedMovie, SwipeState, SwipeRecord, initialSwipeState, TMDB_GENRE_MAP, ProfileData, MovieDetail,
 } from '../src/types';
 import { saveSwipeState, getSwipeState, getFilters, getProfile, saveMode, getMode, AppMode, clearAll } from '../src/store';
 
@@ -29,6 +29,207 @@ const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
 const REQUIRED_SWIPES = 20;
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+
+// Movie Details Modal
+function MovieDetailsModal({
+  visible, onClose, movieId, colors,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  movieId: number;
+  colors: ReturnType<typeof getThemeColors>;
+}) {
+  const [details, setDetails] = useState<MovieDetail | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (visible && movieId > 0) {
+      fetchDetails();
+    }
+  }, [visible, movieId]);
+
+  const fetchDetails = async () => {
+    setLoading(true);
+    try {
+      const resp = await fetch(`${BACKEND_URL}/api/tmdb/movie/${movieId}`);
+      if (resp.ok) {
+        const data = await resp.json();
+        setDetails(data);
+      }
+    } catch (e) {
+      console.error('Error fetching movie details:', e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={detailStyles.overlay} onPress={onClose}>
+        <Pressable style={[detailStyles.container, { backgroundColor: colors.bgCard }]} onPress={(e) => e.stopPropagation()}>
+          <View style={detailStyles.handle} />
+          
+          {loading ? (
+            <View style={detailStyles.loadingContainer}>
+              <ActivityIndicator size="large" color={colors.primary} />
+              <Text style={[detailStyles.loadingText, { color: colors.textSecondary }]}>Loading details...</Text>
+            </View>
+          ) : details ? (
+            <ScrollView style={detailStyles.scroll} showsVerticalScrollIndicator={false}>
+              {/* Header with poster and title */}
+              <View style={detailStyles.header}>
+                {details.poster_path && (
+                  <Image 
+                    source={{ uri: `${TMDB_IMAGE_BASE}${details.poster_path}` }}
+                    style={detailStyles.poster}
+                    resizeMode="cover"
+                  />
+                )}
+                <View style={detailStyles.headerInfo}>
+                  <Text style={[detailStyles.title, { color: colors.text }]} numberOfLines={2}>{details.title}</Text>
+                  {details.release_date && (
+                    <Text style={[detailStyles.year, { color: colors.textSecondary }]}>
+                      {details.release_date.split('-')[0]}
+                    </Text>
+                  )}
+                  {details.runtime > 0 && (
+                    <View style={detailStyles.runtimeRow}>
+                      <Ionicons name="time-outline" size={14} color={colors.textMuted} />
+                      <Text style={[detailStyles.runtime, { color: colors.textMuted }]}>
+                        {Math.floor(details.runtime / 60)}h {details.runtime % 60}m
+                      </Text>
+                    </View>
+                  )}
+                  {details.vote_average > 0 && (
+                    <View style={detailStyles.ratingRow}>
+                      <Ionicons name="star" size={16} color={colors.gold} />
+                      <Text style={[detailStyles.rating, { color: colors.gold }]}>
+                        {details.vote_average.toFixed(1)}/10
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+
+              {/* Genres */}
+              {details.genres && details.genres.length > 0 && (
+                <View style={detailStyles.section}>
+                  <View style={detailStyles.genresRow}>
+                    {details.genres.map((genre, i) => (
+                      <View key={i} style={[detailStyles.genreChip, { borderColor: colors.primary }]}>
+                        <Text style={[detailStyles.genreText, { color: colors.primary }]}>{genre}</Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              )}
+
+              {/* Synopsis */}
+              {details.overview && (
+                <View style={detailStyles.section}>
+                  <Text style={[detailStyles.sectionTitle, { color: colors.textSecondary }]}>Synopsis</Text>
+                  <Text style={[detailStyles.synopsis, { color: colors.text }]}>{details.overview}</Text>
+                </View>
+              )}
+
+              {/* Directors */}
+              {details.directors && details.directors.length > 0 && (
+                <View style={detailStyles.section}>
+                  <Text style={[detailStyles.sectionTitle, { color: colors.textSecondary }]}>
+                    Director{details.directors.length > 1 ? 's' : ''}
+                  </Text>
+                  <Text style={[detailStyles.directors, { color: colors.text }]}>
+                    {details.directors.join(', ')}
+                  </Text>
+                </View>
+              )}
+
+              {/* Cast */}
+              {details.cast && details.cast.length > 0 && (
+                <View style={detailStyles.section}>
+                  <Text style={[detailStyles.sectionTitle, { color: colors.textSecondary }]}>Cast</Text>
+                  <View style={detailStyles.castList}>
+                    {details.cast.slice(0, 8).map((member, i) => (
+                      <View key={i} style={detailStyles.castItem}>
+                        <View style={[detailStyles.castAvatar, { backgroundColor: colors.bgInput }]}>
+                          <Ionicons name="person" size={18} color={colors.textMuted} />
+                        </View>
+                        <View style={detailStyles.castInfo}>
+                          <Text style={[detailStyles.castName, { color: colors.text }]} numberOfLines={1}>
+                            {member.name}
+                          </Text>
+                          {member.character && (
+                            <Text style={[detailStyles.castCharacter, { color: colors.textMuted }]} numberOfLines={1}>
+                              as {member.character}
+                            </Text>
+                          )}
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              )}
+            </ScrollView>
+          ) : (
+            <View style={detailStyles.errorContainer}>
+              <Ionicons name="alert-circle-outline" size={48} color={colors.textMuted} />
+              <Text style={[detailStyles.errorText, { color: colors.textSecondary }]}>
+                Could not load movie details
+              </Text>
+            </View>
+          )}
+
+          <TouchableOpacity
+            style={[detailStyles.closeBtn, { backgroundColor: colors.primary }]}
+            onPress={onClose}
+            testID="close-details-btn"
+          >
+            <Text style={detailStyles.closeBtnText}>Close</Text>
+          </TouchableOpacity>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+const detailStyles = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
+  container: { 
+    borderTopLeftRadius: 24, borderTopRightRadius: 24, 
+    padding: SPACING.l, paddingBottom: SPACING.xxl,
+    maxHeight: '85%',
+  },
+  handle: { width: 40, height: 4, backgroundColor: '#555', borderRadius: 2, alignSelf: 'center', marginBottom: SPACING.m },
+  loadingContainer: { alignItems: 'center', justifyContent: 'center', paddingVertical: SPACING.xxl },
+  loadingText: { marginTop: SPACING.m, fontSize: 14 },
+  scroll: { maxHeight: SCREEN_HEIGHT * 0.6 },
+  header: { flexDirection: 'row', marginBottom: SPACING.l },
+  poster: { width: 100, height: 150, borderRadius: BORDER_RADIUS.m },
+  headerInfo: { flex: 1, marginLeft: SPACING.m, justifyContent: 'center' },
+  title: { fontSize: 20, fontWeight: 'bold', marginBottom: SPACING.xs },
+  year: { fontSize: 14, marginBottom: SPACING.s },
+  runtimeRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: SPACING.xs },
+  runtime: { fontSize: 13 },
+  ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  rating: { fontSize: 16, fontWeight: '600' },
+  section: { marginBottom: SPACING.l },
+  sectionTitle: { fontSize: 13, fontWeight: '600', marginBottom: SPACING.s, textTransform: 'uppercase', letterSpacing: 1 },
+  genresRow: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.s },
+  genreChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: BORDER_RADIUS.full, borderWidth: 1 },
+  genreText: { fontSize: 12, fontWeight: '500' },
+  synopsis: { fontSize: 14, lineHeight: 22 },
+  directors: { fontSize: 15, fontWeight: '500' },
+  castList: { gap: SPACING.s },
+  castItem: { flexDirection: 'row', alignItems: 'center', gap: SPACING.s },
+  castAvatar: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  castInfo: { flex: 1 },
+  castName: { fontSize: 14, fontWeight: '500' },
+  castCharacter: { fontSize: 12 },
+  errorContainer: { alignItems: 'center', justifyContent: 'center', paddingVertical: SPACING.xxl },
+  errorText: { marginTop: SPACING.m, fontSize: 14 },
+  closeBtn: { paddingVertical: 14, borderRadius: BORDER_RADIUS.full, alignItems: 'center', marginTop: SPACING.m },
+  closeBtnText: { fontSize: 16, fontWeight: '600', color: '#FFF' },
+});
 
 // Left Swipe Reason Modal
 function LeftSwipeModal({
@@ -461,11 +662,12 @@ const modalStyles = StyleSheet.create({
 });
 
 function SwipeCard({
-  movie, isTop, onSwipe, colors,
+  movie, isTop, onSwipe, onInfo, colors,
 }: {
   movie: FeedMovie;
   isTop: boolean;
   onSwipe: (direction: 'left' | 'right') => void;
+  onInfo: () => void;
   colors: ReturnType<typeof getThemeColors>;
 }) {
   const translateX = useSharedValue(0);
@@ -534,6 +736,16 @@ function SwipeCard({
       <Animated.View style={[styles.card, cardStyle]} testID={`swipe-card-${movie.id}`}>
         <Image source={{ uri: `${TMDB_IMAGE_BASE}${movie.poster_path}` }} style={styles.poster} resizeMode="cover" />
 
+        {/* Info Button */}
+        <TouchableOpacity
+          style={styles.infoBtn}
+          onPress={onInfo}
+          testID="movie-info-btn"
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Ionicons name="information-circle" size={32} color="#FFF" />
+        </TouchableOpacity>
+
         <Animated.View style={[styles.stamp, styles.likeStamp, { borderColor: colors.primary }, likeStyle]}>
           <Text style={[styles.stampText, { color: colors.primary }]}>LIKED</Text>
         </Animated.View>
@@ -569,6 +781,8 @@ export default function SwipeScreen() {
   const [showLeftModal, setShowLeftModal] = useState(false);
   const [showModeDrawer, setShowModeDrawer] = useState(false);
   const [showProfileDrawer, setShowProfileDrawer] = useState(false);
+  const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [selectedMovieId, setSelectedMovieId] = useState(0);
   const [pendingMovie, setPendingMovie] = useState<FeedMovie | null>(null);
   const [page, setPage] = useState(1);
   const [mode, setMode] = useState<AppMode>('date');
@@ -596,6 +810,11 @@ export default function SwipeScreen() {
     await clearAll();
     setShowProfileDrawer(false);
     router.replace('/');
+  };
+
+  const handleShowDetails = (movieId: number) => {
+    setSelectedMovieId(movieId);
+    setShowDetailsModal(true);
   };
 
   // Fetch movie feed
@@ -770,8 +989,17 @@ export default function SwipeScreen() {
           </View>
         ) : (
           <>
-            {nextMovie && <SwipeCard key={nextMovie.id} movie={nextMovie} isTop={false} onSwipe={() => {}} colors={colors} />}
-            {currentMovie && <SwipeCard key={currentMovie.id} movie={currentMovie} isTop={true} onSwipe={(dir) => handleSwipe(dir, currentMovie)} colors={colors} />}
+            {nextMovie && <SwipeCard key={nextMovie.id} movie={nextMovie} isTop={false} onSwipe={() => {}} onInfo={() => {}} colors={colors} />}
+            {currentMovie && (
+              <SwipeCard 
+                key={currentMovie.id} 
+                movie={currentMovie} 
+                isTop={true} 
+                onSwipe={(dir) => handleSwipe(dir, currentMovie)} 
+                onInfo={() => handleShowDetails(currentMovie.id)}
+                colors={colors} 
+              />
+            )}
           </>
         )}
       </View>
@@ -786,6 +1014,16 @@ export default function SwipeScreen() {
             activeOpacity={0.8}
           >
             <Ionicons name="close" size={32} color="#FF6B6B" />
+          </TouchableOpacity>
+
+          {/* Info Button in Actions */}
+          <TouchableOpacity
+            style={[styles.infoActionBtn, { borderColor: colors.gold, backgroundColor: `${colors.gold}15` }]}
+            onPress={() => currentMovie && handleShowDetails(currentMovie.id)}
+            testID="info-action-btn"
+            activeOpacity={0.8}
+          >
+            <Ionicons name="information-circle-outline" size={26} color={colors.gold} />
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -840,6 +1078,12 @@ export default function SwipeScreen() {
         onFilters={() => { setShowProfileDrawer(false); router.push('/filters'); }}
         colors={colors}
       />
+      <MovieDetailsModal
+        visible={showDetailsModal}
+        onClose={() => setShowDetailsModal(false)}
+        movieId={selectedMovieId}
+        colors={colors}
+      />
     </SafeAreaView>
   );
 }
@@ -864,6 +1108,10 @@ const styles = StyleSheet.create({
   card: { position: 'absolute', width: CARD_WIDTH, height: CARD_HEIGHT, borderRadius: BORDER_RADIUS.xl, overflow: 'hidden', backgroundColor: '#1E1E1E' },
   cardBehind: { transform: [{ scale: 0.95 }], opacity: 0.7 },
   poster: { width: '100%', height: '100%' },
+  infoBtn: {
+    position: 'absolute', top: 12, right: 12, width: 44, height: 44,
+    borderRadius: 22, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center',
+  },
   stamp: { position: 'absolute', top: 40, paddingHorizontal: 16, paddingVertical: 8, borderWidth: 4, borderRadius: 8 },
   likeStamp: { right: 20, transform: [{ rotate: '15deg' }] },
   nopeStamp: { left: 20, borderColor: '#FF6B6B', transform: [{ rotate: '-15deg' }] },
@@ -876,8 +1124,9 @@ const styles = StyleSheet.create({
   ratingBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(255,215,0,0.15)', paddingHorizontal: 8, paddingVertical: 3, borderRadius: BORDER_RADIUS.s },
   ratingText: { fontSize: 14, color: '#FFD700', fontWeight: '600' },
   genres: { fontSize: 13, color: '#757575' },
-  actionsContainer: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: SPACING.xl, paddingVertical: SPACING.m },
+  actionsContainer: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: SPACING.l, paddingVertical: SPACING.m },
   actionBtn: { width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center', borderWidth: 2 },
+  infoActionBtn: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', borderWidth: 2 },
   instructionsContainer: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: SPACING.xxl, paddingBottom: SPACING.m },
   instructionItem: { flexDirection: 'row', alignItems: 'center', gap: SPACING.xs },
   instructionText: { fontSize: 12 },

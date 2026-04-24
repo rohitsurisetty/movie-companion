@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -28,6 +28,7 @@ type SelectionConfig = {
   multiSelect: boolean;
   displayAs: 'chips' | 'tiles' | 'list';
   field: keyof ProfileData;
+  optional?: boolean;
 };
 
 const SELECTION_CONFIGS: Record<number, SelectionConfig> = {
@@ -39,8 +40,10 @@ const SELECTION_CONFIGS: Record<number, SelectionConfig> = {
   },
   2: {
     title: 'Who do you want to meet?',
+    subtitle: 'Optional - Skip if you prefer not to say',
     options: ['Men', 'Women', 'Anyone'],
     multiSelect: false, displayAs: 'chips', field: 'partnerPreference',
+    optional: true,
   },
   3: {
     title: 'Languages you speak',
@@ -99,16 +102,30 @@ export default function OnboardingScreen() {
     router.replace('/success');
   };
 
+  // Fixed validation function that properly handles back navigation
   const isSelectionValid = (stepIdx: number): boolean => {
     const config = SELECTION_CONFIGS[stepIdx];
     if (!config) return true;
+    
+    // If step is marked as optional, always return true
+    if (config.optional) return true;
+    
     const val = data[config.field];
-    if (config.multiSelect) return Array.isArray(val) && val.length > 0;
-    return !!val;
+    
+    if (config.multiSelect) {
+      return Array.isArray(val) && val.length > 0;
+    }
+    
+    // For single select, check if value exists and is not empty
+    return val !== undefined && val !== null && val !== '';
   };
 
   const STEPS_WITH_OWN_BUTTON = [0, 8, 9, 10, 11];
   const showSharedButton = !STEPS_WITH_OWN_BUTTON.includes(step);
+
+  // Check if current step has a skip option
+  const currentConfig = SELECTION_CONFIGS[step];
+  const canSkip = currentConfig?.optional || false;
 
   const renderStep = () => {
     if (step === 0) {
@@ -177,10 +194,23 @@ export default function OnboardingScreen() {
       {/* Shared Continue Button (for selection steps 1-7) */}
       {showSharedButton && (
         <View style={styles.footer}>
+          {canSkip && (
+            <TouchableOpacity
+              style={styles.skipBtn}
+              onPress={handleNext}
+              testID="onboarding-skip-btn"
+            >
+              <Text style={styles.skipBtnText}>Skip</Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity
-            style={[styles.continueBtn, !isSelectionValid(step) && styles.continueBtnDisabled]}
+            style={[
+              styles.continueBtn, 
+              canSkip && styles.continueBtnWithSkip,
+              !isSelectionValid(step) && !canSkip && styles.continueBtnDisabled
+            ]}
             onPress={handleNext}
-            disabled={!isSelectionValid(step)}
+            disabled={!isSelectionValid(step) && !canSkip}
             testID="onboarding-continue-btn"
           >
             <Text style={styles.continueBtnText}>Continue</Text>
@@ -209,10 +239,28 @@ const styles = StyleSheet.create({
     height: '100%', backgroundColor: COLORS.primary, borderRadius: 2,
   },
   content: { flex: 1, paddingHorizontal: SPACING.l },
-  footer: { paddingHorizontal: SPACING.l, paddingBottom: SPACING.m },
+  footer: { 
+    flexDirection: 'row', 
+    paddingHorizontal: SPACING.l, 
+    paddingBottom: SPACING.m,
+    gap: SPACING.m,
+  },
+  skipBtn: {
+    flex: 1,
+    borderWidth: 1.5,
+    borderColor: COLORS.border,
+    paddingVertical: 16,
+    borderRadius: BORDER_RADIUS.full,
+    alignItems: 'center',
+  },
+  skipBtnText: { fontSize: 16, fontWeight: '600', color: COLORS.textSecondary },
   continueBtn: {
+    flex: 1,
     backgroundColor: COLORS.primary, paddingVertical: 16, borderRadius: BORDER_RADIUS.full,
     alignItems: 'center',
+  },
+  continueBtnWithSkip: {
+    flex: 2,
   },
   continueBtnDisabled: { opacity: 0.4 },
   continueBtnText: { fontSize: 16, fontWeight: 'bold', color: COLORS.white, letterSpacing: 1 },

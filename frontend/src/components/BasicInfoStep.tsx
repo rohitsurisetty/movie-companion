@@ -2,7 +2,6 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, Modal,
   ScrollView, Alert, ActivityIndicator, Platform, KeyboardAvoidingView,
-  FlatList,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
@@ -39,75 +38,6 @@ const getMaxDays = (month: number, year: number): number => {
   return 31;
 };
 
-// Inline Scroll Picker Component
-function InlineScrollPicker({ 
-  data, 
-  selectedValue, 
-  onSelect, 
-  label,
-  renderItem,
-  itemWidth = 60,
-}: {
-  data: any[];
-  selectedValue: any;
-  onSelect: (val: any) => void;
-  label: string;
-  renderItem: (item: any, isSelected: boolean) => React.ReactNode;
-  itemWidth?: number;
-}) {
-  const scrollRef = useRef<ScrollView>(null);
-  const selectedIndex = data.findIndex(item => 
-    typeof item === 'object' ? item.value === selectedValue : item === selectedValue
-  );
-
-  useEffect(() => {
-    if (scrollRef.current && selectedIndex >= 0) {
-      setTimeout(() => {
-        scrollRef.current?.scrollTo({ x: selectedIndex * itemWidth - 60, animated: false });
-      }, 100);
-    }
-  }, []);
-
-  return (
-    <View style={pickerStyles.container}>
-      <Text style={pickerStyles.label}>{label}</Text>
-      <ScrollView
-        ref={scrollRef}
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={pickerStyles.scrollContent}
-        snapToInterval={itemWidth}
-        decelerationRate="fast"
-      >
-        {data.map((item, index) => {
-          const value = typeof item === 'object' ? item.value : item;
-          const isSelected = value === selectedValue;
-          return (
-            <TouchableOpacity
-              key={index}
-              style={[pickerStyles.item, { width: itemWidth }, isSelected && pickerStyles.itemSelected]}
-              onPress={() => onSelect(value)}
-            >
-              {renderItem(item, isSelected)}
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
-    </View>
-  );
-}
-
-const pickerStyles = StyleSheet.create({
-  container: { marginBottom: SPACING.m },
-  label: { fontSize: 12, color: COLORS.textMuted, marginBottom: SPACING.xs, textAlign: 'center' },
-  scrollContent: { paddingHorizontal: SPACING.m },
-  item: {
-    height: 48, alignItems: 'center', justifyContent: 'center',
-    borderRadius: BORDER_RADIUS.m, marginHorizontal: 4,
-  },
-  itemSelected: { backgroundColor: COLORS.primary },
-});
-
 type Props = {
   data: ProfileData;
   onUpdate: (field: string, value: any) => void;
@@ -117,8 +47,6 @@ type Props = {
 export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
   const [showGenderPicker, setShowGenderPicker] = useState(false);
   const [showIdentityPicker, setShowIdentityPicker] = useState(false);
-  const [showAgeConfirm, setShowAgeConfirm] = useState(false);
-  const [ageConfirmed, setAgeConfirmed] = useState(!!data.age && data.age >= 18);
   const [underAge, setUnderAge] = useState(false);
   const [calculatedAge, setCalculatedAge] = useState(data.age || 0);
   const [dateError, setDateError] = useState('');
@@ -126,28 +54,66 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
   const [predictions, setPredictions] = useState<any[]>([]);
   const [searchingLocation, setSearchingLocation] = useState(false);
   const [gettingCurrentLoc, setGettingCurrentLoc] = useState(false);
+  const [ageConfirmed, setAgeConfirmed] = useState(!!data.age && data.age >= 18);
 
   const showsGenderIdentity = data.gender === 'Non-binary' || data.gender === 'Other';
 
-  // Selected DOB values
-  const [selectedDay, setSelectedDay] = useState(data.dobDay ? parseInt(data.dobDay) : 15);
-  const [selectedMonth, setSelectedMonth] = useState(data.dobMonth ? parseInt(data.dobMonth) : 6);
-  const [selectedYear, setSelectedYear] = useState(data.dobYear ? parseInt(data.dobYear) : currentYear - 25);
+  // Selected DOB values - initialize from data if available
+  const [selectedDay, setSelectedDay] = useState(
+    data.dobDay ? parseInt(data.dobDay) : 15
+  );
+  const [selectedMonth, setSelectedMonth] = useState(
+    data.dobMonth ? parseInt(data.dobMonth) : 6
+  );
+  const [selectedYear, setSelectedYear] = useState(
+    data.dobYear ? parseInt(data.dobYear) : currentYear - 25
+  );
+
+  // Refs for scroll views
+  const dayScrollRef = useRef<ScrollView>(null);
+  const monthScrollRef = useRef<ScrollView>(null);
+  const yearScrollRef = useRef<ScrollView>(null);
+
+  // Scroll to selected items on mount
+  useEffect(() => {
+    const itemHeight = 44;
+    setTimeout(() => {
+      dayScrollRef.current?.scrollTo({ y: (selectedDay - 1) * itemHeight - 50, animated: false });
+      monthScrollRef.current?.scrollTo({ y: (selectedMonth - 1) * itemHeight - 50, animated: false });
+      const yearIndex = YEARS.indexOf(selectedYear);
+      if (yearIndex >= 0) {
+        yearScrollRef.current?.scrollTo({ y: yearIndex * itemHeight - 50, animated: false });
+      }
+    }, 100);
+  }, []);
+
+  // Re-validate on mount if we have existing data (for back navigation)
+  useEffect(() => {
+    if (data.dobDay && data.dobMonth && data.dobYear) {
+      const day = parseInt(data.dobDay);
+      const month = parseInt(data.dobMonth);
+      const year = parseInt(data.dobYear);
+      validateAndSetDate(day, month, year, false);
+    }
+  }, []);
 
   // Validate date and calculate age
-  const validateAndSetDate = useCallback((day: number, month: number, year: number) => {
+  const validateAndSetDate = useCallback((day: number, month: number, year: number, updateData: boolean = true) => {
     const maxDays = getMaxDays(month, year);
     
+    // Auto-adjust day if it exceeds max days for the month
+    let adjustedDay = day;
     if (day > maxDays) {
-      setDateError(`${MONTHS[month - 1].full} ${year} has only ${maxDays} days`);
-      return false;
+      adjustedDay = maxDays;
+      setSelectedDay(adjustedDay);
     }
     
+    // Clear any previous error - no red highlight after correction
     setDateError('');
     
     // Calculate age
     const today = new Date();
-    const birthDate = new Date(year, month - 1, day);
+    const birthDate = new Date(year, month - 1, adjustedDay);
     let age = today.getFullYear() - birthDate.getFullYear();
     const monthDiff = today.getMonth() - birthDate.getMonth();
     if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
@@ -157,13 +123,17 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
     if (age >= 18 && age < 120) {
       setCalculatedAge(age);
       setAgeConfirmed(true);
-      onUpdate('age', age);
-      onUpdate('dobDay', String(day).padStart(2, '0'));
-      onUpdate('dobMonth', String(month).padStart(2, '0'));
-      onUpdate('dobYear', String(year));
+      setUnderAge(false);
+      if (updateData) {
+        onUpdate('age', age);
+        onUpdate('dobDay', String(adjustedDay).padStart(2, '0'));
+        onUpdate('dobMonth', String(month).padStart(2, '0'));
+        onUpdate('dobYear', String(year));
+      }
       return true;
     } else if (age < 18) {
       setUnderAge(true);
+      setAgeConfirmed(false);
       return false;
     }
     return false;
@@ -176,10 +146,12 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
 
   const handleMonthChange = (month: number) => {
     setSelectedMonth(month);
-    // Auto-adjust day if needed
+    // Auto-adjust day if needed for the new month
     const maxDays = getMaxDays(month, selectedYear);
     const adjustedDay = Math.min(selectedDay, maxDays);
-    setSelectedDay(adjustedDay);
+    if (adjustedDay !== selectedDay) {
+      setSelectedDay(adjustedDay);
+    }
     validateAndSetDate(adjustedDay, month, selectedYear);
   };
 
@@ -188,7 +160,9 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
     // Auto-adjust day if needed (for Feb 29)
     const maxDays = getMaxDays(selectedMonth, year);
     const adjustedDay = Math.min(selectedDay, maxDays);
-    setSelectedDay(adjustedDay);
+    if (adjustedDay !== selectedDay) {
+      setSelectedDay(adjustedDay);
+    }
     validateAndSetDate(adjustedDay, selectedMonth, year);
   };
 
@@ -300,30 +274,53 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
         )}
 
         <Text style={styles.label}>Date of Birth *</Text>
-        <View style={[styles.dobContainer, dateError && styles.dobContainerError]}>
+        <View style={styles.dobContainer}>
           <View style={styles.dobScrollRow}>
             {/* Day Picker */}
             <View style={styles.dobColumn}>
               <Text style={styles.dobLabel}>Day</Text>
-              <ScrollView style={styles.dobScroll} showsVerticalScrollIndicator={false} nestedScrollEnabled>
-                {DAYS.map(d => (
-                  <TouchableOpacity
-                    key={d}
-                    style={[styles.dobItem, selectedDay === d && styles.dobItemSelected]}
-                    onPress={() => handleDayChange(d)}
-                  >
-                    <Text style={[styles.dobItemText, selectedDay === d && styles.dobItemTextSelected]}>
-                      {String(d).padStart(2, '0')}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+              <ScrollView 
+                ref={dayScrollRef}
+                style={styles.dobScroll} 
+                showsVerticalScrollIndicator={false} 
+                nestedScrollEnabled
+              >
+                {DAYS.map(d => {
+                  const maxDays = getMaxDays(selectedMonth, selectedYear);
+                  const isDisabled = d > maxDays;
+                  return (
+                    <TouchableOpacity
+                      key={d}
+                      style={[
+                        styles.dobItem, 
+                        selectedDay === d && styles.dobItemSelected,
+                        isDisabled && styles.dobItemDisabled
+                      ]}
+                      onPress={() => !isDisabled && handleDayChange(d)}
+                      disabled={isDisabled}
+                    >
+                      <Text style={[
+                        styles.dobItemText, 
+                        selectedDay === d && styles.dobItemTextSelected,
+                        isDisabled && styles.dobItemTextDisabled
+                      ]}>
+                        {String(d).padStart(2, '0')}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
               </ScrollView>
             </View>
 
             {/* Month Picker */}
             <View style={[styles.dobColumn, styles.dobColumnWide]}>
               <Text style={styles.dobLabel}>Month</Text>
-              <ScrollView style={styles.dobScroll} showsVerticalScrollIndicator={false} nestedScrollEnabled>
+              <ScrollView 
+                ref={monthScrollRef}
+                style={styles.dobScroll} 
+                showsVerticalScrollIndicator={false} 
+                nestedScrollEnabled
+              >
                 {MONTHS.map(m => (
                   <TouchableOpacity
                     key={m.value}
@@ -341,7 +338,12 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
             {/* Year Picker */}
             <View style={styles.dobColumn}>
               <Text style={styles.dobLabel}>Year</Text>
-              <ScrollView style={styles.dobScroll} showsVerticalScrollIndicator={false} nestedScrollEnabled>
+              <ScrollView 
+                ref={yearScrollRef}
+                style={styles.dobScroll} 
+                showsVerticalScrollIndicator={false} 
+                nestedScrollEnabled
+              >
                 {YEARS.map(y => (
                   <TouchableOpacity
                     key={y}
@@ -356,11 +358,16 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
               </ScrollView>
             </View>
           </View>
+
+          {/* Selected date display */}
+          <View style={styles.selectedDateDisplay}>
+            <Text style={styles.selectedDateText}>
+              {String(selectedDay).padStart(2, '0')} {MONTHS[selectedMonth - 1]?.full} {selectedYear}
+            </Text>
+          </View>
         </View>
 
-        {dateError ? (
-          <Text style={styles.dateError}>{dateError}</Text>
-        ) : ageConfirmed && (
+        {ageConfirmed && (
           <View style={styles.ageConfirmedBadge}>
             <Ionicons name="checkmark-circle" size={18} color={COLORS.success} />
             <Text style={styles.ageConfirmedText}>Age verified: {calculatedAge} years old</Text>
@@ -484,19 +491,24 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.bgCard, borderRadius: BORDER_RADIUS.l, padding: SPACING.m,
     borderWidth: 1, borderColor: COLORS.border,
   },
-  dobContainerError: { borderColor: COLORS.error, borderWidth: 2 },
   dobScrollRow: { flexDirection: 'row', gap: SPACING.s },
   dobColumn: { flex: 1 },
   dobColumnWide: { flex: 1.3 },
-  dobLabel: { fontSize: 11, color: COLORS.textMuted, textAlign: 'center', marginBottom: SPACING.xs },
-  dobScroll: { height: 150 },
+  dobLabel: { fontSize: 12, color: COLORS.textMuted, textAlign: 'center', marginBottom: SPACING.xs, fontWeight: '600' },
+  dobScroll: { height: 160 },
   dobItem: {
-    paddingVertical: 10, alignItems: 'center', borderRadius: BORDER_RADIUS.s, marginVertical: 2,
+    height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: BORDER_RADIUS.s, marginVertical: 2,
   },
   dobItemSelected: { backgroundColor: COLORS.primary },
+  dobItemDisabled: { opacity: 0.3 },
   dobItemText: { fontSize: 16, color: COLORS.textSecondary },
   dobItemTextSelected: { color: COLORS.white, fontWeight: '600' },
-  dateError: { fontSize: 13, color: COLORS.error, marginTop: SPACING.s },
+  dobItemTextDisabled: { color: COLORS.textMuted },
+  selectedDateDisplay: {
+    marginTop: SPACING.m, paddingTop: SPACING.m, borderTopWidth: 1, borderTopColor: COLORS.border,
+    alignItems: 'center',
+  },
+  selectedDateText: { fontSize: 18, fontWeight: 'bold', color: COLORS.gold },
   ageConfirmedBadge: {
     flexDirection: 'row', alignItems: 'center', gap: SPACING.s, marginTop: SPACING.m,
     backgroundColor: 'rgba(76,175,80,0.1)', padding: SPACING.m, borderRadius: BORDER_RADIUS.m,

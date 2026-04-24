@@ -214,3 +214,38 @@ agent_communication:
       
       Backend logs confirm TMDB integration working correctly. All tests pass 5/5.
       Both APIs are production-ready and working as expected.
+  - agent: "main"
+    message: |
+      UI FIXES IMPLEMENTED (7 Issues):
+      
+      1. DOB Embedded Scrollable in BasicInfoStep.tsx:
+         - Replaced popup with true 3-column embedded wheel picker (Day/Month/Year)
+         - Added leap year validation - auto-adjusts Feb 29 when changing year
+         - Disabled invalid day options (e.g., 31 for Apr, Jun, Sep, Nov)
+         - Removed red highlight on error - now auto-corrects
+         - Shows selected date at bottom in gold color
+         - Added scroll refs to auto-scroll to selected values
+      
+      2. Continue Button Bug Fixed in onboarding.tsx:
+         - Fixed validation logic that was causing disabled state when going back
+         - Added proper handling for empty string values
+         - Made "Want to Meet" step (step 2) optional with skip button
+      
+      3. Height Embedded Scrollable (already in OptionalProfileStep.tsx):
+         - Verified embedded scrollable implementation is correct
+      
+      4. Filters Page Overhaul in filters.tsx:
+         - Fixed draggable sliders for distance (shows "Upto X kms" / "Infinite distance")
+         - Fixed dual-thumb age range slider (shows "X - Y years")
+         - Replaced horizontal scroll pickers with embedded vertical scrollable for height
+         - Added 'i' info buttons to Exclusive and Expand checkboxes with tooltip modals
+         - Added 'i' info buttons to Distance, Age, Height sections
+         - Moved "Let's Start" button below the section header (not top right)
+      
+      5. Movie Card 'i' Button in swipe.tsx:
+         - Added info button on movie card (top right corner)
+         - Added info button in action buttons row
+         - Created MovieDetailsModal showing synopsis, cast (with character names), directors, runtime, genres
+         - Fetches details from /api/tmdb/movie/{id} endpoint
+      
+      All fixes are implemented. Ready for user testing.
