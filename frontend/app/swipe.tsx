@@ -16,9 +16,9 @@ import {
   LEFT_SWIPE_REASONS, RIGHT_SWIPE_REASONS,
 } from '../src/theme';
 import {
-  FeedMovie, SwipeState, SwipeRecord, initialSwipeState, TMDB_GENRE_MAP,
+  FeedMovie, SwipeState, SwipeRecord, initialSwipeState, TMDB_GENRE_MAP, ProfileData,
 } from '../src/types';
-import { saveSwipeState, getSwipeState, getFilters, getProfile, saveMode, getMode, AppMode } from '../src/store';
+import { saveSwipeState, getSwipeState, getFilters, getProfile, saveMode, getMode, AppMode, clearAll } from '../src/store';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const CARD_WIDTH = SCREEN_WIDTH * 0.88;
@@ -281,6 +281,148 @@ const drawerStyles = StyleSheet.create({
   modeDesc: { fontSize: 13 },
 });
 
+// Profile Drawer Component
+function ProfileDrawer({
+  visible, onClose, onLogout, colors,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onLogout: () => void;
+  colors: ReturnType<typeof getThemeColors>;
+}) {
+  const [profile, setProfile] = useState<ProfileData | null>(null);
+
+  useEffect(() => {
+    if (visible) {
+      getProfile().then(setProfile);
+    }
+  }, [visible]);
+
+  const topMovies = profile?.topMovies || [];
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={profileStyles.overlay} onPress={onClose}>
+        <Pressable style={[profileStyles.container, { backgroundColor: colors.bgCard }]} onPress={(e) => e.stopPropagation()}>
+          <View style={profileStyles.handle} />
+          
+          {/* Header */}
+          <View style={profileStyles.header}>
+            <View style={[profileStyles.avatarCircle, { backgroundColor: colors.primary }]}>
+              <Ionicons name="person" size={32} color="#FFF" />
+            </View>
+            <View style={profileStyles.headerInfo}>
+              <Text style={[profileStyles.name, { color: colors.text }]}>{profile?.name || 'User'}</Text>
+              <Text style={[profileStyles.subInfo, { color: colors.textSecondary }]}>
+                {profile?.age ? `${profile.age} years` : ''}{profile?.location ? ` • ${profile.location}` : ''}
+              </Text>
+            </View>
+          </View>
+
+          {/* Profile Details */}
+          <ScrollView style={profileStyles.scroll} showsVerticalScrollIndicator={false}>
+            {profile?.genres && profile.genres.length > 0 && (
+              <View style={profileStyles.section}>
+                <Text style={[profileStyles.sectionTitle, { color: colors.textSecondary }]}>Favourite Genres</Text>
+                <View style={profileStyles.tagsRow}>
+                  {profile.genres.slice(0, 5).map((genre, i) => (
+                    <View key={i} style={[profileStyles.tag, { borderColor: colors.border }]}>
+                      <Text style={[profileStyles.tagText, { color: colors.text }]}>{genre}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            )}
+
+            {/* Top 5 Movies */}
+            {topMovies.length > 0 && (
+              <View style={profileStyles.section}>
+                <Text style={[profileStyles.sectionTitle, { color: colors.textSecondary }]}>Your Top 5 Movies</Text>
+                <View style={profileStyles.moviesGrid}>
+                  {topMovies.map((movie, i) => (
+                    <View key={i} style={profileStyles.movieItem}>
+                      <Image 
+                        source={{ uri: `https://image.tmdb.org/t/p/w200${movie.poster_path}` }}
+                        style={profileStyles.moviePoster}
+                        resizeMode="cover"
+                      />
+                      <Text style={[profileStyles.movieTitle, { color: colors.text }]} numberOfLines={2}>{movie.title}</Text>
+                      <View style={profileStyles.movieRating}>
+                        <Ionicons name="star" size={12} color={colors.gold} />
+                        <Text style={[profileStyles.ratingText, { color: colors.gold }]}>{movie.rating}</Text>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            )}
+
+            {/* Other Profile Info */}
+            {(profile?.ottTheatre || profile?.movieFrequency) && (
+              <View style={profileStyles.section}>
+                <Text style={[profileStyles.sectionTitle, { color: colors.textSecondary }]}>Preferences</Text>
+                {profile?.ottTheatre && (
+                  <View style={profileStyles.infoRow}>
+                    <Ionicons name="tv-outline" size={18} color={colors.textMuted} />
+                    <Text style={[profileStyles.infoText, { color: colors.text }]}>{profile.ottTheatre}</Text>
+                  </View>
+                )}
+                {profile?.movieFrequency && (
+                  <View style={profileStyles.infoRow}>
+                    <Ionicons name="time-outline" size={18} color={colors.textMuted} />
+                    <Text style={[profileStyles.infoText, { color: colors.text }]}>{profile.movieFrequency}</Text>
+                  </View>
+                )}
+              </View>
+            )}
+          </ScrollView>
+
+          {/* Logout Button */}
+          <TouchableOpacity
+            style={[profileStyles.logoutBtn, { borderColor: '#FF6B6B' }]}
+            onPress={onLogout}
+            testID="logout-btn"
+            activeOpacity={0.7}
+          >
+            <Ionicons name="log-out-outline" size={20} color="#FF6B6B" />
+            <Text style={profileStyles.logoutText}>Logout & Start Over</Text>
+          </TouchableOpacity>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+const profileStyles = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  container: { borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: SPACING.l, paddingBottom: SPACING.xxl, maxHeight: '85%' },
+  handle: { width: 40, height: 4, backgroundColor: '#555', borderRadius: 2, alignSelf: 'center', marginBottom: SPACING.l },
+  header: { flexDirection: 'row', alignItems: 'center', marginBottom: SPACING.l },
+  avatarCircle: { width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center', marginRight: SPACING.m },
+  headerInfo: { flex: 1 },
+  name: { fontSize: 22, fontWeight: 'bold', marginBottom: 2 },
+  subInfo: { fontSize: 14 },
+  scroll: { maxHeight: 400 },
+  section: { marginBottom: SPACING.l },
+  sectionTitle: { fontSize: 13, fontWeight: '600', marginBottom: SPACING.s, textTransform: 'uppercase', letterSpacing: 1 },
+  tagsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.s },
+  tag: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: BORDER_RADIUS.full, borderWidth: 1 },
+  tagText: { fontSize: 13 },
+  moviesGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.s },
+  movieItem: { width: 80, alignItems: 'center' },
+  moviePoster: { width: 70, height: 100, borderRadius: BORDER_RADIUS.s, marginBottom: 4 },
+  movieTitle: { fontSize: 10, textAlign: 'center', marginBottom: 2 },
+  movieRating: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  ratingText: { fontSize: 11, fontWeight: '600' },
+  infoRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.s, marginBottom: SPACING.s },
+  infoText: { fontSize: 14 },
+  logoutBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SPACING.s,
+    paddingVertical: 14, borderRadius: BORDER_RADIUS.full, borderWidth: 2, marginTop: SPACING.m,
+  },
+  logoutText: { fontSize: 16, fontWeight: '600', color: '#FF6B6B' },
+});
+
 const modalStyles = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center', padding: SPACING.l },
   container: { borderRadius: BORDER_RADIUS.xl, padding: SPACING.l, width: '100%', maxWidth: 360, maxHeight: '85%' },
@@ -409,6 +551,7 @@ export default function SwipeScreen() {
   const [showRatingModal, setShowRatingModal] = useState(false);
   const [showLeftModal, setShowLeftModal] = useState(false);
   const [showModeDrawer, setShowModeDrawer] = useState(false);
+  const [showProfileDrawer, setShowProfileDrawer] = useState(false);
   const [pendingMovie, setPendingMovie] = useState<FeedMovie | null>(null);
   const [page, setPage] = useState(1);
   const [mode, setMode] = useState<AppMode>('date');
@@ -430,6 +573,12 @@ export default function SwipeScreen() {
   const handleModeChange = async (newMode: AppMode) => {
     setMode(newMode);
     await saveMode(newMode);
+  };
+
+  const handleLogout = async () => {
+    await clearAll();
+    setShowProfileDrawer(false);
+    router.replace('/');
   };
 
   // Fetch movie feed
@@ -560,14 +709,20 @@ export default function SwipeScreen() {
         <View style={styles.headerCenter}>
           <Ionicons name={colors.modeIcon} size={22} color={colors.primary} />
           <Text style={[styles.headerTitle, { color: colors.text }]}>{colors.modeName}</Text>
-        </View>
-        <View style={styles.headerRight}>
           {!isProfileComplete && (
             <View style={[styles.counterBadge, dynamicStyles.counterBadge]}>
               <Text style={styles.counterText}>{remainingSwipes}</Text>
             </View>
           )}
         </View>
+        <TouchableOpacity
+          style={styles.profileBtn}
+          onPress={() => setShowProfileDrawer(true)}
+          testID="profile-btn"
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Ionicons name="person-circle-outline" size={28} color={colors.text} />
+        </TouchableOpacity>
       </View>
 
       {/* Progress indicator */}
@@ -666,6 +821,12 @@ export default function SwipeScreen() {
         onModeChange={handleModeChange}
         colors={colors}
       />
+      <ProfileDrawer
+        visible={showProfileDrawer}
+        onClose={() => setShowProfileDrawer(false)}
+        onLogout={handleLogout}
+        colors={colors}
+      />
     </SafeAreaView>
   );
 }
@@ -676,10 +837,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.m, paddingVertical: SPACING.s, borderBottomWidth: 1,
   },
   menuBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  profileBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   headerCenter: { flexDirection: 'row', alignItems: 'center', gap: SPACING.s },
   headerTitle: { fontSize: 18, fontWeight: 'bold' },
   headerRight: { width: 44, alignItems: 'flex-end' },
-  counterBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: BORDER_RADIUS.full, minWidth: 32, alignItems: 'center' },
+  counterBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: BORDER_RADIUS.full, minWidth: 32, alignItems: 'center', marginLeft: SPACING.s },
   counterText: { fontSize: 14, fontWeight: 'bold', color: '#FFF' },
   progressContainer: { paddingHorizontal: SPACING.l, paddingVertical: SPACING.m },
   progressText: { fontSize: 13, textAlign: 'center', marginBottom: SPACING.s },
