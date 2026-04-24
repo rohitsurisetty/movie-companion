@@ -451,13 +451,25 @@ export default function FiltersScreen() {
   return (
     <SafeAreaView style={styles.container} testID="filters-screen">
       <View style={styles.headerBar}>
-        <Ionicons name="options-outline" size={24} color={COLORS.gold} />
-        <Text style={styles.headerTitle}>Preferences & Filters</Text>
+        <View style={styles.headerLeft}>
+          <Ionicons name="options-outline" size={24} color={COLORS.gold} />
+          <Text style={styles.headerTitle}>Preferences & Filters</Text>
+          <Text style={styles.optionalLabel}>(Optional)</Text>
+        </View>
+        <TouchableOpacity
+          style={styles.startBtnTop}
+          onPress={handleStart}
+          testID="filters-start-btn-top"
+          activeOpacity={0.8}
+        >
+          <Text style={styles.startBtnTopText}>Let's Start</Text>
+          <Ionicons name="arrow-forward" size={16} color={COLORS.white} />
+        </TouchableOpacity>
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <Text style={styles.intro}>
-          Set your preferences to find the perfect movie companions.
+          Set your preferences to find the perfect movie companions. These are all optional and can be changed later.
         </Text>
 
         {/* Distance */}
@@ -605,11 +617,19 @@ export default function FiltersScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
   headerBar: {
-    flexDirection: 'row', alignItems: 'center', gap: SPACING.s,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: SPACING.l, paddingVertical: SPACING.m,
     borderBottomWidth: 1, borderBottomColor: COLORS.border,
   },
-  headerTitle: { fontSize: 22, fontWeight: 'bold', color: COLORS.text },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: SPACING.s },
+  headerTitle: { fontSize: 18, fontWeight: 'bold', color: COLORS.text },
+  optionalLabel: { fontSize: 12, color: COLORS.textMuted, fontStyle: 'italic' },
+  startBtnTop: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: COLORS.primary, paddingHorizontal: 16, paddingVertical: 8,
+    borderRadius: BORDER_RADIUS.full,
+  },
+  startBtnTopText: { fontSize: 14, fontWeight: '600', color: COLORS.white },
   scroll: { flex: 1 },
   scrollContent: { padding: SPACING.l, paddingBottom: SPACING.xxl },
   intro: { fontSize: 15, color: COLORS.textSecondary, marginBottom: SPACING.l, lineHeight: 22 },

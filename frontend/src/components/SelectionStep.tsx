@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, BORDER_RADIUS } from '../theme';
 
@@ -10,10 +10,35 @@ type Props = {
   selected: string | string[];
   onSelect: (value: any) => void;
   multiSelect: boolean;
-  displayAs: 'chips' | 'tiles' | 'list';
+  displayAs: 'chips' | 'tiles' | 'list' | 'language-tiles';
+  showOthersInput?: boolean;
+  othersValue?: string;
+  onOthersChange?: (value: string) => void;
 };
 
-export default function SelectionStep({ title, subtitle, options, selected, onSelect, multiSelect, displayAs }: Props) {
+// Language code mappings for tiles
+const LANGUAGE_LETTERS: Record<string, string> = {
+  'Hindi': 'हि',
+  'English': 'En',
+  'Telugu': 'తె',
+  'Tamil': 'த',
+  'Malayalam': 'മ',
+  'Kannada': 'ಕ',
+  'Korean': '한',
+  'Japanese': '日',
+  'Spanish': 'Es',
+  'French': 'Fr',
+  'German': 'De',
+  'Chinese': '中',
+  'Others': '...',
+};
+
+export default function SelectionStep({ 
+  title, subtitle, options, selected, onSelect, multiSelect, displayAs,
+  showOthersInput, othersValue, onOthersChange 
+}: Props) {
+  const [customLanguage, setCustomLanguage] = useState(othersValue || '');
+
   const isSelected = (opt: string) => {
     if (multiSelect) return (selected as string[]).includes(opt);
     return selected === opt;
@@ -26,6 +51,11 @@ export default function SelectionStep({ title, subtitle, options, selected, onSe
     } else {
       onSelect(opt);
     }
+  };
+
+  const handleCustomLanguageChange = (text: string) => {
+    setCustomLanguage(text);
+    if (onOthersChange) onOthersChange(text);
   };
 
   const renderChips = () => (
@@ -71,6 +101,51 @@ export default function SelectionStep({ title, subtitle, options, selected, onSe
     </View>
   );
 
+  // New language tiles with letter symbols
+  const renderLanguageTiles = () => {
+    const othersSelected = isSelected('Others');
+    
+    return (
+      <>
+        <View style={styles.languageTilesContainer}>
+          {options.map(opt => (
+            <TouchableOpacity
+              key={opt}
+              style={[styles.languageTile, isSelected(opt) && styles.languageTileActive]}
+              onPress={() => toggle(opt)}
+              testID={`lang-tile-${opt.toLowerCase().replace(/\s+/g, '-')}`}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.letterCircle, isSelected(opt) && styles.letterCircleActive]}>
+                <Text style={[styles.letterText, isSelected(opt) && styles.letterTextActive]}>
+                  {LANGUAGE_LETTERS[opt] || opt.charAt(0).toUpperCase()}
+                </Text>
+              </View>
+              <Text style={[styles.languageName, isSelected(opt) && styles.languageNameActive]}>
+                {opt}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        
+        {/* Others input field */}
+        {othersSelected && showOthersInput && (
+          <View style={styles.othersInputContainer}>
+            <Text style={styles.othersLabel}>Enter other language(s):</Text>
+            <TextInput
+              style={styles.othersInput}
+              placeholder="e.g., Portuguese, Italian"
+              placeholderTextColor={COLORS.textMuted}
+              value={customLanguage}
+              onChangeText={handleCustomLanguageChange}
+              testID="others-language-input"
+            />
+          </View>
+        )}
+      </>
+    );
+  };
+
   const renderList = () => (
     <View style={styles.listContainer}>
       {options.map(opt => (
@@ -94,6 +169,7 @@ export default function SelectionStep({ title, subtitle, options, selected, onSe
       {subtitle && <Text style={styles.subtitle}>{subtitle}</Text>}
       {displayAs === 'chips' && renderChips()}
       {displayAs === 'tiles' && renderTiles()}
+      {displayAs === 'language-tiles' && renderLanguageTiles()}
       {displayAs === 'list' && renderList()}
     </ScrollView>
   );
@@ -124,6 +200,37 @@ const styles = StyleSheet.create({
   tileActive: { borderColor: COLORS.gold, backgroundColor: 'rgba(255,215,0,0.08)' },
   tileText: { fontSize: 14, color: COLORS.textSecondary, fontWeight: '600' },
   tileTextActive: { color: COLORS.gold },
+  // Language tiles styles
+  languageTilesContainer: { 
+    flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.m,
+    justifyContent: 'flex-start',
+  },
+  languageTile: {
+    width: '30%', aspectRatio: 0.85, borderRadius: BORDER_RADIUS.l,
+    backgroundColor: COLORS.bgCard, borderWidth: 2, borderColor: COLORS.border,
+    alignItems: 'center', justifyContent: 'center', paddingVertical: SPACING.m,
+  },
+  languageTileActive: { borderColor: COLORS.gold, backgroundColor: 'rgba(255,215,0,0.08)' },
+  letterCircle: {
+    width: 48, height: 48, borderRadius: 24, 
+    backgroundColor: COLORS.bgInput, alignItems: 'center', justifyContent: 'center',
+    marginBottom: SPACING.s,
+  },
+  letterCircleActive: { backgroundColor: COLORS.gold },
+  letterText: { fontSize: 18, fontWeight: 'bold', color: COLORS.textSecondary },
+  letterTextActive: { color: COLORS.black },
+  languageName: { fontSize: 12, color: COLORS.textSecondary, fontWeight: '600', textAlign: 'center' },
+  languageNameActive: { color: COLORS.gold },
+  // Others input
+  othersInputContainer: {
+    marginTop: SPACING.l, padding: SPACING.m, backgroundColor: COLORS.bgCard,
+    borderRadius: BORDER_RADIUS.m, borderWidth: 1, borderColor: COLORS.border,
+  },
+  othersLabel: { fontSize: 13, color: COLORS.textSecondary, marginBottom: SPACING.s },
+  othersInput: {
+    backgroundColor: COLORS.bgInput, borderRadius: BORDER_RADIUS.m,
+    paddingHorizontal: SPACING.m, paddingVertical: 12, color: COLORS.text, fontSize: 15,
+  },
   listContainer: { gap: SPACING.s },
   listItem: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',

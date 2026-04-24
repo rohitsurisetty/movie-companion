@@ -283,12 +283,13 @@ const drawerStyles = StyleSheet.create({
 
 // Profile Drawer Component
 function ProfileDrawer({
-  visible, onClose, onLogout, colors,
+  visible, onClose, onLogout, colors, onFilters,
 }: {
   visible: boolean;
   onClose: () => void;
   onLogout: () => void;
   colors: ReturnType<typeof getThemeColors>;
+  onFilters: () => void;
 }) {
   const [profile, setProfile] = useState<ProfileData | null>(null);
 
@@ -377,6 +378,17 @@ function ProfileDrawer({
             )}
           </ScrollView>
 
+          {/* Preferences & Filters Button */}
+          <TouchableOpacity
+            style={[profileStyles.filtersBtn, { borderColor: colors.primary }]}
+            onPress={onFilters}
+            testID="filters-btn"
+            activeOpacity={0.7}
+          >
+            <Ionicons name="options-outline" size={20} color={colors.primary} />
+            <Text style={[profileStyles.filtersBtnText, { color: colors.primary }]}>Preferences & Filters</Text>
+          </TouchableOpacity>
+
           {/* Logout Button */}
           <TouchableOpacity
             style={[profileStyles.logoutBtn, { borderColor: '#FF6B6B' }]}
@@ -416,6 +428,11 @@ const profileStyles = StyleSheet.create({
   ratingText: { fontSize: 11, fontWeight: '600' },
   infoRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.s, marginBottom: SPACING.s },
   infoText: { fontSize: 14 },
+  filtersBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SPACING.s,
+    paddingVertical: 14, borderRadius: BORDER_RADIUS.full, borderWidth: 2, marginTop: SPACING.m,
+  },
+  filtersBtnText: { fontSize: 16, fontWeight: '600' },
   logoutBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SPACING.s,
     paddingVertical: 14, borderRadius: BORDER_RADIUS.full, borderWidth: 2, marginTop: SPACING.m,
@@ -709,11 +726,6 @@ export default function SwipeScreen() {
         <View style={styles.headerCenter}>
           <Ionicons name={colors.modeIcon} size={22} color={colors.primary} />
           <Text style={[styles.headerTitle, { color: colors.text }]}>{colors.modeName}</Text>
-          {!isProfileComplete && (
-            <View style={[styles.counterBadge, dynamicStyles.counterBadge]}>
-              <Text style={styles.counterText}>{remainingSwipes}</Text>
-            </View>
-          )}
         </View>
         <TouchableOpacity
           style={styles.profileBtn}
@@ -825,6 +837,7 @@ export default function SwipeScreen() {
         visible={showProfileDrawer}
         onClose={() => setShowProfileDrawer(false)}
         onLogout={handleLogout}
+        onFilters={() => { setShowProfileDrawer(false); router.push('/filters'); }}
         colors={colors}
       />
     </SafeAreaView>

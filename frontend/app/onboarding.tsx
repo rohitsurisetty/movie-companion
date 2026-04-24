@@ -62,7 +62,7 @@ const SELECTION_CONFIGS: Record<number, SelectionConfig> = {
     title: 'Languages of films you watch',
     subtitle: 'Select all that apply',
     options: ['Hindi', 'English', 'Telugu', 'Tamil', 'Malayalam', 'Kannada', 'Korean', 'Others'],
-    multiSelect: true, displayAs: 'tiles', field: 'filmLanguages',
+    multiSelect: true, displayAs: 'language-tiles', field: 'filmLanguages',
   },
   7: {
     title: 'Your favourite genres',
@@ -116,6 +116,7 @@ export default function OnboardingScreen() {
     }
     if (step >= 1 && step <= 7) {
       const config = SELECTION_CONFIGS[step];
+      const showOthersInput = step === 6; // Film languages step
       return (
         <SelectionStep
           title={config.title}
@@ -125,6 +126,9 @@ export default function OnboardingScreen() {
           onSelect={(val) => updateField(config.field, val)}
           multiSelect={config.multiSelect}
           displayAs={config.displayAs}
+          showOthersInput={showOthersInput}
+          othersValue={(data as any).otherFilmLanguages || ''}
+          onOthersChange={(val) => updateField('otherFilmLanguages', val)}
         />
       );
     }

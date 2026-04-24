@@ -11,6 +11,18 @@ import { ProfileData } from '../types';
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
 const GENDERS = ['Man', 'Woman', 'Non-binary', 'Prefer not to say', 'Other'];
+const GENDER_IDENTITIES = ['Bisexual', 'Gay', 'Lesbian', 'Pansexual', 'Asexual', 'Queer', 'Questioning', 'Prefer not to say'];
+
+// Generate arrays for date picker
+const DAYS = Array.from({ length: 31 }, (_, i) => i + 1);
+const MONTHS = [
+  { value: 1, label: 'January' }, { value: 2, label: 'February' }, { value: 3, label: 'March' },
+  { value: 4, label: 'April' }, { value: 5, label: 'May' }, { value: 6, label: 'June' },
+  { value: 7, label: 'July' }, { value: 8, label: 'August' }, { value: 9, label: 'September' },
+  { value: 10, label: 'October' }, { value: 11, label: 'November' }, { value: 12, label: 'December' },
+];
+const currentYear = new Date().getFullYear();
+const YEARS = Array.from({ length: 100 }, (_, i) => currentYear - 18 - i); // Start from 18 years ago
 
 type Props = {
   data: ProfileData;
@@ -20,6 +32,9 @@ type Props = {
 
 export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
   const [showGenderPicker, setShowGenderPicker] = useState(false);
+  const [showIdentityPicker, setShowIdentityPicker] = useState(false);
+  const [showDOBPicker, setShowDOBPicker] = useState(false);
+  const [dobPickerType, setDobPickerType] = useState<'day' | 'month' | 'year'>('day');
   const [showAgeConfirm, setShowAgeConfirm] = useState(false);
   const [ageConfirmed, setAgeConfirmed] = useState(false);
   const [underAge, setUnderAge] = useState(false);
@@ -29,23 +44,39 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
   const [searchingLocation, setSearchingLocation] = useState(false);
   const [gettingCurrentLoc, setGettingCurrentLoc] = useState(false);
 
+  const showsGenderIdentity = data.gender === 'Non-binary' || data.gender === 'Other';
+
   const calculateAge = useCallback(() => {
     const d = parseInt(data.dobDay);
     const m = parseInt(data.dobMonth);
     const y = parseInt(data.dobYear);
-    if (!d || !m || !y || d > 31 || m > 12 || y < 1900) return;
+    if (!d || !m || !y || d > 31 || m > 12 || y < 1900) return 0;
     const today = new Date();
     const birthDate = new Date(y, m - 1, d);
+    
+    // Validate the date
+    if (birthDate.getDate() !== d || birthDate.getMonth() !== m - 1) {
+      return 0; // Invalid date (e.g., Feb 30)
+    }
+    
     let age = today.getFullYear() - birthDate.getFullYear();
     const monthDiff = today.getMonth() - birthDate.getMonth();
     if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
       age--;
     }
-    if (age > 0 && age < 150) {
-      setCalculatedAge(age);
-      setShowAgeConfirm(true);
-    }
+    return age > 0 && age < 150 ? age : 0;
   }, [data.dobDay, data.dobMonth, data.dobYear]);
+
+  // Auto-trigger age confirmation when DOB is complete
+  const checkAndShowAgeConfirm = useCallback(() => {
+    if (data.dobDay && data.dobMonth && data.dobYear && !ageConfirmed) {
+      const age = calculateAge();
+      if (age > 0) {
+        setCalculatedAge(age);
+        setShowAgeConfirm(true);
+      }
+    }
+  }, [data.dobDay, data.dobMonth, data.dobYear, ageConfirmed, calculateAge]);
 
   const handleAgeConfirm = (confirmed: boolean) => {
     setShowAgeConfirm(false);
@@ -56,7 +87,55 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
         setAgeConfirmed(true);
         onUpdate('age', calculatedAge);
       }
+    } else {
+      // Reset DOB fields when user says "No"
+      onUpdate('dobDay', '');
+      onUpdate('dobMonth', '');
+      onUpdate('dobYear', '');
     }
+  };
+
+  const openDOBPicker = (type: 'day' | 'month' | 'year') => {
+    setDobPickerType(type);
+    setShowDOBPicker(true);
+  };
+
+  const selectDOBValue = (value: number) => {
+    if (dobPickerType === 'day') {
+      onUpdate('dobDay', String(value).padStart(2, '0'));
+    } else if (dobPickerType === 'month') {
+      onUpdate('dobMonth', String(value).padStart(2, '0'));
+    } else {
+      onUpdate('dobYear', String(value));
+    }
+    setShowDOBPicker(false);
+    
+    // Check if all fields are filled after this selection
+    setTimeout(() => {
+      const newDay = dobPickerType === 'day' ? String(value).padStart(2, '0') : data.dobDay;
+      const newMonth = dobPickerType === 'month' ? String(value).padStart(2, '0') : data.dobMonth;
+      const newYear = dobPickerType === 'year' ? String(value) : data.dobYear;
+      
+      if (newDay && newMonth && newYear && !ageConfirmed) {
+        const d = parseInt(newDay);
+        const m = parseInt(newMonth);
+        const y = parseInt(newYear);
+        const today = new Date();
+        const birthDate = new Date(y, m - 1, d);
+        
+        if (birthDate.getDate() === d && birthDate.getMonth() === m - 1) {
+          let age = today.getFullYear() - birthDate.getFullYear();
+          const monthDiff = today.getMonth() - birthDate.getMonth();
+          if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+            age--;
+          }
+          if (age > 0 && age < 150) {
+            setCalculatedAge(age);
+            setShowAgeConfirm(true);
+          }
+        }
+      }
+    }, 100);
   };
 
   const searchLocation = useCallback(async (text: string) => {
@@ -134,9 +213,11 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
           placeholder="Your full name"
           placeholderTextColor={COLORS.textMuted}
           value={data.name}
-          onChangeText={(t) => onUpdate('name', t)}
+          onChangeText={(t) => onUpdate('name', t.slice(0, 50))}
+          maxLength={50}
           testID="basic-name-input"
         />
+        <Text style={styles.charCount}>{data.name.length}/50</Text>
 
         <Text style={styles.label}>Gender *</Text>
         <TouchableOpacity
@@ -150,47 +231,58 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
           <Ionicons name="chevron-down" size={20} color={COLORS.textMuted} />
         </TouchableOpacity>
 
+        {/* Gender Identity for Non-binary/Other */}
+        {showsGenderIdentity && (
+          <>
+            <Text style={styles.label}>Gender Identity (Optional)</Text>
+            <TouchableOpacity
+              style={styles.dropdown}
+              onPress={() => setShowIdentityPicker(true)}
+              testID="basic-identity-dropdown"
+            >
+              <Text style={[styles.dropdownText, !(data as any).genderIdentity && styles.placeholder]}>
+                {(data as any).genderIdentity || 'Select your identity'}
+              </Text>
+              <Ionicons name="chevron-down" size={20} color={COLORS.textMuted} />
+            </TouchableOpacity>
+          </>
+        )}
+
         <Text style={styles.label}>Date of Birth *</Text>
         <View style={styles.dobRow}>
-          <TextInput
-            style={[styles.input, styles.dobInput]}
-            placeholder="DD"
-            placeholderTextColor={COLORS.textMuted}
-            value={data.dobDay}
-            onChangeText={(t) => onUpdate('dobDay', t.replace(/[^0-9]/g, '').slice(0, 2))}
-            keyboardType="number-pad"
-            maxLength={2}
-            testID="basic-dob-day"
-          />
-          <Text style={styles.dobSep}>/</Text>
-          <TextInput
-            style={[styles.input, styles.dobInput]}
-            placeholder="MM"
-            placeholderTextColor={COLORS.textMuted}
-            value={data.dobMonth}
-            onChangeText={(t) => onUpdate('dobMonth', t.replace(/[^0-9]/g, '').slice(0, 2))}
-            keyboardType="number-pad"
-            maxLength={2}
-            testID="basic-dob-month"
-          />
-          <Text style={styles.dobSep}>/</Text>
-          <TextInput
-            style={[styles.input, styles.dobInputYear]}
-            placeholder="YYYY"
-            placeholderTextColor={COLORS.textMuted}
-            value={data.dobYear}
-            onChangeText={(t) => onUpdate('dobYear', t.replace(/[^0-9]/g, '').slice(0, 4))}
-            keyboardType="number-pad"
-            maxLength={4}
-            testID="basic-dob-year"
-          />
-        </View>
-
-        {!ageConfirmed && data.dobDay.length === 2 && data.dobMonth.length === 2 && data.dobYear.length === 4 && (
-          <TouchableOpacity style={styles.verifyAgeBtn} onPress={calculateAge} testID="verify-age-btn">
-            <Text style={styles.verifyAgeText}>Verify Age</Text>
+          <TouchableOpacity 
+            style={[styles.dobPicker, data.dobDay && styles.dobPickerFilled]} 
+            onPress={() => openDOBPicker('day')}
+            testID="dob-day-picker"
+          >
+            <Text style={[styles.dobPickerText, !data.dobDay && styles.placeholder]}>
+              {data.dobDay || 'DD'}
+            </Text>
+            <Ionicons name="chevron-down" size={16} color={COLORS.textMuted} />
           </TouchableOpacity>
-        )}
+          
+          <TouchableOpacity 
+            style={[styles.dobPicker, styles.dobPickerMonth, data.dobMonth && styles.dobPickerFilled]} 
+            onPress={() => openDOBPicker('month')}
+            testID="dob-month-picker"
+          >
+            <Text style={[styles.dobPickerText, !data.dobMonth && styles.placeholder]}>
+              {data.dobMonth ? MONTHS[parseInt(data.dobMonth) - 1]?.label : 'Month'}
+            </Text>
+            <Ionicons name="chevron-down" size={16} color={COLORS.textMuted} />
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={[styles.dobPicker, data.dobYear && styles.dobPickerFilled]} 
+            onPress={() => openDOBPicker('year')}
+            testID="dob-year-picker"
+          >
+            <Text style={[styles.dobPickerText, !data.dobYear && styles.placeholder]}>
+              {data.dobYear || 'YYYY'}
+            </Text>
+            <Ionicons name="chevron-down" size={16} color={COLORS.textMuted} />
+          </TouchableOpacity>
+        </View>
 
         {ageConfirmed && (
           <View style={styles.ageConfirmedBadge}>
@@ -277,10 +369,83 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
         </TouchableOpacity>
       </Modal>
 
+      {/* Gender Identity Picker Modal */}
+      <Modal visible={showIdentityPicker} transparent animationType="fade">
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowIdentityPicker(false)}
+        >
+          <View style={styles.pickerContent}>
+            <Text style={styles.pickerTitle}>Select Identity</Text>
+            <ScrollView style={styles.pickerScroll}>
+              {GENDER_IDENTITIES.map(g => (
+                <TouchableOpacity
+                  key={g}
+                  style={[styles.pickerItem, (data as any).genderIdentity === g && styles.pickerItemActive]}
+                  onPress={() => { onUpdate('genderIdentity', g); setShowIdentityPicker(false); }}
+                  testID={`identity-${g.toLowerCase().replace(/\s+/g, '-')}`}
+                >
+                  <Text style={[styles.pickerItemText, (data as any).genderIdentity === g && styles.pickerItemTextActive]}>{g}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* DOB Picker Modal */}
+      <Modal visible={showDOBPicker} transparent animationType="fade">
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowDOBPicker(false)}
+        >
+          <View style={styles.pickerContent}>
+            <Text style={styles.pickerTitle}>
+              {dobPickerType === 'day' ? 'Select Day' : dobPickerType === 'month' ? 'Select Month' : 'Select Year'}
+            </Text>
+            <ScrollView style={styles.pickerScroll}>
+              {dobPickerType === 'day' && DAYS.map(d => (
+                <TouchableOpacity
+                  key={d}
+                  style={[styles.pickerItem, data.dobDay === String(d).padStart(2, '0') && styles.pickerItemActive]}
+                  onPress={() => selectDOBValue(d)}
+                  testID={`dob-day-${d}`}
+                >
+                  <Text style={[styles.pickerItemText, data.dobDay === String(d).padStart(2, '0') && styles.pickerItemTextActive]}>{d}</Text>
+                </TouchableOpacity>
+              ))}
+              {dobPickerType === 'month' && MONTHS.map(m => (
+                <TouchableOpacity
+                  key={m.value}
+                  style={[styles.pickerItem, data.dobMonth === String(m.value).padStart(2, '0') && styles.pickerItemActive]}
+                  onPress={() => selectDOBValue(m.value)}
+                  testID={`dob-month-${m.value}`}
+                >
+                  <Text style={[styles.pickerItemText, data.dobMonth === String(m.value).padStart(2, '0') && styles.pickerItemTextActive]}>{m.label}</Text>
+                </TouchableOpacity>
+              ))}
+              {dobPickerType === 'year' && YEARS.map(y => (
+                <TouchableOpacity
+                  key={y}
+                  style={[styles.pickerItem, data.dobYear === String(y) && styles.pickerItemActive]}
+                  onPress={() => selectDOBValue(y)}
+                  testID={`dob-year-${y}`}
+                >
+                  <Text style={[styles.pickerItemText, data.dobYear === String(y) && styles.pickerItemTextActive]}>{y}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
       {/* Age Confirmation Modal */}
       <Modal visible={showAgeConfirm} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.ageConfirmContent}>
+            <Ionicons name="calendar-outline" size={48} color={COLORS.gold} style={{ marginBottom: SPACING.m }} />
             <Text style={styles.ageConfirmTitle}>Age Confirmation</Text>
             <Text style={styles.ageConfirmText}>Are you {calculatedAge} years old?</Text>
             <View style={styles.ageConfirmBtns}>
@@ -309,6 +474,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.bgInput, borderRadius: BORDER_RADIUS.m, paddingHorizontal: SPACING.m,
     paddingVertical: 14, color: COLORS.text, fontSize: 16,
   },
+  charCount: { fontSize: 11, color: COLORS.textMuted, textAlign: 'right', marginTop: 4 },
   dropdown: {
     backgroundColor: COLORS.bgInput, borderRadius: BORDER_RADIUS.m, paddingHorizontal: SPACING.m,
     paddingVertical: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
@@ -316,14 +482,14 @@ const styles = StyleSheet.create({
   dropdownText: { fontSize: 16, color: COLORS.text },
   placeholder: { color: COLORS.textMuted },
   dobRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.s },
-  dobInput: { flex: 1, textAlign: 'center' },
-  dobInputYear: { flex: 1.5, textAlign: 'center' },
-  dobSep: { fontSize: 20, color: COLORS.textMuted },
-  verifyAgeBtn: {
-    backgroundColor: COLORS.gold, paddingVertical: 12, borderRadius: BORDER_RADIUS.full,
-    alignItems: 'center', marginTop: SPACING.m,
+  dobPicker: {
+    flex: 1, backgroundColor: COLORS.bgInput, borderRadius: BORDER_RADIUS.m,
+    paddingHorizontal: SPACING.s, paddingVertical: 14, flexDirection: 'row',
+    alignItems: 'center', justifyContent: 'space-between',
   },
-  verifyAgeText: { fontSize: 15, fontWeight: '700', color: COLORS.black },
+  dobPickerMonth: { flex: 1.8 },
+  dobPickerFilled: { borderWidth: 1, borderColor: COLORS.primary },
+  dobPickerText: { fontSize: 14, color: COLORS.text },
   ageConfirmedBadge: {
     flexDirection: 'row', alignItems: 'center', gap: SPACING.s, marginTop: SPACING.m,
     backgroundColor: 'rgba(76,175,80,0.1)', padding: SPACING.m, borderRadius: BORDER_RADIUS.m,
@@ -356,9 +522,10 @@ const styles = StyleSheet.create({
   },
   pickerContent: {
     backgroundColor: COLORS.bgCard, borderRadius: BORDER_RADIUS.l, padding: SPACING.l,
-    width: '100%', maxWidth: 340,
+    width: '100%', maxWidth: 340, maxHeight: '70%',
   },
   pickerTitle: { fontSize: 20, fontWeight: 'bold', color: COLORS.text, marginBottom: SPACING.m, textAlign: 'center' },
+  pickerScroll: { maxHeight: 350 },
   pickerItem: {
     paddingVertical: 14, paddingHorizontal: SPACING.m, borderRadius: BORDER_RADIUS.m,
     marginBottom: SPACING.xs,
@@ -367,10 +534,10 @@ const styles = StyleSheet.create({
   pickerItemText: { fontSize: 16, color: COLORS.textSecondary },
   pickerItemTextActive: { color: COLORS.primary, fontWeight: '600' },
   ageConfirmContent: {
-    backgroundColor: COLORS.bgCard, borderRadius: BORDER_RADIUS.l, padding: SPACING.l,
+    backgroundColor: COLORS.bgCard, borderRadius: BORDER_RADIUS.l, padding: SPACING.xl,
     width: '100%', maxWidth: 320, alignItems: 'center',
   },
-  ageConfirmTitle: { fontSize: 20, fontWeight: 'bold', color: COLORS.text, marginBottom: SPACING.m },
+  ageConfirmTitle: { fontSize: 22, fontWeight: 'bold', color: COLORS.text, marginBottom: SPACING.s },
   ageConfirmText: { fontSize: 18, color: COLORS.textSecondary, marginBottom: SPACING.l },
   ageConfirmBtns: { flexDirection: 'row', gap: SPACING.m, width: '100%' },
   ageConfirmYes: {

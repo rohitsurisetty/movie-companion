@@ -19,15 +19,15 @@ type Props = {
   onNext: () => void;
 };
 
-type FieldDef = { key: string; label: string; type: 'text' | 'array' | 'movies' };
+type FieldDef = { key: string; label: string; type: 'text' | 'array' | 'movies'; mandatory?: boolean };
 
 const FIELDS: FieldDef[] = [
-  { key: 'name', label: 'Name', type: 'text' },
-  { key: 'gender', label: 'Gender', type: 'text' },
-  { key: 'age', label: 'Age', type: 'text' },
+  { key: 'name', label: 'Name', type: 'text', mandatory: true },
+  { key: 'gender', label: 'Gender', type: 'text', mandatory: true },
+  { key: 'age', label: 'Age', type: 'text', mandatory: true },
   { key: 'location', label: 'Location', type: 'text' },
   { key: 'relationshipIntent', label: 'Looking For', type: 'array' },
-  { key: 'partnerPreference', label: 'Want to Meet', type: 'text' },
+  { key: 'partnerPreference', label: 'Want to Meet', type: 'text', mandatory: true },
   { key: 'languagesSpoken', label: 'Languages', type: 'array' },
   { key: 'movieFrequency', label: 'Movie Frequency', type: 'text' },
   { key: 'ottTheatre', label: 'Preference', type: 'text' },
@@ -46,6 +46,9 @@ const FIELDS: FieldDef[] = [
   { key: 'pets', label: 'Pets', type: 'text' },
   { key: 'familyPlanning', label: 'Family Planning', type: 'text' },
   { key: 'siblings', label: 'Siblings', type: 'text' },
+  { key: 'education', label: 'Education', type: 'text' },
+  { key: 'workProfile', label: 'Work', type: 'text' },
+  { key: 'travel', label: 'Travel', type: 'text' },
 ];
 
 export default function ProfilePreviewStep({ data, onUpdate, onNext }: Props) {
@@ -90,7 +93,10 @@ export default function ProfilePreviewStep({ data, onUpdate, onNext }: Props) {
       {filledFields.map(field => (
         <View key={field.key} style={styles.fieldRow}>
           <View style={styles.fieldInfo}>
-            <Text style={styles.fieldLabel}>{field.label}</Text>
+            <View style={styles.labelRow}>
+              <Text style={styles.fieldLabel}>{field.label}</Text>
+              {field.mandatory && <Text style={styles.mandatoryBadge}>Always visible</Text>}
+            </View>
             {field.type === 'array' || field.type === 'movies' ? (
               <View style={styles.chipsRow}>
                 {(Array.isArray((data as any)[field.key]) ? (data as any)[field.key] : []).map((item: any, i: number) => (
@@ -105,13 +111,15 @@ export default function ProfilePreviewStep({ data, onUpdate, onNext }: Props) {
               <Text style={styles.fieldValue}>{getValue(field)}</Text>
             )}
           </View>
-          <Switch
-            value={data.visibilityToggles[field.key] !== false}
-            onValueChange={() => toggleVisibility(field.key)}
-            trackColor={{ false: COLORS.border, true: COLORS.primaryDark }}
-            thumbColor={data.visibilityToggles[field.key] !== false ? COLORS.primary : COLORS.textMuted}
-            testID={`toggle-${field.key}`}
-          />
+          {!field.mandatory && (
+            <Switch
+              value={data.visibilityToggles[field.key] !== false}
+              onValueChange={() => toggleVisibility(field.key)}
+              trackColor={{ false: COLORS.border, true: COLORS.primaryDark }}
+              thumbColor={data.visibilityToggles[field.key] !== false ? COLORS.primary : COLORS.textMuted}
+              testID={`toggle-${field.key}`}
+            />
+          )}
         </View>
       ))}
 
@@ -137,7 +145,9 @@ const styles = StyleSheet.create({
     paddingVertical: SPACING.m, borderBottomWidth: 1, borderBottomColor: COLORS.border,
   },
   fieldInfo: { flex: 1, marginRight: SPACING.m },
-  fieldLabel: { fontSize: 13, fontWeight: '600', color: COLORS.textMuted, marginBottom: SPACING.xs },
+  labelRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.s, marginBottom: SPACING.xs },
+  fieldLabel: { fontSize: 13, fontWeight: '600', color: COLORS.textMuted },
+  mandatoryBadge: { fontSize: 10, color: COLORS.gold, fontWeight: '500', backgroundColor: 'rgba(255,215,0,0.1)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
   fieldValue: { fontSize: 15, color: COLORS.text },
   chipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.xs },
   previewChip: {
