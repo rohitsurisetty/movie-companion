@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   View, Text, StyleSheet, Dimensions, Image, TouchableOpacity,
-  ActivityIndicator, Modal, Pressable, ScrollView, PanResponder,
+  ActivityIndicator, Modal, Pressable, ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -11,6 +11,7 @@ import Animated, {
   runOnJS, interpolate, Extrapolation,
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import BottomSheet, { BottomSheetScrollView, BottomSheetBackdrop } from '@gorhom/bottom-sheet';
 import {
   SPACING, BORDER_RADIUS, getThemeColors,
   LEFT_SWIPE_REASONS, RIGHT_SWIPE_REASONS,
@@ -30,8 +31,8 @@ const REQUIRED_SWIPES = 20;
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
-// Movie Details Modal - Scrollable & Swipe Down to Dismiss
-function MovieDetailsModal({
+// Movie Details Bottom Sheet - Uses @gorhom/bottom-sheet for proper scroll + swipe handling
+function MovieDetailsBottomSheet({
   visible, onClose, movieId, colors,
 }: {
   visible: boolean;
@@ -41,12 +42,19 @@ function MovieDetailsModal({
 }) {
   const [details, setDetails] = useState<MovieDetail | null>(null);
   const [loading, setLoading] = useState(false);
-  const [translateY, setTranslateY] = useState(0);
+  const bottomSheetRef = useRef<BottomSheet>(null);
+  
+  // Snap points for bottom sheet - 85% of screen height
+  const snapPoints = useMemo(() => ['85%'], []);
 
   useEffect(() => {
     if (visible && movieId > 0) {
       fetchDetails();
-      setTranslateY(0);
+      // Expand the sheet when visible
+      bottomSheetRef.current?.expand();
+    } else {
+      // Close the sheet when not visible
+      bottomSheetRef.current?.close();
     }
   }, [visible, movieId]);
 
@@ -65,175 +73,158 @@ function MovieDetailsModal({
     }
   };
 
-  // PanResponder ONLY for the handle area - not the whole modal
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderMove: (_, gestureState) => {
-        if (gestureState.dy > 0) {
-          setTranslateY(gestureState.dy);
-        }
-      },
-      onPanResponderRelease: (_, gestureState) => {
-        if (gestureState.dy > 80 || gestureState.vy > 0.5) {
-          onClose();
-          setTranslateY(0);
-        } else {
-          setTranslateY(0);
-        }
-      },
-      onPanResponderTerminate: () => {
-        setTranslateY(0);
-      },
-    })
-  ).current;
+  // Handle sheet close
+  const handleSheetChanges = useCallback((index: number) => {
+    if (index === -1) {
+      onClose();
+    }
+  }, [onClose]);
+
+  // Custom backdrop
+  const renderBackdrop = useCallback(
+    (props: any) => (
+      <BottomSheetBackdrop
+        {...props}
+        disappearsOnIndex={-1}
+        appearsOnIndex={0}
+        opacity={0.7}
+        pressBehavior="close"
+      />
+    ),
+    []
+  );
+
+  if (!visible) return null;
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={detailStyles.overlay} onPress={onClose}>
-        <Pressable 
-          style={[
-            detailStyles.container, 
-            { 
-              backgroundColor: colors.bgCard,
-              transform: [{ translateY }],
-            }
-          ]} 
-          onPress={(e) => e.stopPropagation()}
+    <BottomSheet
+      ref={bottomSheetRef}
+      index={0}
+      snapPoints={snapPoints}
+      onChange={handleSheetChanges}
+      enablePanDownToClose={true}
+      backdropComponent={renderBackdrop}
+      backgroundStyle={{ backgroundColor: colors.bgCard }}
+      handleIndicatorStyle={{ backgroundColor: '#555', width: 48, height: 5 }}
+      style={detailStyles.bottomSheet}
+    >
+      <View style={detailStyles.handleArea}>
+        <Text style={[detailStyles.swipeHint, { color: colors.textMuted }]}>
+          Pull down to close
+        </Text>
+      </View>
+      
+      {loading ? (
+        <View style={detailStyles.loadingContainer}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={[detailStyles.loadingText, { color: colors.textSecondary }]}>Loading details...</Text>
+        </View>
+      ) : details ? (
+        <BottomSheetScrollView 
+          style={detailStyles.scroll}
+          contentContainerStyle={detailStyles.scrollContent}
+          showsVerticalScrollIndicator={true}
         >
-          {/* Swipe Handle - Only this area triggers swipe to close */}
-          <View {...panResponder.panHandlers} style={detailStyles.handleArea}>
-            <View style={detailStyles.handle} />
-            <Text style={[detailStyles.swipeHint, { color: colors.textMuted }]}>
-              Pull down to close
-            </Text>
-          </View>
-          
-          {loading ? (
-            <View style={detailStyles.loadingContainer}>
-              <ActivityIndicator size="large" color={colors.primary} />
-              <Text style={[detailStyles.loadingText, { color: colors.textSecondary }]}>Loading details...</Text>
-            </View>
-          ) : details ? (
-            <ScrollView 
-              style={detailStyles.scroll} 
-              showsVerticalScrollIndicator={true}
-              contentContainerStyle={detailStyles.scrollContent}
-              bounces={true}
-              nestedScrollEnabled={true}
-            >
-              {/* Header with poster and title */}
-              <View style={detailStyles.header}>
-                {details.poster_path && (
-                  <Image 
-                    source={{ uri: `${TMDB_IMAGE_BASE}${details.poster_path}` }}
-                    style={detailStyles.poster}
-                    resizeMode="cover"
-                  />
-                )}
-                <View style={detailStyles.headerInfo}>
-                  <Text style={[detailStyles.title, { color: colors.text }]} numberOfLines={3}>{details.title}</Text>
-                  {details.release_date && (
-                    <Text style={[detailStyles.year, { color: colors.textSecondary }]}>
-                      {details.release_date.split('-')[0]}
+          {/* Header with poster and title */}
+          <View style={detailStyles.header}>
+            {details.poster_path && (
+              <Image 
+                source={{ uri: `${TMDB_IMAGE_BASE}${details.poster_path}` }}
+                style={detailStyles.poster}
+                resizeMode="cover"
+              />
+            )}
+            <View style={detailStyles.headerInfo}>
+              <Text style={[detailStyles.title, { color: colors.text }]} numberOfLines={3}>{details.title}</Text>
+              {details.release_date && (
+                <Text style={[detailStyles.year, { color: colors.textSecondary }]}>
+                  {details.release_date.split('-')[0]}
+                </Text>
+              )}
+              {details.runtime > 0 && (
+                <View style={detailStyles.runtimeRow}>
+                  <Ionicons name="time-outline" size={14} color={colors.textMuted} />
+                  <Text style={[detailStyles.runtime, { color: colors.textMuted }]}>
+                    {Math.floor(details.runtime / 60)}h {details.runtime % 60}m
+                  </Text>
+                </View>
+              )}
+              {details.vote_average > 0 && (
+                <View style={detailStyles.ratingRow}>
+                  <Ionicons name="star" size={16} color={colors.gold} />
+                  <Text style={[detailStyles.rating, { color: colors.gold }]}>
+                    {details.vote_average.toFixed(1)}/10
+                  </Text>
+                  {details.vote_count && (
+                    <Text style={[detailStyles.voteCount, { color: colors.textMuted }]}>
+                      ({details.vote_count.toLocaleString()} votes)
                     </Text>
                   )}
-                  {details.runtime > 0 && (
-                    <View style={detailStyles.runtimeRow}>
-                      <Ionicons name="time-outline" size={14} color={colors.textMuted} />
-                      <Text style={[detailStyles.runtime, { color: colors.textMuted }]}>
-                        {Math.floor(details.runtime / 60)}h {details.runtime % 60}m
-                      </Text>
-                    </View>
-                  )}
-                  {details.vote_average > 0 && (
-                    <View style={detailStyles.ratingRow}>
-                      <Ionicons name="star" size={16} color={colors.gold} />
-                      <Text style={[detailStyles.rating, { color: colors.gold }]}>
-                        {details.vote_average.toFixed(1)}/10
-                      </Text>
-                      {details.vote_count && (
-                        <Text style={[detailStyles.voteCount, { color: colors.textMuted }]}>
-                          ({details.vote_count.toLocaleString()} votes)
-                        </Text>
-                      )}
-                    </View>
-                  )}
                 </View>
+              )}
+            </View>
+          </View>
+
+          {/* Genres */}
+          {details.genres && details.genres.length > 0 && (
+            <View style={detailStyles.section}>
+              <View style={detailStyles.genresRow}>
+                {details.genres.map((genre, i) => (
+                  <View key={i} style={[detailStyles.genreChip, { borderColor: colors.primary }]}>
+                    <Text style={[detailStyles.genreText, { color: colors.primary }]}>{genre}</Text>
+                  </View>
+                ))}
               </View>
+            </View>
+          )}
 
-              {/* Genres */}
-              {details.genres && details.genres.length > 0 && (
-                <View style={detailStyles.section}>
-                  <View style={detailStyles.genresRow}>
-                    {details.genres.map((genre, i) => (
-                      <View key={i} style={[detailStyles.genreChip, { borderColor: colors.primary }]}>
-                        <Text style={[detailStyles.genreText, { color: colors.primary }]}>{genre}</Text>
-                      </View>
-                    ))}
-                  </View>
-                </View>
-              )}
+          {/* Synopsis */}
+          {details.overview && (
+            <View style={detailStyles.section}>
+              <Text style={[detailStyles.sectionTitle, { color: colors.textSecondary }]}>Synopsis</Text>
+              <Text style={[detailStyles.synopsis, { color: colors.text }]}>{details.overview}</Text>
+            </View>
+          )}
 
-              {/* Synopsis */}
-              {details.overview && (
-                <View style={detailStyles.section}>
-                  <Text style={[detailStyles.sectionTitle, { color: colors.textSecondary }]}>Synopsis</Text>
-                  <Text style={[detailStyles.synopsis, { color: colors.text }]}>{details.overview}</Text>
-                </View>
-              )}
-
-              {/* Directors */}
-              {details.directors && details.directors.length > 0 && (
-                <View style={detailStyles.section}>
-                  <Text style={[detailStyles.sectionTitle, { color: colors.textSecondary }]}>
-                    Director{details.directors.length > 1 ? 's' : ''}
-                  </Text>
-                  <Text style={[detailStyles.directors, { color: colors.text }]}>
-                    {details.directors.join(', ')}
-                  </Text>
-                </View>
-              )}
-
-              {/* Cast */}
-              {details.cast && details.cast.length > 0 && (
-                <View style={detailStyles.section}>
-                  <Text style={[detailStyles.sectionTitle, { color: colors.textSecondary }]}>Cast</Text>
-                  <View style={detailStyles.castList}>
-                    {details.cast.slice(0, 10).map((member, i) => (
-                      <View key={i} style={detailStyles.castItem}>
-                        <View style={[detailStyles.castAvatar, { backgroundColor: colors.bgInput }]}>
-                          <Ionicons name="person" size={18} color={colors.textMuted} />
-                        </View>
-                        <View style={detailStyles.castInfo}>
-                          <Text style={[detailStyles.castName, { color: colors.text }]} numberOfLines={1}>
-                            {member.name}
-                          </Text>
-                          {member.character && (
-                            <Text style={[detailStyles.castCharacter, { color: colors.textMuted }]} numberOfLines={1}>
-                              as {member.character}
-                            </Text>
-                          )}
-                        </View>
-                      </View>
-                    ))}
-                  </View>
-                </View>
-              )}
-              
-              {/* Bottom padding for scroll */}
-              <View style={{ height: 60 }} />
-            </ScrollView>
-          ) : (
-            <View style={detailStyles.errorContainer}>
-              <Ionicons name="alert-circle-outline" size={48} color={colors.textMuted} />
-              <Text style={[detailStyles.errorText, { color: colors.textSecondary }]}>
-                Could not load movie details
+          {/* Directors */}
+          {details.directors && details.directors.length > 0 && (
+            <View style={detailStyles.section}>
+              <Text style={[detailStyles.sectionTitle, { color: colors.textSecondary }]}>
+                Director{details.directors.length > 1 ? 's' : ''}
+              </Text>
+              <Text style={[detailStyles.directors, { color: colors.text }]}>
+                {details.directors.join(', ')}
               </Text>
             </View>
           )}
 
+          {/* Cast */}
+          {details.cast && details.cast.length > 0 && (
+            <View style={detailStyles.section}>
+              <Text style={[detailStyles.sectionTitle, { color: colors.textSecondary }]}>Cast</Text>
+              <View style={detailStyles.castList}>
+                {details.cast.slice(0, 10).map((member, i) => (
+                  <View key={i} style={detailStyles.castItem}>
+                    <View style={[detailStyles.castAvatar, { backgroundColor: colors.bgInput }]}>
+                      <Ionicons name="person" size={18} color={colors.textMuted} />
+                    </View>
+                    <View style={detailStyles.castInfo}>
+                      <Text style={[detailStyles.castName, { color: colors.text }]} numberOfLines={1}>
+                        {member.name}
+                      </Text>
+                      {member.character && (
+                        <Text style={[detailStyles.castCharacter, { color: colors.textMuted }]} numberOfLines={1}>
+                          as {member.character}
+                        </Text>
+                      )}
+                    </View>
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
+          
+          {/* Close Button */}
           <TouchableOpacity
             style={[detailStyles.closeBtn, { backgroundColor: colors.primary }]}
             onPress={onClose}
@@ -242,30 +233,42 @@ function MovieDetailsModal({
             <Ionicons name="chevron-down" size={20} color="#FFF" />
             <Text style={detailStyles.closeBtnText}>Close</Text>
           </TouchableOpacity>
-        </Pressable>
-      </Pressable>
-    </Modal>
+          
+          {/* Bottom padding for scroll */}
+          <View style={{ height: 40 }} />
+        </BottomSheetScrollView>
+      ) : (
+        <View style={detailStyles.errorContainer}>
+          <Ionicons name="alert-circle-outline" size={48} color={colors.textMuted} />
+          <Text style={[detailStyles.errorText, { color: colors.textSecondary }]}>
+            Could not load movie details
+          </Text>
+        </View>
+      )}
+    </BottomSheet>
   );
 }
 
 const detailStyles = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
-  container: { 
-    borderTopLeftRadius: 24, borderTopRightRadius: 24, 
-    padding: SPACING.l, paddingBottom: SPACING.xxl,
-    maxHeight: '90%',
+  bottomSheet: { 
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
   },
   handleArea: { 
     alignItems: 'center', 
-    paddingBottom: SPACING.m,
+    paddingBottom: SPACING.s,
+    paddingHorizontal: SPACING.l,
   },
   handle: { width: 48, height: 5, backgroundColor: '#555', borderRadius: 3, marginBottom: SPACING.xs },
   swipeHint: { fontSize: 11, fontStyle: 'italic' },
   loadingContainer: { alignItems: 'center', justifyContent: 'center', paddingVertical: SPACING.xxl },
   loadingText: { marginTop: SPACING.m, fontSize: 14 },
-  scroll: { maxHeight: SCREEN_HEIGHT * 0.65 },
+  scroll: { flex: 1, paddingHorizontal: SPACING.l },
   scrollContent: { paddingBottom: SPACING.m },
-  header: { flexDirection: 'row', marginBottom: SPACING.l },
+  header: { flexDirection: 'row', marginBottom: SPACING.l, paddingTop: SPACING.s },
   poster: { width: 110, height: 165, borderRadius: BORDER_RADIUS.m },
   headerInfo: { flex: 1, marginLeft: SPACING.m, justifyContent: 'center' },
   title: { fontSize: 20, fontWeight: 'bold', marginBottom: SPACING.xs },
@@ -1189,7 +1192,7 @@ export default function SwipeScreen() {
         onViewProfile={() => { setShowProfileDrawer(false); router.push('/profile'); }}
         colors={colors}
       />
-      <MovieDetailsModal
+      <MovieDetailsBottomSheet
         visible={showDetailsModal}
         onClose={() => setShowDetailsModal(false)}
         movieId={selectedMovieId}
