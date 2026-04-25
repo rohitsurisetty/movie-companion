@@ -694,26 +694,44 @@ async def get_recommendations(req: RecommendationRequest):
             if movie.get("id"):
                 top_movie_ids.add(movie.get("id"))
     
+    # Get previously shown movie IDs (to prevent duplicates across pages)
+    shown_doc = await db.user_shown_movies.find_one({"user_id": req.user_id})
+    shown_movie_ids = set(shown_doc.get("movie_ids", [])) if shown_doc else set()
+    
+    # Combine all exclusions
+    all_exclude_ids = swiped_ids | top_movie_ids | shown_movie_ids
+    
     # Get personalized feed with USER-SPECIFIC randomization
-    # Passes: swiped_ids (never show again), top_movie_ids (user's favorites to exclude)
     recommendations = await get_personalized_feed(
         taste_vector,
-        swiped_ids,
+        all_exclude_ids,  # Pass all movies to exclude
         req.page,
         req.limit,
         user_id=req.user_id,
-        top_movie_ids=top_movie_ids  # Pass top 5 movies to exclude
+        top_movie_ids=top_movie_ids
     )
     
+    # Track the movie IDs we're about to show (to avoid showing them again)
+    new_shown_ids = [m["id"] for m in recommendations]
+    if new_shown_ids:
+        await db.user_shown_movies.update_one(
+            {"user_id": req.user_id},
+            {
+                "$addToSet": {"movie_ids": {"$each": new_shown_ids}},
+                "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}
+            },
+            upsert=True
+        )
+    
     logger.info(f"Generated {len(recommendations)} recommendations for user {req.user_id} "
-                f"(excluded {len(swiped_ids)} swiped + {len(top_movie_ids)} top movies)")
+                f"(excluded {len(all_exclude_ids)} movies: {len(swiped_ids)} swiped + {len(top_movie_ids)} top + {len(shown_movie_ids)} shown)")
     
     return {
         "results": recommendations,
         "page": req.page,
         "total_swipes": taste_vector.total_swipes,
         "taste_dimensions": len(taste_vector.vector),
-        "excluded_movies": len(swiped_ids) + len(top_movie_ids),
+        "excluded_movies": len(all_exclude_ids),
     }
 
 
@@ -788,6 +806,9 @@ async def reset_user_feed(user_id: str):
     # Delete swipe history
     swipe_result = await db.user_swipes.delete_many({"user_id": user_id})
     
+    # Delete shown movies tracking (so they can see movies again)
+    shown_result = await db.user_shown_movies.delete_many({"user_id": user_id})
+    
     # Reset swipe counts in taste vector (but keep preferences)
     taste_doc = await db.user_taste_vectors.find_one({"user_id": user_id})
     if taste_doc:
@@ -804,7 +825,7 @@ async def reset_user_feed(user_id: str):
     # Delete unwatched patterns
     await db.user_unwatched_patterns.delete_many({"user_id": user_id})
     
-    logger.info(f"Reset feed for user {user_id}: deleted {swipe_result.deleted_count} swipes")
+    logger.info(f"Reset feed for user {user_id}: deleted {swipe_result.deleted_count} swipes, {shown_result.deleted_count} shown records")
     
     return {
         "success": True,

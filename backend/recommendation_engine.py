@@ -1266,12 +1266,16 @@ async def get_candidate_movies(
     all_movies = []
     
     # CRITICAL: TMDB API max page is 500. Cap the page number.
-    # For high page numbers, use randomization within valid range
+    # Use deterministic page mapping to ensure different pages return different movies
     MAX_TMDB_PAGE = 500
+    
+    # Map the requested page to a TMDB page deterministically
+    # This ensures page 1 always fetches TMDB page 1, page 2 fetches TMDB page 2, etc.
+    tmdb_page = min(page, MAX_TMDB_PAGE)
+    
     if page > MAX_TMDB_PAGE:
-        # Use a random page within a reasonable range for variety
-        import random
-        page = random.randint(1, min(50, MAX_TMDB_PAGE))  # Random page 1-50
+        # For pages beyond 500, cycle through pages 1-500
+        tmdb_page = (page % MAX_TMDB_PAGE) + 1
     
     # Extract top genres from taste vector
     genre_scores = []
@@ -1314,7 +1318,7 @@ async def get_candidate_movies(
                 params = {
                     "with_original_language": lang_code,
                     "sort_by": "popularity.desc",
-                    "page": page
+                    "page": tmdb_page  # Use mapped TMDB page
                 }
                 # NO vote_count filter - get ALL movies in user's preferred language!
                 
@@ -1342,7 +1346,7 @@ async def get_candidate_movies(
                         "with_original_language": lang_code,
                         "sort_by": "vote_average.desc",
                         "vote_count.gte": 100,  # Higher threshold for related languages
-                        "page": page
+                        "page": tmdb_page  # Use mapped TMDB page
                     }
                     
                     if top_genre_ids:
@@ -1372,7 +1376,7 @@ async def get_candidate_movies(
                 "with_genres": genre_str,
                 "sort_by": "vote_average.desc",
                 "vote_count.gte": 100,
-                "page": page
+                "page": tmdb_page  # Use mapped TMDB page
             }
             
             if preferred_langs:
@@ -1395,7 +1399,7 @@ async def get_candidate_movies(
         try:
             resp = await http_client.get(
                 "https://api.themoviedb.org/3/trending/movie/week",
-                params={"page": page},
+                params={"page": tmdb_page},  # Use mapped TMDB page
                 headers={"Authorization": f"Bearer {TMDB_ACCESS_TOKEN}"}
             )
             if resp.status_code == 200:
@@ -1412,7 +1416,7 @@ async def get_candidate_movies(
         try:
             resp = await http_client.get(
                 "https://api.themoviedb.org/3/movie/top_rated",
-                params={"page": page},
+                params={"page": tmdb_page},  # Use mapped TMDB page
                 headers={"Authorization": f"Bearer {TMDB_ACCESS_TOKEN}"}
             )
             if resp.status_code == 200:
@@ -1429,7 +1433,7 @@ async def get_candidate_movies(
             try:
                 resp = await http_client.get(
                     "https://api.themoviedb.org/3/movie/popular",
-                    params={"page": page},
+                    params={"page": tmdb_page},  # Use mapped TMDB page
                     headers={"Authorization": f"Bearer {TMDB_ACCESS_TOKEN}"}
                 )
                 if resp.status_code == 200:
