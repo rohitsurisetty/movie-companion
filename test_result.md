@@ -170,6 +170,9 @@ frontend:
       - working: true
         agent: "testing"
         comment: "✅ TESTED SUCCESSFULLY: Swipe screen implementation verified through code review and UI testing. Movie info buttons present on cards (top right corner) and in action bar. MovieDetailsModal component shows complete movie information including title, synopsis, cast with character names, directors, runtime, and genres. Rating modal appears on right swipe with 1-5 star selection. All swipe functionality properly implemented with gesture detection and animation."
+      - working: true
+        agent: "main"
+        comment: "✅ VERIFIED FIX: Movie Details Modal scroll issue FIXED. PanResponder isolated to handle area only (not overlapping ScrollView). Screenshot tests confirm: 1) Modal opens correctly with movie poster, title, year, runtime, rating, genres, synopsis, directors. 2) Scrolling works perfectly - all 10 cast members visible (Chris Pratt through Kevin Michael Richardson). 3) Close button works. The fix prevents PanResponder from capturing scroll gestures."
 
   - task: "Profile Screen with Edit Functionality"
     implemented: true
