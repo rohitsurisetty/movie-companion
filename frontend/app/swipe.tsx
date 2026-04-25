@@ -17,9 +17,10 @@ import {
   LEFT_SWIPE_REASONS, RIGHT_SWIPE_REASONS,
 } from '../src/theme';
 import {
-  FeedMovie, SwipeState, SwipeRecord, initialSwipeState, TMDB_GENRE_MAP, ProfileData, MovieDetail,
+  FeedMovie, SwipeState, SwipeRecord, initialSwipeState, TMDB_GENRE_MAP, ProfileData, MovieDetail, initialProfileData,
 } from '../src/types';
 import { saveSwipeState, getSwipeState, getFilters, getProfile, saveMode, getMode, AppMode, clearAll } from '../src/store';
+import PublicProfilePreviewStep from '../src/components/PublicProfilePreviewStep';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const CARD_WIDTH = SCREEN_WIDTH * 0.88;
@@ -582,7 +583,7 @@ const drawerStyles = StyleSheet.create({
 
 // Profile Drawer Component - Fully Scrollable with Swipe Dismiss
 function ProfileDrawer({
-  visible, onClose, onLogout, colors, onFilters, onViewProfile,
+  visible, onClose, onLogout, colors, onFilters, onViewProfile, onProfilePreview,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -590,6 +591,7 @@ function ProfileDrawer({
   colors: ReturnType<typeof getThemeColors>;
   onFilters: () => void;
   onViewProfile: () => void;
+  onProfilePreview: () => void;
 }) {
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const bottomSheetRef = useRef<BottomSheet>(null);
@@ -624,7 +626,7 @@ function ProfileDrawer({
   );
 
   // Helper to extract partial location (City, State, Country)
-  const getPartialLocation = (fullLocation: string | undefined) => {
+  const getPartialLocationLocal = (fullLocation: string | undefined) => {
     if (!fullLocation) return '';
     // Split by comma and take last 3 parts (typically City, State, Country)
     const parts = fullLocation.split(',').map(p => p.trim());
@@ -667,7 +669,7 @@ function ProfileDrawer({
             )}
             {profile?.location && (
               <Text style={[profileStyles.locationText, { color: colors.textMuted }]}>
-                {getPartialLocation(profile.location)}
+                {getPartialLocationLocal(profile.location)}
               </Text>
             )}
             <Text style={[profileStyles.viewProfileText, { color: colors.primary }]}>View & Edit Profile →</Text>
@@ -746,6 +748,17 @@ function ProfileDrawer({
 
         {/* Action Buttons */}
         <View style={profileStyles.buttonsContainer}>
+          {/* Profile Preview Button - NEW */}
+          <TouchableOpacity
+            style={[profileStyles.previewBtn, { backgroundColor: colors.gold }]}
+            onPress={onProfilePreview}
+            testID="profile-preview-btn"
+            activeOpacity={0.8}
+          >
+            <Ionicons name="eye-outline" size={20} color="#000" />
+            <Text style={profileStyles.previewBtnText}>Profile Preview</Text>
+          </TouchableOpacity>
+
           {/* View Full Profile Button */}
           <TouchableOpacity
             style={[profileStyles.viewProfileBtn, { backgroundColor: colors.primary }]}
@@ -811,6 +824,11 @@ const profileStyles = StyleSheet.create({
   infoRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.s, marginBottom: SPACING.s },
   infoText: { fontSize: 14 },
   buttonsContainer: { marginTop: SPACING.m },
+  previewBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SPACING.s,
+    paddingVertical: 14, borderRadius: BORDER_RADIUS.full, marginBottom: SPACING.m,
+  },
+  previewBtnText: { fontSize: 16, fontWeight: '600', color: '#000' },
   viewProfileBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SPACING.s,
     paddingVertical: 14, borderRadius: BORDER_RADIUS.full, marginBottom: SPACING.m,
@@ -969,11 +987,13 @@ export default function SwipeScreen() {
   const [showLeftModal, setShowLeftModal] = useState(false);
   const [showModeDrawer, setShowModeDrawer] = useState(false);
   const [showProfileDrawer, setShowProfileDrawer] = useState(false);
+  const [showProfilePreview, setShowProfilePreview] = useState(false);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [selectedMovieId, setSelectedMovieId] = useState(0);
   const [pendingMovie, setPendingMovie] = useState<FeedMovie | null>(null);
   const [page, setPage] = useState(1);
   const [mode, setMode] = useState<AppMode>('date');
+  const [profileData, setProfileData] = useState<ProfileData | null>(null);
   const fetchingRef = useRef(false);
 
   const colors = getThemeColors(mode);
@@ -989,6 +1009,13 @@ export default function SwipeScreen() {
     })();
   }, []);
 
+  // Load profile data when preview is shown
+  useEffect(() => {
+    if (showProfilePreview) {
+      getProfile().then(setProfileData);
+    }
+  }, [showProfilePreview]);
+
   const handleModeChange = async (newMode: AppMode) => {
     setMode(newMode);
     await saveMode(newMode);
@@ -998,6 +1025,18 @@ export default function SwipeScreen() {
     await clearAll();
     setShowProfileDrawer(false);
     router.replace('/');
+  };
+
+  // Handle profile preview - navigate to profile for editing
+  const handleProfilePreviewEdit = () => {
+    setShowProfilePreview(false);
+    router.push('/profile');
+  };
+
+  // Handle profile preview done - close and return to swipe
+  const handleProfilePreviewContinue = () => {
+    setShowProfilePreview(false);
+    setShowProfileDrawer(false);
   };
 
   const handleShowDetails = (movieId: number) => {
@@ -1260,6 +1299,7 @@ export default function SwipeScreen() {
         onLogout={handleLogout}
         onFilters={() => { setShowProfileDrawer(false); router.push('/filters?from=profile'); }}
         onViewProfile={() => { setShowProfileDrawer(false); router.push('/profile'); }}
+        onProfilePreview={() => { setShowProfileDrawer(false); setShowProfilePreview(true); }}
         colors={colors}
       />
       <MovieDetailsBottomSheet
@@ -1268,6 +1308,22 @@ export default function SwipeScreen() {
         movieId={selectedMovieId}
         colors={colors}
       />
+      {/* In-App Profile Preview Modal - Reuses the same PublicProfilePreviewStep from onboarding */}
+      <Modal
+        visible={showProfilePreview}
+        animationType="slide"
+        onRequestClose={() => setShowProfilePreview(false)}
+      >
+        <SafeAreaView style={[{ flex: 1 }, { backgroundColor: colors.bg }]} edges={['top', 'bottom']}>
+          <View style={{ flex: 1, padding: SPACING.l }}>
+            <PublicProfilePreviewStep
+              data={profileData || initialProfileData}
+              onEdit={handleProfilePreviewEdit}
+              onContinue={handleProfilePreviewContinue}
+            />
+          </View>
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
