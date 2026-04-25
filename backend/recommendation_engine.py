@@ -1461,22 +1461,43 @@ async def get_personalized_feed(
     user_taste: TasteVector,
     swiped_ids: Set[int],
     page: int = 1,
-    limit: int = 20
+    limit: int = 20,
+    user_id: str = ""
 ) -> List[Dict[str, Any]]:
     """
-    Get a personalized movie feed for the user.
+    Get a TRULY PERSONALIZED movie feed for each user.
+    
+    CRITICAL: Each user MUST get different movies in different order!
+    
+    Personalization factors:
+    1. User's taste vector (genres, actors, directors they like)
+    2. User's swipe history (exclude already seen)
+    3. User's preferred languages
+    4. User-specific randomization seed (so different users get different orders)
+    5. Time-based variation (different recommendations at different times)
     
     Process:
     1. Get candidate movies (filtered by language)
-    2. Score each movie using cosine similarity
-    3. Apply language filter (strict)
-    4. Sort by score
+    2. Score each movie using cosine similarity with user's taste
+    3. Add user-specific random factor to scores
+    4. Sort by personalized score
     5. Return top N
     """
+    import random
+    import hashlib
+    from datetime import datetime
+    
+    # Create a user-specific seed for randomization
+    # This ensures the SAME user gets consistent results within a session
+    # But DIFFERENT users get different results
+    user_seed_str = f"{user_id}_{page}_{datetime.now().strftime('%Y%m%d%H')}"
+    user_seed = int(hashlib.md5(user_seed_str.encode()).hexdigest()[:8], 16)
+    user_random = random.Random(user_seed)
+    
     # Get candidates
     candidates = await get_candidate_movies(user_taste, page, swiped_ids)
     
-    # Score each movie
+    # Score each movie with PERSONALIZED scoring
     scored_movies = []
     for movie in candidates:
         score, passes_language = score_movie_for_user(movie, user_taste, swiped_ids)
@@ -1484,14 +1505,63 @@ async def get_personalized_feed(
         # Only include movies that pass the language filter (if filter is set)
         if score >= 0:
             if not user_taste.preferred_languages or passes_language:
-                scored_movies.append((movie, score))
+                # Add user-specific random factor (±15% variation)
+                # This ensures different users see movies in different orders
+                random_factor = user_random.uniform(0.85, 1.15)
+                personalized_score = score * random_factor
+                
+                # Add slight boost for movies matching user's top preferences
+                # This makes each user's feed unique based on their taste
+                movie_genres = []
+                for gid in movie.get("genre_ids", []):
+                    if gid in GENRE_ID_TO_NAME:
+                        movie_genres.append(GENRE_ID_TO_NAME[gid].lower().replace(" ", "_").replace("-", "_"))
+                
+                # Check if movie matches user's strong genre preferences
+                for genre in movie_genres:
+                    genre_key = f"genre_{genre}"
+                    if genre_key in user_taste.vector and user_taste.vector[genre_key] > 1.0:
+                        personalized_score *= 1.1  # 10% boost for matching strong preferences
+                        break
+                
+                scored_movies.append((movie, personalized_score, score))
     
-    # Sort by score (descending)
-    scored_movies.sort(key=lambda x: x[1], reverse=True)
+    # Shuffle movies with similar scores to add variety
+    # Group movies by score brackets and shuffle within brackets
+    if len(scored_movies) > 10:
+        # Sort first
+        scored_movies.sort(key=lambda x: x[1], reverse=True)
+        
+        # Then shuffle within score brackets (movies within 10% of each other)
+        shuffled_results = []
+        current_bracket = []
+        last_score = None
+        
+        for movie, p_score, orig_score in scored_movies:
+            if last_score is None or p_score >= last_score * 0.9:
+                current_bracket.append((movie, p_score, orig_score))
+            else:
+                # Shuffle and add current bracket
+                user_random.shuffle(current_bracket)
+                shuffled_results.extend(current_bracket)
+                current_bracket = [(movie, p_score, orig_score)]
+            last_score = p_score
+        
+        # Don't forget the last bracket
+        user_random.shuffle(current_bracket)
+        shuffled_results.extend(current_bracket)
+        scored_movies = shuffled_results
+    else:
+        # For small lists, just shuffle
+        user_random.shuffle(scored_movies)
     
     # Format results
     results = []
-    for movie, score in scored_movies[:limit]:
+    for item in scored_movies[:limit]:
+        movie = item[0]
+        personalized_score = item[1]
+        original_score = item[2] if len(item) > 2 else personalized_score
+        
         results.append({
             "id": movie["id"],
             "title": movie["title"],
@@ -1503,7 +1573,7 @@ async def get_personalized_feed(
             "vote_count": movie.get("vote_count", 0),
             "genre_ids": movie.get("genre_ids", []),
             "original_language": movie.get("original_language", ""),
-            "recommendation_score": round(score, 3),
+            "recommendation_score": round(personalized_score, 3),
         })
     
     return results

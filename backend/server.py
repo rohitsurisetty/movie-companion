@@ -685,12 +685,13 @@ async def get_recommendations(req: RecommendationRequest):
     
     swiped_ids = set(s["movie_id"] for s in swipes)
     
-    # Get personalized feed
+    # Get personalized feed with USER-SPECIFIC randomization
     recommendations = await get_personalized_feed(
         taste_vector,
         swiped_ids,
         req.page,
-        req.limit
+        req.limit,
+        user_id=req.user_id  # Pass user_id for personalized ordering
     )
     
     logger.info(f"Generated {len(recommendations)} recommendations for user {req.user_id}")
