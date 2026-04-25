@@ -26,7 +26,7 @@ type SelectionConfig = {
   subtitle?: string;
   options: string[];
   multiSelect: boolean;
-  displayAs: 'chips' | 'tiles' | 'list';
+  displayAs: 'chips' | 'tiles' | 'list' | 'language-tiles';
   field: keyof ProfileData;
 };
 
@@ -124,6 +124,7 @@ export default function OnboardingScreen() {
     if (step >= 1 && step <= 7) {
       const config = SELECTION_CONFIGS[step];
       const showOthersInput = step === 6;
+      const showVisibilityToggle = step === 2; // Only for "Who do you want to meet?"
       return (
         <SelectionStep
           title={config.title}
@@ -136,6 +137,9 @@ export default function OnboardingScreen() {
           showOthersInput={showOthersInput}
           othersValue={(data as any).otherFilmLanguages || ''}
           onOthersChange={(val) => updateField('otherFilmLanguages', val)}
+          showVisibilityToggle={showVisibilityToggle}
+          visibilityValue={data.visibilityToggles.partnerPreference}
+          onVisibilityChange={(val) => updateField('visibilityToggles', { ...data.visibilityToggles, partnerPreference: val })}
         />
       );
     }

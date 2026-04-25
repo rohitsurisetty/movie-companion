@@ -203,6 +203,34 @@ test_plan:
 agent_communication:
   - agent: "main"
     message: |
+      SESSION UPDATE - DOB Picker, Height Picker, and "Who do you want to meet" mandatory logic:
+      
+      CHANGES MADE:
+      1. DOB Picker (BasicInfoStep.tsx):
+         - Already implemented as iOS-style 3-column embedded wheel picker (Day/Month/Year)
+         - Verified working in screenshot - shows minimalistic scrollable with red highlight
+         - Age verification logic present - shows blocking screen if age < 18
+         - Default year starts at currentYear - 25 (around 2001)
+      
+      2. Height Picker (OptionalProfileStep.tsx):
+         - Already implemented as iOS-style wheel picker
+         - Supports both imperial (ft/in) and metric (cm) modes
+         - Toggle to switch between units
+         - Shows selected height in gold color at bottom
+      
+      3. "Who do you want to meet" mandatory logic (onboarding.tsx + SelectionStep.tsx):
+         - Selection (Men/Women/Anyone) is MANDATORY - validated by isSelectionValid
+         - Added new "Show on my profile" toggle that is OPTIONAL
+         - Toggle controls visibilityToggles.partnerPreference
+         - Updated SelectionStep to accept showVisibilityToggle, visibilityValue, onVisibilityChange props
+      
+      4. Fixed TypeScript error:
+         - Added 'language-tiles' to SelectionConfig type in onboarding.tsx
+      
+      All changes are in place. Frontend restart done.
+      No backend changes were needed.
+  - agent: "main"
+    message: |
       Implemented Iteration 2 features:
       1. Created /app/frontend/app/swipe.tsx with:
          - Tinder-like card swiping using GestureDetector and react-native-reanimated

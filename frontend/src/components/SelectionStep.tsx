@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput, Switch } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, BORDER_RADIUS } from '../theme';
 
@@ -14,6 +14,10 @@ type Props = {
   showOthersInput?: boolean;
   othersValue?: string;
   onOthersChange?: (value: string) => void;
+  // Optional "Show on my profile" toggle
+  showVisibilityToggle?: boolean;
+  visibilityValue?: boolean;
+  onVisibilityChange?: (value: boolean) => void;
 };
 
 // Language code mappings for tiles
@@ -35,7 +39,8 @@ const LANGUAGE_LETTERS: Record<string, string> = {
 
 export default function SelectionStep({ 
   title, subtitle, options, selected, onSelect, multiSelect, displayAs,
-  showOthersInput, othersValue, onOthersChange 
+  showOthersInput, othersValue, onOthersChange,
+  showVisibilityToggle, visibilityValue, onVisibilityChange
 }: Props) {
   const [customLanguage, setCustomLanguage] = useState(othersValue || '');
 
@@ -171,6 +176,25 @@ export default function SelectionStep({
       {displayAs === 'tiles' && renderTiles()}
       {displayAs === 'language-tiles' && renderLanguageTiles()}
       {displayAs === 'list' && renderList()}
+      
+      {/* Optional "Show on my profile" toggle */}
+      {showVisibilityToggle && (
+        <View style={styles.visibilityToggleContainer}>
+          <View style={styles.visibilityToggleRow}>
+            <View style={styles.visibilityToggleInfo}>
+              <Text style={styles.visibilityToggleLabel}>Show on my profile</Text>
+              <Text style={styles.visibilityToggleHint}>Others can see this preference (Optional)</Text>
+            </View>
+            <Switch
+              value={visibilityValue ?? true}
+              onValueChange={onVisibilityChange}
+              trackColor={{ false: COLORS.border, true: COLORS.primaryDark }}
+              thumbColor={visibilityValue ? COLORS.primary : COLORS.textMuted}
+              testID="visibility-toggle"
+            />
+          </View>
+        </View>
+      )}
     </ScrollView>
   );
 }
@@ -241,4 +265,32 @@ const styles = StyleSheet.create({
   listItemActive: { borderColor: COLORS.primary, backgroundColor: 'rgba(229,9,20,0.08)' },
   listText: { fontSize: 16, color: COLORS.textSecondary, fontWeight: '500' },
   listTextActive: { color: COLORS.text, fontWeight: '600' },
+  // Visibility toggle styles
+  visibilityToggleContainer: {
+    marginTop: SPACING.xl,
+    padding: SPACING.m,
+    backgroundColor: COLORS.bgCard,
+    borderRadius: BORDER_RADIUS.m,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  visibilityToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  visibilityToggleInfo: {
+    flex: 1,
+    marginRight: SPACING.m,
+  },
+  visibilityToggleLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: COLORS.text,
+  },
+  visibilityToggleHint: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    marginTop: 2,
+  },
 });
