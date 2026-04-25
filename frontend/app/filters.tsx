@@ -773,26 +773,6 @@ export default function FiltersScreen() {
         title="Expand If Run Out"
         description="When enabled, if we run out of matches with your current filters, we'll automatically expand to show more profiles that closely match your preferences."
       />
-
-      {/* Info Tooltips for Distance, Age, Height */}
-      <InfoTooltip
-        visible={showDistanceInfo}
-        onClose={() => setShowDistanceInfo(false)}
-        title="Distance Radius"
-        description="Set the maximum distance for potential matches. Drag the slider to adjust. Select 'Infinite' to see matches from anywhere."
-      />
-      <InfoTooltip
-        visible={showAgeInfo}
-        onClose={() => setShowAgeInfo(false)}
-        title="Age Range"
-        description="Set your preferred age range for matches. Drag the left thumb for minimum age and right thumb for maximum age."
-      />
-      <InfoTooltip
-        visible={showHeightInfo}
-        onClose={() => setShowHeightInfo(false)}
-        title="Height Preference"
-        description="Set your preferred height range. Switch between feet/inches and centimeters using the toggle. Scroll to select minimum and maximum heights."
-      />
     </SafeAreaView>
   );
 }
