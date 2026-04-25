@@ -580,7 +580,7 @@ const drawerStyles = StyleSheet.create({
   modeDesc: { fontSize: 13 },
 });
 
-// Profile Drawer Component
+// Profile Drawer Component - Fully Scrollable with Swipe Dismiss
 function ProfileDrawer({
   visible, onClose, onLogout, colors, onFilters, onViewProfile,
 }: {
@@ -592,93 +592,160 @@ function ProfileDrawer({
   onViewProfile: () => void;
 }) {
   const [profile, setProfile] = useState<ProfileData | null>(null);
+  const bottomSheetRef = useRef<BottomSheet>(null);
+  const snapPoints = useMemo(() => ['90%'], []);
 
   useEffect(() => {
     if (visible) {
       getProfile().then(setProfile);
+      bottomSheetRef.current?.expand();
+    } else {
+      bottomSheetRef.current?.close();
     }
   }, [visible]);
 
+  const handleSheetChanges = useCallback((index: number) => {
+    if (index === -1) {
+      onClose();
+    }
+  }, [onClose]);
+
+  const renderBackdrop = useCallback(
+    (props: any) => (
+      <BottomSheetBackdrop
+        {...props}
+        disappearsOnIndex={-1}
+        appearsOnIndex={0}
+        opacity={0.6}
+        pressBehavior="close"
+      />
+    ),
+    []
+  );
+
+  // Helper to extract partial location (City, State, Country)
+  const getPartialLocation = (fullLocation: string | undefined) => {
+    if (!fullLocation) return '';
+    // Split by comma and take last 3 parts (typically City, State, Country)
+    const parts = fullLocation.split(',').map(p => p.trim());
+    if (parts.length <= 3) return fullLocation;
+    // Take last 3 parts
+    return parts.slice(-3).join(', ');
+  };
+
   const topMovies = profile?.topMovies || [];
 
+  if (!visible) return null;
+
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={profileStyles.overlay} onPress={onClose}>
-        <Pressable style={[profileStyles.container, { backgroundColor: colors.bgCard }]} onPress={(e) => e.stopPropagation()}>
-          <View style={profileStyles.handle} />
-          
-          {/* Header - Clickable to view full profile */}
-          <TouchableOpacity style={profileStyles.header} onPress={onViewProfile} activeOpacity={0.8}>
-            <View style={[profileStyles.avatarCircle, { backgroundColor: colors.primary }]}>
-              <Ionicons name="person" size={32} color="#FFF" />
-            </View>
-            <View style={profileStyles.headerInfo}>
-              <Text style={[profileStyles.name, { color: colors.text }]}>{profile?.name || 'User'}</Text>
-              <Text style={[profileStyles.subInfo, { color: colors.textSecondary }]}>
-                {profile?.age ? `${profile.age} years` : ''}{profile?.location ? ` • ${profile.location}` : ''}
+    <BottomSheet
+      ref={bottomSheetRef}
+      index={0}
+      snapPoints={snapPoints}
+      onChange={handleSheetChanges}
+      enablePanDownToClose={true}
+      backdropComponent={renderBackdrop}
+      backgroundStyle={{ backgroundColor: colors.bgCard }}
+      handleIndicatorStyle={{ backgroundColor: '#555', width: 48, height: 5 }}
+    >
+      <BottomSheetScrollView 
+        style={profileStyles.scroll}
+        contentContainerStyle={profileStyles.scrollContent}
+        showsVerticalScrollIndicator={true}
+      >
+        {/* Header - Clickable to view full profile */}
+        <TouchableOpacity style={profileStyles.header} onPress={onViewProfile} activeOpacity={0.8}>
+          <View style={[profileStyles.avatarCircle, { backgroundColor: colors.primary }]}>
+            <Ionicons name="person" size={32} color="#FFF" />
+          </View>
+          <View style={profileStyles.headerInfo}>
+            <Text style={[profileStyles.name, { color: colors.text }]}>
+              {profile?.name || 'User'}{profile?.age ? `, ${profile.age}` : ''}
+            </Text>
+            {profile?.gender && (
+              <Text style={[profileStyles.genderText, { color: colors.textSecondary }]}>{profile.gender}</Text>
+            )}
+            {profile?.location && (
+              <Text style={[profileStyles.locationText, { color: colors.textMuted }]}>
+                {getPartialLocation(profile.location)}
               </Text>
-              <Text style={[profileStyles.viewProfileText, { color: colors.primary }]}>View & Edit Profile →</Text>
+            )}
+            <Text style={[profileStyles.viewProfileText, { color: colors.primary }]}>View & Edit Profile →</Text>
+          </View>
+        </TouchableOpacity>
+
+        {/* Favourite Genres */}
+        {profile?.genres && profile.genres.length > 0 && (
+          <View style={profileStyles.section}>
+            <Text style={[profileStyles.sectionTitle, { color: colors.textSecondary }]}>Favourite Genres</Text>
+            <View style={profileStyles.tagsRow}>
+              {profile.genres.slice(0, 5).map((genre, i) => (
+                <View key={i} style={[profileStyles.tag, { borderColor: colors.border }]}>
+                  <Text style={[profileStyles.tagText, { color: colors.text }]}>{genre}</Text>
+                </View>
+              ))}
             </View>
-          </TouchableOpacity>
+          </View>
+        )}
 
-          {/* Profile Details */}
-          <ScrollView style={profileStyles.scroll} showsVerticalScrollIndicator={false}>
-            {profile?.genres && profile.genres.length > 0 && (
-              <View style={profileStyles.section}>
-                <Text style={[profileStyles.sectionTitle, { color: colors.textSecondary }]}>Favourite Genres</Text>
-                <View style={profileStyles.tagsRow}>
-                  {profile.genres.slice(0, 5).map((genre, i) => (
-                    <View key={i} style={[profileStyles.tag, { borderColor: colors.border }]}>
-                      <Text style={[profileStyles.tagText, { color: colors.text }]}>{genre}</Text>
-                    </View>
-                  ))}
+        {/* Languages I Watch */}
+        {profile?.filmLanguages && profile.filmLanguages.length > 0 && (
+          <View style={profileStyles.section}>
+            <Text style={[profileStyles.sectionTitle, { color: colors.textSecondary }]}>Languages I Watch</Text>
+            <View style={profileStyles.tagsRow}>
+              {profile.filmLanguages.map((lang, i) => (
+                <View key={i} style={[profileStyles.tag, { borderColor: colors.border }]}>
+                  <Text style={[profileStyles.tagText, { color: colors.text }]}>{lang}</Text>
                 </View>
-              </View>
-            )}
+              ))}
+            </View>
+          </View>
+        )}
 
-            {/* Top 5 Movies */}
-            {topMovies.length > 0 && (
-              <View style={profileStyles.section}>
-                <Text style={[profileStyles.sectionTitle, { color: colors.textSecondary }]}>Your Top 5 Movies</Text>
-                <View style={profileStyles.moviesGrid}>
-                  {topMovies.map((movie, i) => (
-                    <View key={i} style={profileStyles.movieItem}>
-                      <Image 
-                        source={{ uri: `https://image.tmdb.org/t/p/w200${movie.poster_path}` }}
-                        style={profileStyles.moviePoster}
-                        resizeMode="cover"
-                      />
-                      <Text style={[profileStyles.movieTitle, { color: colors.text }]} numberOfLines={2}>{movie.title}</Text>
-                      <View style={profileStyles.movieRating}>
-                        <Ionicons name="star" size={12} color={colors.gold} />
-                        <Text style={[profileStyles.ratingText, { color: colors.gold }]}>{movie.rating}</Text>
-                      </View>
-                    </View>
-                  ))}
+        {/* Top 5 Movies */}
+        {topMovies.length > 0 && (
+          <View style={profileStyles.section}>
+            <Text style={[profileStyles.sectionTitle, { color: colors.textSecondary }]}>Your Top 5 Movies</Text>
+            <View style={profileStyles.moviesGrid}>
+              {topMovies.map((movie, i) => (
+                <View key={i} style={profileStyles.movieItem}>
+                  <Image 
+                    source={{ uri: `https://image.tmdb.org/t/p/w200${movie.poster_path}` }}
+                    style={profileStyles.moviePoster}
+                    resizeMode="cover"
+                  />
+                  <Text style={[profileStyles.movieTitle, { color: colors.text }]} numberOfLines={2}>{movie.title}</Text>
+                  <View style={profileStyles.movieRating}>
+                    <Ionicons name="star" size={12} color={colors.gold} />
+                    <Text style={[profileStyles.ratingText, { color: colors.gold }]}>{movie.rating}</Text>
+                  </View>
                 </View>
+              ))}
+            </View>
+          </View>
+        )}
+
+        {/* Other Profile Info - Preferences */}
+        {(profile?.ottTheatre || profile?.movieFrequency) && (
+          <View style={profileStyles.section}>
+            <Text style={[profileStyles.sectionTitle, { color: colors.textSecondary }]}>Preferences</Text>
+            {profile?.ottTheatre && (
+              <View style={profileStyles.infoRow}>
+                <Ionicons name="tv-outline" size={18} color={colors.textMuted} />
+                <Text style={[profileStyles.infoText, { color: colors.text }]}>{profile.ottTheatre}</Text>
               </View>
             )}
-
-            {/* Other Profile Info */}
-            {(profile?.ottTheatre || profile?.movieFrequency) && (
-              <View style={profileStyles.section}>
-                <Text style={[profileStyles.sectionTitle, { color: colors.textSecondary }]}>Preferences</Text>
-                {profile?.ottTheatre && (
-                  <View style={profileStyles.infoRow}>
-                    <Ionicons name="tv-outline" size={18} color={colors.textMuted} />
-                    <Text style={[profileStyles.infoText, { color: colors.text }]}>{profile.ottTheatre}</Text>
-                  </View>
-                )}
-                {profile?.movieFrequency && (
-                  <View style={profileStyles.infoRow}>
-                    <Ionicons name="time-outline" size={18} color={colors.textMuted} />
-                    <Text style={[profileStyles.infoText, { color: colors.text }]}>{profile.movieFrequency}</Text>
-                  </View>
-                )}
+            {profile?.movieFrequency && (
+              <View style={profileStyles.infoRow}>
+                <Ionicons name="time-outline" size={18} color={colors.textMuted} />
+                <Text style={[profileStyles.infoText, { color: colors.text }]}>{profile.movieFrequency}</Text>
               </View>
             )}
-          </ScrollView>
+          </View>
+        )}
 
+        {/* Action Buttons */}
+        <View style={profileStyles.buttonsContainer}>
           {/* View Full Profile Button */}
           <TouchableOpacity
             style={[profileStyles.viewProfileBtn, { backgroundColor: colors.primary }]}
@@ -711,23 +778,25 @@ function ProfileDrawer({
             <Ionicons name="log-out-outline" size={20} color="#FF6B6B" />
             <Text style={profileStyles.logoutText}>Logout & Start Over</Text>
           </TouchableOpacity>
-        </Pressable>
-      </Pressable>
-    </Modal>
+        </View>
+
+        {/* Bottom padding */}
+        <View style={{ height: 40 }} />
+      </BottomSheetScrollView>
+    </BottomSheet>
   );
 }
 
 const profileStyles = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
-  container: { borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: SPACING.l, paddingBottom: SPACING.xxl, maxHeight: '85%' },
-  handle: { width: 40, height: 4, backgroundColor: '#555', borderRadius: 2, alignSelf: 'center', marginBottom: SPACING.l },
-  header: { flexDirection: 'row', alignItems: 'center', marginBottom: SPACING.l },
+  scroll: { flex: 1, paddingHorizontal: SPACING.l },
+  scrollContent: { paddingBottom: SPACING.l },
+  header: { flexDirection: 'row', alignItems: 'center', marginBottom: SPACING.l, paddingTop: SPACING.s },
   avatarCircle: { width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center', marginRight: SPACING.m },
   headerInfo: { flex: 1 },
   name: { fontSize: 22, fontWeight: 'bold', marginBottom: 2 },
-  subInfo: { fontSize: 14 },
+  genderText: { fontSize: 14, marginBottom: 2 },
+  locationText: { fontSize: 13, marginBottom: SPACING.xs },
   viewProfileText: { fontSize: 12, fontWeight: '600', marginTop: SPACING.xs },
-  scroll: { maxHeight: 300 },
   section: { marginBottom: SPACING.l },
   sectionTitle: { fontSize: 13, fontWeight: '600', marginBottom: SPACING.s, textTransform: 'uppercase', letterSpacing: 1 },
   tagsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.s },
@@ -741,19 +810,20 @@ const profileStyles = StyleSheet.create({
   ratingText: { fontSize: 11, fontWeight: '600' },
   infoRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.s, marginBottom: SPACING.s },
   infoText: { fontSize: 14 },
+  buttonsContainer: { marginTop: SPACING.m },
   viewProfileBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SPACING.s,
-    paddingVertical: 14, borderRadius: BORDER_RADIUS.full, marginTop: SPACING.m,
+    paddingVertical: 14, borderRadius: BORDER_RADIUS.full, marginBottom: SPACING.m,
   },
   viewProfileBtnText: { fontSize: 16, fontWeight: '600', color: '#FFF' },
   filtersBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SPACING.s,
-    paddingVertical: 14, borderRadius: BORDER_RADIUS.full, borderWidth: 2, marginTop: SPACING.m,
+    paddingVertical: 14, borderRadius: BORDER_RADIUS.full, borderWidth: 2, marginBottom: SPACING.m,
   },
   filtersBtnText: { fontSize: 16, fontWeight: '600' },
   logoutBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SPACING.s,
-    paddingVertical: 14, borderRadius: BORDER_RADIUS.full, borderWidth: 2, marginTop: SPACING.m,
+    paddingVertical: 14, borderRadius: BORDER_RADIUS.full, borderWidth: 2,
   },
   logoutText: { fontSize: 16, fontWeight: '600', color: '#FF6B6B' },
 });
