@@ -761,9 +761,6 @@ async def get_swipe_history(user_id: str, limit: int = 50):
     }
 
 
-app.include_router(api_router)
-
-
 @api_router.delete("/user/{user_id}/reset-feed")
 async def reset_user_feed(user_id: str):
     """
@@ -828,6 +825,10 @@ async def reset_user_completely(user_id: str):
             "unwatched_patterns": unwatched_result.deleted_count,
         }
     }
+
+
+# Include router after all routes are defined
+app.include_router(api_router)
 
 
 app.add_middleware(

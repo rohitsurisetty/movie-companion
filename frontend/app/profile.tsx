@@ -584,13 +584,27 @@ export default function ProfileScreen() {
   const handleLogout = async () => {
     Alert.alert(
       'Logout',
-      'Are you sure you want to logout and clear all data?',
+      'Are you sure you want to logout and clear all data? This will delete your profile, preferences, and swipe history.',
       [
         { text: 'Cancel', style: 'cancel' },
         { 
-          text: 'Logout', 
+          text: 'Logout & Delete Data', 
           style: 'destructive',
           onPress: async () => {
+            try {
+              // Delete user data from backend first
+              if (profile.userId) {
+                await fetch(`${BACKEND_URL}/api/user/${profile.userId}/reset-all`, {
+                  method: 'DELETE',
+                });
+                console.log('Deleted user data from backend');
+              }
+            } catch (error) {
+              console.log('Error deleting backend data:', error);
+              // Continue with logout even if backend delete fails
+            }
+            
+            // Clear local storage
             await clearAll();
             router.replace('/');
           }
