@@ -207,8 +207,23 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
     return (
       <View style={styles.centerContent}>
         <Ionicons name="sad-outline" size={64} color={COLORS.primary} />
-        <Text style={styles.underAgeTitle}>Sorry!</Text>
-        <Text style={styles.underAgeText}>You must be over 18 to use Film Companion.</Text>
+        <Text style={styles.underAgeTitle}>Age Verification Failed</Text>
+        <Text style={styles.underAgeText}>You must be at least 18 years old to use Film Companion.</Text>
+        <TouchableOpacity 
+          style={styles.retryButton}
+          onPress={() => {
+            setUnderAge(false);
+            setAgeConfirmed(false);
+            // Reset to a valid adult year
+            const currentYear = new Date().getFullYear();
+            setSelectedYear(currentYear - 25);
+            setSelectedMonth(1);
+            setSelectedDay(1);
+          }}
+        >
+          <Ionicons name="arrow-back" size={20} color={COLORS.white} />
+          <Text style={styles.retryButtonText}>Go Back & Edit Date of Birth</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -501,4 +516,19 @@ const styles = StyleSheet.create({
   pickerItemTextActive: { color: COLORS.primary, fontWeight: '600' },
   underAgeTitle: { fontSize: 28, fontWeight: 'bold', color: COLORS.text, marginTop: SPACING.l },
   underAgeText: { fontSize: 16, color: COLORS.textSecondary, textAlign: 'center', marginTop: SPACING.m, lineHeight: 24 },
+  retryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.s,
+    backgroundColor: COLORS.primary,
+    paddingVertical: 14,
+    paddingHorizontal: SPACING.xl,
+    borderRadius: BORDER_RADIUS.full,
+    marginTop: SPACING.xl,
+  },
+  retryButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.white,
+  },
 });

@@ -1,11 +1,11 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, Modal,
-  PanResponder, Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import Slider from '@react-native-community/slider';
 import { COLORS, SPACING, BORDER_RADIUS } from '../src/theme';
 import { FiltersData, initialFiltersData, FilterSection, HeightFilter, AgeFilter } from '../src/types';
 import { saveFilters } from '../src/store';
@@ -46,78 +46,38 @@ const FILTER_CONFIGS: FilterConfig[] = [
 ];
 
 // ============================================
-// HORIZONTAL SLIDER BAR - Distance
+// SMOOTH DISTANCE SLIDER
 // ============================================
-function DistanceSlider({ value, onChange }: { value: number; onChange: (v: number) => void }) {
-  const [trackWidth, setTrackWidth] = useState(0);
-  const [isDragging, setIsDragging] = useState(false);
-  const trackRef = useRef<View>(null);
+function DistanceSliderComponent({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  // Convert -1 (infinite) to max slider value
+  const sliderValue = value < 0 ? MAX_KM + 1 : value;
+  
+  const handleChange = (val: number) => {
+    if (val > MAX_KM) {
+      onChange(-1); // Infinite
+    } else {
+      onChange(Math.round(val));
+    }
+  };
 
-  // Convert value to percentage (0-1)
-  const getPercent = useCallback(() => {
-    if (value < 0) return 1; // Infinite = 100%
-    return Math.min(value / MAX_KM, 1);
-  }, [value]);
-
-  // Convert position to value
-  const positionToValue = useCallback((x: number) => {
-    if (trackWidth === 0) return value;
-    const percent = Math.max(0, Math.min(1, x / trackWidth));
-    if (percent >= 0.95) return -1; // Infinite
-    return Math.round(percent * MAX_KM);
-  }, [trackWidth, value]);
-
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: (e) => {
-        setIsDragging(true);
-        const x = e.nativeEvent.locationX;
-        onChange(positionToValue(x));
-      },
-      onPanResponderMove: (e) => {
-        const x = e.nativeEvent.locationX;
-        onChange(positionToValue(x));
-      },
-      onPanResponderRelease: () => {
-        setIsDragging(false);
-      },
-      onPanResponderTerminate: () => {
-        setIsDragging(false);
-      },
-    })
-  ).current;
-
-  // Update panResponder when trackWidth changes
-  useEffect(() => {
-    panResponder.panHandlers.onResponderMove = (e: any) => {
-      const x = e.nativeEvent.locationX;
-      onChange(positionToValue(x));
-    };
-  }, [trackWidth, positionToValue, onChange]);
-
-  const thumbLeft = `${getPercent() * 100}%`;
   const label = value < 0 ? 'Infinite distance' : `${value} km`;
 
   return (
     <View style={sliderStyles.container}>
       <Text style={sliderStyles.label}>Upto: {label}</Text>
-      <View
-        ref={trackRef}
-        style={sliderStyles.trackWrapper}
-        onLayout={(e) => setTrackWidth(e.nativeEvent.layout.width)}
-        {...panResponder.panHandlers}
-      >
-        <View style={sliderStyles.track}>
-          <View style={[sliderStyles.trackFill, { width: thumbLeft }]} />
-        </View>
-        <View style={[sliderStyles.thumbOuter, { left: thumbLeft }]}>
-          <View style={[sliderStyles.thumb, isDragging && sliderStyles.thumbActive]} />
-        </View>
-      </View>
+      <Slider
+        style={sliderStyles.slider}
+        minimumValue={1}
+        maximumValue={MAX_KM + 1}
+        value={sliderValue}
+        onValueChange={handleChange}
+        minimumTrackTintColor={COLORS.primary}
+        maximumTrackTintColor={COLORS.border}
+        thumbTintColor={COLORS.primary}
+        step={1}
+      />
       <View style={sliderStyles.labelsRow}>
-        <Text style={sliderStyles.minLabel}>0</Text>
+        <Text style={sliderStyles.minLabel}>1 km</Text>
         <Text style={sliderStyles.maxLabel}>∞</Text>
       </View>
     </View>
@@ -125,90 +85,58 @@ function DistanceSlider({ value, onChange }: { value: number; onChange: (v: numb
 }
 
 // ============================================
-// HORIZONTAL SLIDER BAR - Age Range (Dual Thumb)
+// SMOOTH AGE RANGE SLIDER (Two separate sliders)
 // ============================================
-function AgeRangeSlider({ value, onChange }: { value: AgeFilter; onChange: (v: AgeFilter) => void }) {
-  const [trackWidth, setTrackWidth] = useState(0);
-  const [activeThumb, setActiveThumb] = useState<'min' | 'max' | null>(null);
+function AgeRangeSliderComponent({ value, onChange }: { value: AgeFilter; onChange: (v: AgeFilter) => void }) {
   const MIN_AGE = 18;
   const MAX_AGE = 60;
-  const RANGE = MAX_AGE - MIN_AGE;
 
-  const getMinPercent = () => ((value.min - MIN_AGE) / RANGE) * 100;
-  const getMaxPercent = () => ((value.max - MIN_AGE) / RANGE) * 100;
+  const handleMinChange = (val: number) => {
+    const newMin = Math.round(val);
+    if (newMin < value.max) {
+      onChange({ ...value, min: newMin });
+    }
+  };
 
-  const positionToAge = useCallback((x: number) => {
-    if (trackWidth === 0) return MIN_AGE;
-    const percent = Math.max(0, Math.min(1, x / trackWidth));
-    return Math.round(MIN_AGE + percent * RANGE);
-  }, [trackWidth]);
-
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: (e) => {
-        const x = e.nativeEvent.locationX;
-        const touchAge = positionToAge(x);
-        
-        // Determine which thumb is closer
-        const distToMin = Math.abs(touchAge - value.min);
-        const distToMax = Math.abs(touchAge - value.max);
-        
-        if (distToMin <= distToMax) {
-          setActiveThumb('min');
-          if (touchAge < value.max) {
-            onChange({ ...value, min: touchAge });
-          }
-        } else {
-          setActiveThumb('max');
-          if (touchAge > value.min) {
-            onChange({ ...value, max: touchAge });
-          }
-        }
-      },
-      onPanResponderMove: (e) => {
-        const x = e.nativeEvent.locationX;
-        const touchAge = positionToAge(x);
-        
-        if (activeThumb === 'min' && touchAge < value.max) {
-          onChange({ ...value, min: Math.max(MIN_AGE, touchAge) });
-        } else if (activeThumb === 'max' && touchAge > value.min) {
-          onChange({ ...value, max: Math.min(MAX_AGE, touchAge) });
-        }
-      },
-      onPanResponderRelease: () => {
-        setActiveThumb(null);
-      },
-      onPanResponderTerminate: () => {
-        setActiveThumb(null);
-      },
-    })
-  ).current;
+  const handleMaxChange = (val: number) => {
+    const newMax = Math.round(val);
+    if (newMax > value.min) {
+      onChange({ ...value, max: newMax });
+    }
+  };
 
   return (
     <View style={sliderStyles.container}>
       <Text style={sliderStyles.label}>{value.min} - {value.max} years</Text>
-      <View
-        style={sliderStyles.trackWrapper}
-        onLayout={(e) => setTrackWidth(e.nativeEvent.layout.width)}
-        {...panResponder.panHandlers}
-      >
-        <View style={sliderStyles.track}>
-          <View style={[
-            sliderStyles.trackFillRange,
-            { left: `${getMinPercent()}%`, width: `${getMaxPercent() - getMinPercent()}%` }
-          ]} />
-        </View>
-        {/* Min thumb */}
-        <View style={[sliderStyles.thumbOuter, { left: `${getMinPercent()}%` }]}>
-          <View style={[sliderStyles.thumb, activeThumb === 'min' && sliderStyles.thumbActive]} />
-        </View>
-        {/* Max thumb */}
-        <View style={[sliderStyles.thumbOuter, { left: `${getMaxPercent()}%` }]}>
-          <View style={[sliderStyles.thumb, activeThumb === 'max' && sliderStyles.thumbActive]} />
-        </View>
-      </View>
+      
+      {/* Min Age Slider */}
+      <Text style={sliderStyles.subLabel}>Minimum Age: {value.min}</Text>
+      <Slider
+        style={sliderStyles.slider}
+        minimumValue={MIN_AGE}
+        maximumValue={MAX_AGE}
+        value={value.min}
+        onValueChange={handleMinChange}
+        minimumTrackTintColor={COLORS.primary}
+        maximumTrackTintColor={COLORS.border}
+        thumbTintColor={COLORS.primary}
+        step={1}
+      />
+      
+      {/* Max Age Slider */}
+      <Text style={[sliderStyles.subLabel, { marginTop: SPACING.m }]}>Maximum Age: {value.max}</Text>
+      <Slider
+        style={sliderStyles.slider}
+        minimumValue={MIN_AGE}
+        maximumValue={MAX_AGE}
+        value={value.max}
+        onValueChange={handleMaxChange}
+        minimumTrackTintColor={COLORS.primary}
+        maximumTrackTintColor={COLORS.border}
+        thumbTintColor={COLORS.primary}
+        step={1}
+      />
+      
       <View style={sliderStyles.labelsRow}>
         <Text style={sliderStyles.minLabel}>{MIN_AGE}</Text>
         <Text style={sliderStyles.maxLabel}>{MAX_AGE}</Text>
@@ -217,7 +145,6 @@ function AgeRangeSlider({ value, onChange }: { value: AgeFilter; onChange: (v: A
   );
 }
 
-// Slider Styles
 const sliderStyles = StyleSheet.create({
   container: {
     backgroundColor: COLORS.bgCard,
@@ -230,60 +157,21 @@ const sliderStyles = StyleSheet.create({
     fontWeight: '600',
     color: COLORS.gold,
     textAlign: 'center',
-    marginBottom: SPACING.l,
+    marginBottom: SPACING.s,
   },
-  trackWrapper: {
+  subLabel: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    marginBottom: SPACING.xs,
+  },
+  slider: {
+    width: '100%',
     height: 40,
-    justifyContent: 'center',
-    position: 'relative',
-  },
-  track: {
-    height: 6,
-    backgroundColor: COLORS.border,
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  trackFill: {
-    height: '100%',
-    backgroundColor: COLORS.primary,
-    borderRadius: 3,
-  },
-  trackFillRange: {
-    position: 'absolute',
-    height: '100%',
-    backgroundColor: COLORS.primary,
-  },
-  thumbOuter: {
-    position: 'absolute',
-    top: '50%',
-    marginTop: -16,
-    marginLeft: -16,
-    width: 32,
-    height: 32,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  thumb: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: COLORS.white,
-    borderWidth: 3,
-    borderColor: COLORS.primary,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 5,
-  },
-  thumbActive: {
-    transform: [{ scale: 1.15 }],
-    borderColor: COLORS.primaryDark,
   },
   labelsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: SPACING.s,
+    marginTop: SPACING.xs,
   },
   minLabel: {
     fontSize: 12,
@@ -296,7 +184,7 @@ const sliderStyles = StyleSheet.create({
 });
 
 // ============================================
-// iOS WHEEL PICKER - Height (like DOB picker)
+// iOS WHEEL PICKER - Height with Min ≤ Max validation
 // ============================================
 function HeightWheelPicker({ value, onChange }: { value: HeightFilter; onChange: (v: HeightFilter) => void }) {
   const [isMetric, setIsMetric] = useState(value.unit === 'metric');
@@ -317,6 +205,9 @@ function HeightWheelPicker({ value, onChange }: { value: HeightFilter; onChange:
   const minCmIdx = CM_VALUES.indexOf(value.minCm) >= 0 ? CM_VALUES.indexOf(value.minCm) : 30;
   const maxCmIdx = CM_VALUES.indexOf(value.maxCm) >= 0 ? CM_VALUES.indexOf(value.maxCm) : 70;
 
+  // Helper to convert ft/in to total inches for comparison
+  const toTotalInches = (feet: number, inches: number) => feet * 12 + inches;
+
   // Scroll to initial positions
   useEffect(() => {
     setTimeout(() => {
@@ -332,12 +223,30 @@ function HeightWheelPicker({ value, onChange }: { value: HeightFilter; onChange:
     }, 100);
   }, [isMetric]);
 
+  // Validation: Ensure min ≤ max
+  const validateAndUpdate = (newValue: HeightFilter) => {
+    const minTotal = toTotalInches(newValue.minFeet, newValue.minInches);
+    const maxTotal = toTotalInches(newValue.maxFeet, newValue.maxInches);
+    
+    if (minTotal <= maxTotal) {
+      onChange(newValue);
+    }
+    // If invalid, don't update (keeps current valid state)
+  };
+
+  const validateAndUpdateCm = (newValue: HeightFilter) => {
+    if (newValue.minCm <= newValue.maxCm) {
+      onChange(newValue);
+    }
+  };
+
   const handleMinFeetScroll = (e: any) => {
     const y = e.nativeEvent.contentOffset.y;
     const idx = Math.round(y / ITEM_HEIGHT);
     const clampedIdx = Math.max(0, Math.min(FEET.length - 1, idx));
-    if (FEET[clampedIdx] !== value.minFeet) {
-      onChange({ ...value, minFeet: FEET[clampedIdx] });
+    const newFeet = FEET[clampedIdx];
+    if (newFeet !== value.minFeet) {
+      validateAndUpdate({ ...value, minFeet: newFeet });
     }
   };
 
@@ -345,8 +254,9 @@ function HeightWheelPicker({ value, onChange }: { value: HeightFilter; onChange:
     const y = e.nativeEvent.contentOffset.y;
     const idx = Math.round(y / ITEM_HEIGHT);
     const clampedIdx = Math.max(0, Math.min(INCHES.length - 1, idx));
-    if (INCHES[clampedIdx] !== value.minInches) {
-      onChange({ ...value, minInches: INCHES[clampedIdx] });
+    const newInch = INCHES[clampedIdx];
+    if (newInch !== value.minInches) {
+      validateAndUpdate({ ...value, minInches: newInch });
     }
   };
 
@@ -354,8 +264,9 @@ function HeightWheelPicker({ value, onChange }: { value: HeightFilter; onChange:
     const y = e.nativeEvent.contentOffset.y;
     const idx = Math.round(y / ITEM_HEIGHT);
     const clampedIdx = Math.max(0, Math.min(FEET.length - 1, idx));
-    if (FEET[clampedIdx] !== value.maxFeet) {
-      onChange({ ...value, maxFeet: FEET[clampedIdx] });
+    const newFeet = FEET[clampedIdx];
+    if (newFeet !== value.maxFeet) {
+      validateAndUpdate({ ...value, maxFeet: newFeet });
     }
   };
 
@@ -363,8 +274,9 @@ function HeightWheelPicker({ value, onChange }: { value: HeightFilter; onChange:
     const y = e.nativeEvent.contentOffset.y;
     const idx = Math.round(y / ITEM_HEIGHT);
     const clampedIdx = Math.max(0, Math.min(INCHES.length - 1, idx));
-    if (INCHES[clampedIdx] !== value.maxInches) {
-      onChange({ ...value, maxInches: INCHES[clampedIdx] });
+    const newInch = INCHES[clampedIdx];
+    if (newInch !== value.maxInches) {
+      validateAndUpdate({ ...value, maxInches: newInch });
     }
   };
 
@@ -372,8 +284,9 @@ function HeightWheelPicker({ value, onChange }: { value: HeightFilter; onChange:
     const y = e.nativeEvent.contentOffset.y;
     const idx = Math.round(y / ITEM_HEIGHT);
     const clampedIdx = Math.max(0, Math.min(CM_VALUES.length - 1, idx));
-    if (CM_VALUES[clampedIdx] !== value.minCm) {
-      onChange({ ...value, minCm: CM_VALUES[clampedIdx] });
+    const newCm = CM_VALUES[clampedIdx];
+    if (newCm !== value.minCm) {
+      validateAndUpdateCm({ ...value, minCm: newCm });
     }
   };
 
@@ -381,8 +294,9 @@ function HeightWheelPicker({ value, onChange }: { value: HeightFilter; onChange:
     const y = e.nativeEvent.contentOffset.y;
     const idx = Math.round(y / ITEM_HEIGHT);
     const clampedIdx = Math.max(0, Math.min(CM_VALUES.length - 1, idx));
-    if (CM_VALUES[clampedIdx] !== value.maxCm) {
-      onChange({ ...value, maxCm: CM_VALUES[clampedIdx] });
+    const newCm = CM_VALUES[clampedIdx];
+    if (newCm !== value.maxCm) {
+      validateAndUpdateCm({ ...value, maxCm: newCm });
     }
   };
 
@@ -584,7 +498,7 @@ function HeightWheelPicker({ value, onChange }: { value: HeightFilter; onChange:
   );
 }
 
-// Wheel Picker Styles (same as DOB picker)
+// Wheel Picker Styles
 const wheelStyles = StyleSheet.create({
   container: {
     backgroundColor: COLORS.bgCard,
@@ -728,7 +642,7 @@ const tooltipStyles = StyleSheet.create({
 });
 
 // ============================================
-// FILTER SECTION CARD (Collapsible)
+// FILTER SECTION CARD (Collapsible) - Uses 'selected' field
 // ============================================
 function FilterSectionCard({ config, section, onUpdate }: {
   config: FilterConfig; section: FilterSection; onUpdate: (s: FilterSection) => void;
@@ -736,9 +650,17 @@ function FilterSectionCard({ config, section, onUpdate }: {
   const [expanded, setExpanded] = useState(false);
 
   const toggleOption = (opt: string) => {
-    const vals = section.values || [];
+    const vals = section.selected || [];
     const newVals = vals.includes(opt) ? vals.filter(v => v !== opt) : [...vals, opt];
-    onUpdate({ ...section, values: newVals });
+    onUpdate({ ...section, selected: newVals });
+  };
+
+  const selectAll = () => {
+    onUpdate({ ...section, selected: [...config.options] });
+  };
+
+  const deselectAll = () => {
+    onUpdate({ ...section, selected: [] });
   };
 
   return (
@@ -746,9 +668,9 @@ function FilterSectionCard({ config, section, onUpdate }: {
       <TouchableOpacity style={fStyles.header} onPress={() => setExpanded(!expanded)}>
         <Text style={fStyles.title}>{config.title}</Text>
         <View style={fStyles.headerRight}>
-          {(section.values?.length || 0) > 0 && (
+          {(section.selected?.length || 0) > 0 && (
             <View style={fStyles.badge}>
-              <Text style={fStyles.badgeText}>{section.values?.length}</Text>
+              <Text style={fStyles.badgeText}>{section.selected?.length}</Text>
             </View>
           )}
           <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={20} color={COLORS.textMuted} />
@@ -776,14 +698,25 @@ function FilterSectionCard({ config, section, onUpdate }: {
               <Text style={fStyles.checkLabel}>Expand if run out</Text>
             </TouchableOpacity>
           </View>
+          
+          {/* Quick select/deselect buttons */}
+          <View style={fStyles.quickActions}>
+            <TouchableOpacity style={fStyles.quickBtn} onPress={selectAll}>
+              <Text style={fStyles.quickBtnText}>Select All</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={fStyles.quickBtn} onPress={deselectAll}>
+              <Text style={fStyles.quickBtnText}>Clear All</Text>
+            </TouchableOpacity>
+          </View>
+          
           <View style={fStyles.chips}>
             {config.options.map(opt => (
               <TouchableOpacity
                 key={opt}
-                style={[fStyles.chip, section.values?.includes(opt) && fStyles.chipActive]}
+                style={[fStyles.chip, section.selected?.includes(opt) && fStyles.chipActive]}
                 onPress={() => toggleOption(opt)}
               >
-                <Text style={[fStyles.chipText, section.values?.includes(opt) && fStyles.chipTextActive]}>{opt}</Text>
+                <Text style={[fStyles.chipText, section.selected?.includes(opt) && fStyles.chipTextActive]}>{opt}</Text>
               </TouchableOpacity>
             ))}
           </View>
@@ -806,6 +739,9 @@ const fStyles = StyleSheet.create({
   checkBox: { width: 20, height: 20, borderRadius: 4, borderWidth: 1.5, borderColor: COLORS.border, alignItems: 'center', justifyContent: 'center' },
   checkBoxChecked: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
   checkLabel: { fontSize: 13, color: COLORS.textSecondary },
+  quickActions: { flexDirection: 'row', gap: SPACING.s, marginBottom: SPACING.m },
+  quickBtn: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: BORDER_RADIUS.s, backgroundColor: COLORS.bgInput },
+  quickBtnText: { fontSize: 12, color: COLORS.textMuted },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.s },
   chip: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: BORDER_RADIUS.full, backgroundColor: COLORS.bgInput, borderWidth: 1, borderColor: COLORS.border },
   chipActive: { borderColor: COLORS.primary, backgroundColor: 'rgba(229,9,20,0.15)' },
@@ -855,7 +791,7 @@ export default function FiltersScreen() {
           Set your preferences to find the perfect movie companions. These are all optional and can be changed later.
         </Text>
 
-        {/* Distance Radius - Horizontal Slider */}
+        {/* Distance Radius - Smooth Slider */}
         <View style={pStyles.section}>
           <Text style={pStyles.title}>Distance Radius</Text>
           <View style={pStyles.checkboxRow}>
@@ -884,13 +820,13 @@ export default function FiltersScreen() {
               </TouchableOpacity>
             </TouchableOpacity>
           </View>
-          <DistanceSlider
+          <DistanceSliderComponent
             value={filters.distance.radius}
             onChange={(v) => setFilters(prev => ({ ...prev, distance: { ...prev.distance, radius: v } }))}
           />
         </View>
 
-        {/* Age Range - Horizontal Slider */}
+        {/* Age Range - Smooth Slider */}
         <View style={pStyles.section}>
           <Text style={pStyles.title}>Age Range</Text>
           <View style={pStyles.checkboxRow}>
@@ -919,7 +855,7 @@ export default function FiltersScreen() {
               </TouchableOpacity>
             </TouchableOpacity>
           </View>
-          <AgeRangeSlider
+          <AgeRangeSliderComponent
             value={filters.age}
             onChange={(v) => setFilters(prev => ({ ...prev, age: v }))}
           />
