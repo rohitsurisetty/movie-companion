@@ -140,6 +140,51 @@ backend:
         agent: "testing"
         comment: "✅ TESTED SUCCESSFULLY: Movie details API working correctly. Tested Fight Club (ID: 550) and Inception (ID: 27205). Returns proper JSON with id, title, overview, runtime, genres, cast, directors. All required fields present and correctly formatted."
 
+  - task: "Comprehensive Recommendation Engine"
+    implemented: true
+    working: true
+    file: "/app/backend/recommendation_engine.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Enhanced recommendation engine with comprehensive TMDB data extraction for taste profiling. Includes full cast/crew, keywords, production details for both top movies and swipe signals."
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTED SUCCESSFULLY: Comprehensive recommendation engine working perfectly. All 5 new endpoints tested: 1) Profile save with top movies enrichment (5/5 movies enriched, 50 actors, 6 directors, 110 keywords extracted), 2) Right swipe with rating (comprehensive signal extraction), 3) Left swipe recording, 4) Rich taste profile generation (Action/Thriller/Drama genres, Michael Caine/Edward Norton/Brad Pitt actors, Christopher Nolan/David Fincher directors), 5) Personalized recommendations with language filtering (10 movies returned, 198 taste dimensions). Backend logs confirm 'append_to_response=credits%2Ckeywords' in TMDB requests and proper enrichment logging."
+
+  - task: "Top Movies Enrichment"
+    implemented: true
+    working: true
+    file: "/app/backend/recommendation_engine.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Created enrich_top_movies() function to fetch comprehensive TMDB details for user's Top 5 movies during profile save"
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTED SUCCESSFULLY: Top movies enrichment working perfectly. Profile save endpoint successfully enriched all 5 top movies (Fight Club, Inception, Dark Knight, Matrix, Godfather) with full TMDB data. Extracted 50 actors, 6 directors, 110 keywords total. Backend logs show 'Saved profile for user test_user_12345 with 3 genres, 2 languages, 5 top movies (5 enriched with 110 keywords)' confirming enrichment is working."
+
+  - task: "Swipe Signal Extraction"
+    implemented: true
+    working: true
+    file: "/app/backend/recommendation_engine.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Enhanced update_taste_vector_from_swipe() to extract 15 categories of signals from each swiped movie including genres, actors, directors, writers, composers, keywords, etc."
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTED SUCCESSFULLY: Swipe signal extraction working perfectly. Both right swipe (with 5-star rating and reason 'Amazing cinematography and emotional story') and left swipe recorded successfully. Taste vector properly updated with comprehensive signals. Swipe counts tracked correctly (2 total swipes, 1 like, 1 dislike). Backend logs confirm 'Recorded right/left swipe for user test_user_12345' with full TMDB enrichment."
+
 frontend:
   - task: "Filters Screen"
     implemented: true
@@ -196,14 +241,55 @@ metadata:
   run_ui: false
 
 test_plan:
-  current_focus:
-    - "Movie Feed API"
-    - "Movie Swipe Screen"
+  current_focus: []
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
 
 agent_communication:
+  - agent: "main"
+    message: |
+      SESSION UPDATE - COMPREHENSIVE RECOMMENDATION ENGINE ENHANCEMENT
+      
+      MAJOR CHANGES MADE (June 2025):
+      
+      1. Enhanced `enrich_movie_with_full_details()` in recommendation_engine.py:
+         - Now fetches ALL TMDB data: credits + keywords in single API call
+         - Extracts: Full cast (10 actors with billing order), Directors, Writers, Composers, Cinematographers
+         - Extracts: Keywords/tags, Production companies, Production countries, Spoken languages
+         - Calculates: content_type (blockbuster/mainstream/indie), runtime_category (short/standard/long/epic)
+         - Returns 25+ data fields per movie
+      
+      2. Created `enrich_top_movies()` function:
+         - Fetches comprehensive TMDB details for user's Top 5 movies during profile save
+         - Stores enriched data in MongoDB for future reference
+      
+      3. Created `initialize_taste_vector_from_enriched_movies()` function:
+         - Extracts signals from ALL movie data: genres, directors, writers, composers, actors, keywords
+         - Applies rank-based weighting (1st movie weighted higher than 5th)
+         - Applies personal rating boost (5-star = 1.3x weight)
+         - Extracts user's explicit reasons (story, acting, emotional, craft) as quality signals
+      
+      4. Enhanced `update_taste_vector_from_swipe()` function:
+         - Now extracts 15 categories of signals from each swiped movie:
+           * Genres, Actors (with billing order weighting), Directors, Writers, Composers
+           * Cinematographers, Keywords, Production companies, Countries, Era/decade
+           * Language (original + spoken), Content type, Runtime category, Quality signals
+         - Enhanced reason-based learning (music, emotional, thought-provoking, etc.)
+      
+      5. Updated `save_user_profile` endpoint in server.py:
+         - Now enriches Top 5 movies with full TMDB details before taste vector creation
+         - Returns enrichment stats (actors, directors, keywords extracted)
+      
+      FILES MODIFIED:
+      - /app/backend/recommendation_engine.py (comprehensive enhancement)
+      - /app/backend/server.py (updated save_user_profile endpoint)
+      
+      TESTING NEEDED:
+      1. POST /api/user/profile - Should enrich top movies and return stats
+      2. POST /api/user/swipe - Should extract comprehensive signals
+      3. POST /api/recommendations - Should return personalized results
+      4. GET /api/user/{user_id}/taste-profile - Should show rich taste dimensions
   - agent: "main"
     message: |
       SESSION UPDATE - DOB Picker, Height Picker, and "Who do you want to meet" mandatory logic:
@@ -351,3 +437,53 @@ agent_communication:
       
       Minor: Some field clicks may have overlay interference but core functionality works.
       Profile screen is fully functional and ready for production use.
+  - agent: "testing"
+    message: |
+      ✅ COMPREHENSIVE RECOMMENDATION ENGINE TESTING COMPLETE
+      
+      TESTED SUCCESSFULLY - ALL 10/10 TESTS PASSED:
+      
+      📽️ ORIGINAL MOVIE API TESTS (5/5):
+      1. Movie Feed API - Basic ✅
+      2. Movie Feed API - With Genres ✅  
+      3. Movie Feed API - With Exclude ✅
+      4. Movie Details API - Fight Club ✅
+      5. Movie Details API - Inception ✅
+      
+      🧠 COMPREHENSIVE RECOMMENDATION ENGINE TESTS (5/5):
+      6. Profile Save with Top Movies Enrichment ✅
+         - All 5 top movies enriched successfully
+         - Extracted: 50 actors, 6 directors, 110 keywords
+         - 154 taste dimensions created
+      
+      7. Right Swipe with Rating ✅
+         - 5-star rating with reason "Amazing cinematography and emotional story"
+         - Comprehensive signal extraction working
+         - Swipe counts: 1 like, 0 dislikes, 1 total
+      
+      8. Left Swipe ✅
+         - Negative signal extraction working
+         - Swipe counts: 1 like, 1 dislike, 2 total
+      
+      9. Taste Profile Generation ✅
+         - Rich taste profile with 198 dimensions
+         - Top genres: Action, Thriller, Drama
+         - Top actors: Michael Caine, Edward Norton, Brad Pitt
+         - Top directors: Christopher Nolan, David Fincher, Francis Ford Coppola
+      
+      10. Personalized Recommendations ✅
+          - 10 movies returned with recommendation scores
+          - Language filtering working (English/Hindi)
+          - Taste-based ranking functional
+      
+      🔍 BACKEND LOG VERIFICATION CONFIRMED:
+      - ✅ 'append_to_response=credits%2Ckeywords' in TMDB requests
+      - ✅ 'Saved profile for user test_user_12345 with 3 genres, 2 languages, 5 top movies (5 enriched with 110 keywords)'
+      - ✅ 'Recorded right/left swipe for user test_user_12345' messages
+      
+      🎉 COMPREHENSIVE RECOMMENDATION ENGINE IS FULLY FUNCTIONAL:
+      ✅ Profile enrichment with full TMDB data (cast, crew, keywords)
+      ✅ Comprehensive swipe signal extraction (15 categories)
+      ✅ Rich taste profile generation with multi-dimensional vectors
+      ✅ Personalized recommendations with language filtering
+      ✅ All endpoints working correctly with proper error handling

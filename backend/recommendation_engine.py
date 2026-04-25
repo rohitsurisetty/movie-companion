@@ -379,36 +379,341 @@ def initialize_taste_vector_from_profile(profile: Dict[str, Any]) -> TasteVector
 
 
 # =============================================
-# SWIPE-BASED LEARNING
+# COMPREHENSIVE MOVIE DATA EXTRACTION
 # =============================================
 
-async def enrich_movie_with_details(movie_id: int, http_client: httpx.AsyncClient) -> Dict[str, Any]:
-    """Fetch detailed movie info including cast and crew from TMDB"""
+async def enrich_movie_with_full_details(movie_id: int, http_client: httpx.AsyncClient) -> Dict[str, Any]:
+    """
+    Fetch COMPREHENSIVE movie details from TMDB including:
+    - Basic info (title, overview, runtime, etc.)
+    - All genres
+    - Full cast (top 10 actors)
+    - Full crew (directors, writers, composers, cinematographers)
+    - Keywords/tags
+    - Production companies
+    - Spoken languages
+    - Budget & Revenue (for blockbuster vs indie classification)
+    - Popularity metrics
+    - Release info
+    
+    This is the main enrichment function used for both Top 5 movies and swiped movies.
+    """
     try:
+        # Fetch movie with credits AND keywords in a single call
         resp = await http_client.get(
             f"https://api.themoviedb.org/3/movie/{movie_id}",
-            params={"append_to_response": "credits"},
+            params={"append_to_response": "credits,keywords"},
             headers={"Authorization": f"Bearer {TMDB_ACCESS_TOKEN}"}
         )
         if resp.status_code == 200:
             data = resp.json()
             credits = data.get("credits", {})
+            keywords_data = data.get("keywords", {})
+            
+            # Extract cast (top 10 main actors)
+            cast = []
+            for c in credits.get("cast", [])[:10]:
+                cast.append({
+                    "name": c.get("name", ""),
+                    "character": c.get("character", ""),
+                    "order": c.get("order", 99),  # Billing order
+                    "known_for": c.get("known_for_department", "Acting"),
+                })
+            
+            # Extract directors
+            directors = [c["name"] for c in credits.get("crew", []) if c.get("job") == "Director"]
+            
+            # Extract writers (screenplay, story, writer)
+            writers = [c["name"] for c in credits.get("crew", []) 
+                      if c.get("job") in ["Screenplay", "Writer", "Story", "Novel"]]
+            
+            # Extract composers (music)
+            composers = [c["name"] for c in credits.get("crew", []) 
+                        if c.get("job") in ["Original Music Composer", "Music", "Composer"]]
+            
+            # Extract cinematographers
+            cinematographers = [c["name"] for c in credits.get("crew", []) 
+                               if c.get("job") in ["Director of Photography", "Cinematography"]]
+            
+            # Extract producers (top 3)
+            producers = [c["name"] for c in credits.get("crew", [])[:20] 
+                        if c.get("job") in ["Producer", "Executive Producer"]][:3]
+            
+            # Extract keywords/tags
+            keywords = [k.get("name", "") for k in keywords_data.get("keywords", [])]
+            
+            # Extract production companies
+            production_companies = [p.get("name", "") for p in data.get("production_companies", [])]
+            
+            # Extract spoken languages
+            spoken_languages = [l.get("english_name", l.get("name", "")) 
+                               for l in data.get("spoken_languages", [])]
+            
+            # Extract production countries
+            production_countries = [c.get("name", "") for c in data.get("production_countries", [])]
+            
+            # Determine content type based on budget/revenue
+            budget = data.get("budget", 0)
+            revenue = data.get("revenue", 0)
+            popularity = data.get("popularity", 0)
+            
+            content_type = "unknown"
+            if budget > 100_000_000 or popularity > 100:
+                content_type = "blockbuster"
+            elif budget > 30_000_000 or popularity > 50:
+                content_type = "mainstream"
+            elif budget > 5_000_000 or popularity > 20:
+                content_type = "mid_budget"
+            elif budget > 0 or popularity > 5:
+                content_type = "indie"
+            else:
+                content_type = "unknown"
+            
+            # Determine runtime category
+            runtime = data.get("runtime", 0)
+            runtime_category = "standard"
+            if runtime > 0:
+                if runtime < 90:
+                    runtime_category = "short"
+                elif runtime < 120:
+                    runtime_category = "standard"
+                elif runtime < 150:
+                    runtime_category = "long"
+                else:
+                    runtime_category = "epic"
+            
             return {
                 "id": data["id"],
                 "title": data.get("title", ""),
+                "original_title": data.get("original_title", ""),
+                "tagline": data.get("tagline", ""),
+                "overview": data.get("overview", ""),
                 "genres": [g["name"] for g in data.get("genres", [])],
-                "cast": [c["name"] for c in credits.get("cast", [])[:5]],
-                "directors": [c["name"] for c in credits.get("crew", []) if c.get("job") == "Director"],
+                "cast": cast,
+                "cast_names": [c["name"] for c in cast],  # Just names for quick access
+                "directors": directors,
+                "writers": writers,
+                "composers": composers,
+                "cinematographers": cinematographers,
+                "producers": producers,
+                "keywords": keywords,
+                "production_companies": production_companies,
+                "production_countries": production_countries,
+                "spoken_languages": spoken_languages,
                 "release_date": data.get("release_date", ""),
                 "vote_average": data.get("vote_average", 0),
+                "vote_count": data.get("vote_count", 0),
                 "original_language": data.get("original_language", ""),
-                "popularity": data.get("popularity", 0),
-                "budget": data.get("budget", 0),
-                "revenue": data.get("revenue", 0),
+                "popularity": popularity,
+                "budget": budget,
+                "revenue": revenue,
+                "runtime": runtime,
+                "runtime_category": runtime_category,
+                "content_type": content_type,
+                "adult": data.get("adult", False),
+                "status": data.get("status", ""),
             }
     except Exception as e:
-        print(f"Error fetching movie {movie_id}: {e}")
+        print(f"Error fetching full movie details for {movie_id}: {e}")
     return {}
+
+
+# Backward compatibility alias
+async def enrich_movie_with_details(movie_id: int, http_client: httpx.AsyncClient) -> Dict[str, Any]:
+    """Backward compatible wrapper - now uses full details"""
+    return await enrich_movie_with_full_details(movie_id, http_client)
+
+
+async def enrich_top_movies(top_movies: List[Dict[str, Any]], http_client: httpx.AsyncClient) -> List[Dict[str, Any]]:
+    """
+    Fetch comprehensive TMDB details for all top 5 movies.
+    This enrichment is crucial for building an accurate initial taste profile.
+    
+    For each movie, we get:
+    - Full cast and crew
+    - Keywords/tags
+    - Production details
+    - All metadata
+    """
+    enriched_movies = []
+    
+    for movie in top_movies:
+        movie_id = movie.get("id")
+        if not movie_id:
+            enriched_movies.append(movie)
+            continue
+        
+        try:
+            full_details = await enrich_movie_with_full_details(movie_id, http_client)
+            if full_details:
+                # Merge original user data (like personal rating) with TMDB data
+                enriched = {**full_details}
+                enriched["personal_rating"] = movie.get("rating", 0)
+                enriched["user_reasons"] = movie.get("reasons", [])
+                enriched_movies.append(enriched)
+            else:
+                enriched_movies.append(movie)
+        except Exception as e:
+            print(f"Error enriching top movie {movie_id}: {e}")
+            enriched_movies.append(movie)
+    
+    return enriched_movies
+
+
+def initialize_taste_vector_from_enriched_movies(
+    tv: TasteVector,
+    enriched_movies: List[Dict[str, Any]]
+) -> TasteVector:
+    """
+    Extract comprehensive signals from enriched top 5 movies.
+    Uses ALL available TMDB data for each movie.
+    """
+    for i, movie in enumerate(enriched_movies):
+        # Weight decreases slightly for lower-ranked movies (1st = 1.5, 5th = 1.1)
+        rank_weight = 1.5 - (i * 0.1)
+        personal_rating = movie.get("personal_rating", 0)
+        
+        # Boost weight based on personal rating (user gave 5 stars = very important)
+        if personal_rating >= 5:
+            rank_weight *= 1.3
+        elif personal_rating >= 4:
+            rank_weight *= 1.15
+        
+        # ========================
+        # 1. GENRES (Strong signal)
+        # ========================
+        for genre in movie.get("genres", []):
+            if isinstance(genre, str):
+                genre_key = f"genre_{genre.lower().replace(' ', '_').replace('-', '_')}"
+                tv.add_signal(genre_key, rank_weight * 1.2)
+        
+        # ========================
+        # 2. DIRECTORS (Very strong signal - users who like a movie usually like director)
+        # ========================
+        for director in movie.get("directors", []):
+            if isinstance(director, str):
+                director_key = f"director_{director.lower().replace(' ', '_').replace('.', '').replace('-', '_')}"
+                tv.add_signal(director_key, rank_weight * 1.5)
+        
+        # ========================
+        # 3. WRITERS (Strong signal)
+        # ========================
+        for writer in movie.get("writers", [])[:3]:
+            if isinstance(writer, str):
+                writer_key = f"writer_{writer.lower().replace(' ', '_').replace('.', '').replace('-', '_')}"
+                tv.add_signal(writer_key, rank_weight * 0.8)
+        
+        # ========================
+        # 4. ACTORS (Lead actors get more weight)
+        # ========================
+        cast_names = movie.get("cast_names", [])
+        if not cast_names:
+            # Fallback to cast if cast_names not available
+            cast = movie.get("cast", [])
+            if cast and isinstance(cast[0], dict):
+                cast_names = [c.get("name", "") for c in cast if c.get("name")]
+            elif cast and isinstance(cast[0], str):
+                cast_names = cast
+        
+        for j, actor_name in enumerate(cast_names[:8]):
+            if isinstance(actor_name, str) and actor_name:
+                actor_key = f"actor_{actor_name.lower().replace(' ', '_').replace('.', '').replace('-', '_')}"
+                # Lead actors get full weight
+                if j < 3:
+                    tv.add_signal(actor_key, rank_weight * 1.0)
+                elif j < 5:
+                    tv.add_signal(actor_key, rank_weight * 0.6)
+                else:
+                    tv.add_signal(actor_key, rank_weight * 0.3)
+        
+        # ========================
+        # 5. COMPOSERS (Music lovers signal)
+        # ========================
+        for composer in movie.get("composers", [])[:2]:
+            if isinstance(composer, str):
+                composer_key = f"composer_{composer.lower().replace(' ', '_').replace('.', '').replace('-', '_')}"
+                tv.add_signal(composer_key, rank_weight * 0.5)
+        
+        # ========================
+        # 6. KEYWORDS (Thematic signals - very valuable!)
+        # ========================
+        for keyword in movie.get("keywords", [])[:12]:
+            if isinstance(keyword, str):
+                keyword_key = f"keyword_{keyword.lower().replace(' ', '_').replace('-', '_')}"
+                tv.add_signal(keyword_key, rank_weight * 0.7)
+        
+        # ========================
+        # 7. PRODUCTION COMPANIES (Studio preference)
+        # ========================
+        for company in movie.get("production_companies", [])[:2]:
+            if isinstance(company, str):
+                company_key = f"studio_{company.lower().replace(' ', '_').replace('.', '').replace('-', '_')}"
+                tv.add_signal(company_key, rank_weight * 0.3)
+        
+        # ========================
+        # 8. PRODUCTION COUNTRIES
+        # ========================
+        for country in movie.get("production_countries", [])[:2]:
+            if isinstance(country, str):
+                country_key = f"country_{country.lower().replace(' ', '_').replace('-', '_')}"
+                tv.add_signal(country_key, rank_weight * 0.4)
+        
+        # ========================
+        # 9. ERA/DECADE
+        # ========================
+        era = get_movie_era(movie.get("release_date", ""))
+        if era != 'unknown':
+            tv.add_signal(f"era_{era}", rank_weight * 0.5)
+        
+        # ========================
+        # 10. LANGUAGE
+        # ========================
+        orig_lang = movie.get("original_language", "")
+        if orig_lang:
+            tv.add_signal(f"lang_{orig_lang}", rank_weight * 0.6)
+        
+        # ========================
+        # 11. CONTENT TYPE
+        # ========================
+        content_type = movie.get("content_type", "")
+        if content_type and content_type != "unknown":
+            tv.add_signal(f"content_{content_type}", rank_weight * 0.4)
+        
+        # ========================
+        # 12. RUNTIME CATEGORY
+        # ========================
+        runtime_category = movie.get("runtime_category", "")
+        if runtime_category and runtime_category != "standard":
+            tv.add_signal(f"runtime_{runtime_category}", rank_weight * 0.3)
+        
+        # ========================
+        # 13. QUALITY SIGNALS
+        # ========================
+        vote_avg = movie.get("vote_average", 0)
+        vote_count = movie.get("vote_count", 0)
+        
+        if vote_avg >= 8.0 and vote_count >= 1000:
+            tv.add_signal("quality_critically_acclaimed", rank_weight * 0.4)
+        elif vote_avg >= 7.0:
+            tv.add_signal("quality_well_received", rank_weight * 0.3)
+        
+        # ========================
+        # 14. USER'S REASONS (from rating modal)
+        # ========================
+        user_reasons = movie.get("user_reasons", [])
+        for reason in user_reasons:
+            reason_lower = reason.lower() if isinstance(reason, str) else ""
+            
+            if any(word in reason_lower for word in ['story', 'plot', 'narrative']):
+                tv.add_signal("quality_story", rank_weight * 0.5)
+            if any(word in reason_lower for word in ['performance', 'acting', 'cast']):
+                tv.add_signal("quality_acting", rank_weight * 0.5)
+            if any(word in reason_lower for word in ['emotional', 'connection', 'heartfelt']):
+                tv.add_signal("quality_emotional", rank_weight * 0.5)
+            if any(word in reason_lower for word in ['craft', 'visual', 'cinematography']):
+                tv.add_signal("quality_visuals", rank_weight * 0.5)
+    
+    return tv
 
 
 def update_taste_vector_from_swipe(
@@ -419,13 +724,19 @@ def update_taste_vector_from_swipe(
     reason: Optional[str] = None
 ) -> TasteVector:
     """
-    Update taste vector based on a swipe action with enhanced learning.
+    Update taste vector based on a swipe action with COMPREHENSIVE learning.
     
-    Learning signals:
+    Extracts signals from ALL available TMDB data:
     - Direction: Like adds positive weight, dislike adds negative
     - Rating (1-5): Modifies the intensity of learning
     - Reason: Adds specific signals (e.g., "Great cast" boosts actor weights)
-    - Movie features: Genres, actors, directors, era, language
+    - Movie features: Genres, actors, directors, writers, composers, cinematographers
+    - Keywords: Thematic tags from TMDB
+    - Production: Companies, countries
+    - Languages: Original and spoken
+    - Content type: Blockbuster, mainstream, indie
+    - Runtime: Short, standard, long, epic
+    - Era: Decade of release
     """
     # Base weight depends on direction
     if direction == 'right':
@@ -442,92 +753,216 @@ def update_taste_vector_from_swipe(
     tv.total_swipes += 1
     
     # ========================
-    # GENRE SIGNALS
+    # 1. GENRE SIGNALS (Primary signal)
     # ========================
     for genre in movie_details.get("genres", []):
         genre_key = f"genre_{genre.lower().replace(' ', '_').replace('-', '_')}"
-        tv.add_signal(genre_key, base_weight)
+        tv.add_signal(genre_key, base_weight * 1.0)
     
     # ========================
-    # ACTOR SIGNALS (with diminishing weight for supporting cast)
+    # 2. ACTOR SIGNALS (with billing order weighting)
     # ========================
-    for i, actor in enumerate(movie_details.get("cast", [])[:5]):
-        actor_key = f"actor_{actor.lower().replace(' ', '_').replace('.', '')}"
-        # Lead actors get full weight, supporting cast gets less
-        actor_weight = base_weight * (1.0 - i * 0.12)
-        tv.add_signal(actor_key, actor_weight)
+    cast = movie_details.get("cast", [])
+    cast_names = movie_details.get("cast_names", [])
+    
+    # Process actors - handle multiple data formats
+    actor_names_to_process = []
+    
+    if cast_names and isinstance(cast_names, list) and len(cast_names) > 0:
+        # Prefer cast_names if available (list of strings)
+        actor_names_to_process = [(name, i) for i, name in enumerate(cast_names[:8]) if isinstance(name, str)]
+    elif cast and isinstance(cast, list) and len(cast) > 0:
+        # Check if cast is a list of dicts
+        if isinstance(cast[0], dict):
+            for i, actor_info in enumerate(cast[:8]):
+                actor_name = actor_info.get("name", "")
+                order = actor_info.get("order", i)
+                if actor_name and isinstance(actor_name, str):
+                    actor_names_to_process.append((actor_name, order))
+        # Or if cast is a list of strings (legacy)
+        elif isinstance(cast[0], str):
+            actor_names_to_process = [(name, i) for i, name in enumerate(cast[:5]) if isinstance(name, str)]
+    
+    # Now process the actors with proper weighting
+    for actor_name, order in actor_names_to_process:
+        try:
+            actor_key = f"actor_{actor_name.lower().replace(' ', '_').replace('.', '').replace('-', '_')}"
+            # Lead actors (billing 0-2) get full weight, supporting cast gets less
+            if order < 3:
+                actor_weight = base_weight * 1.0
+            elif order < 5:
+                actor_weight = base_weight * 0.7
+            else:
+                actor_weight = base_weight * 0.4
+            tv.add_signal(actor_key, actor_weight)
+        except Exception as e:
+            print(f"Error processing actor {actor_name}: {e}")
     
     # ========================
-    # DIRECTOR SIGNALS (strong indicator)
+    # 3. DIRECTOR SIGNALS (Very strong signal)
     # ========================
     for director in movie_details.get("directors", []):
-        director_key = f"director_{director.lower().replace(' ', '_').replace('.', '')}"
-        tv.add_signal(director_key, base_weight * 1.3)  # Directors are strong signals
+        director_key = f"director_{director.lower().replace(' ', '_').replace('.', '').replace('-', '_')}"
+        tv.add_signal(director_key, base_weight * 1.5)  # Directors are very strong signals
     
     # ========================
-    # ERA SIGNAL
+    # 4. WRITER SIGNALS (Strong signal for story lovers)
+    # ========================
+    for writer in movie_details.get("writers", [])[:3]:
+        writer_key = f"writer_{writer.lower().replace(' ', '_').replace('.', '').replace('-', '_')}"
+        tv.add_signal(writer_key, base_weight * 0.8)
+    
+    # ========================
+    # 5. COMPOSER SIGNALS (For music appreciation)
+    # ========================
+    for composer in movie_details.get("composers", [])[:2]:
+        composer_key = f"composer_{composer.lower().replace(' ', '_').replace('.', '').replace('-', '_')}"
+        tv.add_signal(composer_key, base_weight * 0.5)
+    
+    # ========================
+    # 6. CINEMATOGRAPHER SIGNALS (For visual style lovers)
+    # ========================
+    for cinematographer in movie_details.get("cinematographers", [])[:2]:
+        dop_key = f"dop_{cinematographer.lower().replace(' ', '_').replace('.', '').replace('-', '_')}"
+        tv.add_signal(dop_key, base_weight * 0.5)
+    
+    # ========================
+    # 7. KEYWORDS/TAGS (Thematic signals - very valuable!)
+    # ========================
+    for keyword in movie_details.get("keywords", [])[:10]:
+        keyword_key = f"keyword_{keyword.lower().replace(' ', '_').replace('-', '_')}"
+        tv.add_signal(keyword_key, base_weight * 0.6)
+    
+    # ========================
+    # 8. PRODUCTION COMPANY SIGNALS (Studio preference)
+    # ========================
+    for company in movie_details.get("production_companies", [])[:3]:
+        company_key = f"studio_{company.lower().replace(' ', '_').replace('.', '').replace('-', '_')}"
+        tv.add_signal(company_key, base_weight * 0.3)
+    
+    # ========================
+    # 9. PRODUCTION COUNTRY SIGNALS
+    # ========================
+    for country in movie_details.get("production_countries", [])[:2]:
+        country_key = f"country_{country.lower().replace(' ', '_').replace('-', '_')}"
+        tv.add_signal(country_key, base_weight * 0.4)
+    
+    # ========================
+    # 10. ERA/DECADE SIGNAL
     # ========================
     era = get_movie_era(movie_details.get("release_date", ""))
     if era != 'unknown':
-        tv.add_signal(f"era_{era}", base_weight * 0.4)
+        tv.add_signal(f"era_{era}", base_weight * 0.5)
     
     # ========================
-    # LANGUAGE SIGNAL
+    # 11. LANGUAGE SIGNALS (Original + Spoken)
     # ========================
     orig_lang = movie_details.get("original_language", "")
     if orig_lang:
-        tv.add_signal(f"lang_{orig_lang}", base_weight * 0.6)
+        tv.add_signal(f"lang_{orig_lang}", base_weight * 0.7)
+    
+    # Spoken languages also matter
+    for spoken_lang in movie_details.get("spoken_languages", [])[:3]:
+        lang_code = LANGUAGE_TO_CODE.get(spoken_lang, spoken_lang[:2].lower() if len(spoken_lang) >= 2 else "")
+        if lang_code:
+            tv.add_signal(f"lang_{lang_code}", base_weight * 0.3)
     
     # ========================
-    # CONTENT TYPE SIGNALS (based on popularity/budget)
+    # 12. CONTENT TYPE SIGNALS
     # ========================
-    popularity = movie_details.get("popularity", 0)
-    budget = movie_details.get("budget", 0)
-    
-    if direction == 'right':
-        if popularity > 100 or budget > 100000000:
-            tv.add_signal("content_blockbuster", base_weight * 0.3)
-        elif popularity < 30:
-            tv.add_signal("content_indie", base_weight * 0.3)
+    content_type = movie_details.get("content_type", "")
+    if content_type and content_type != "unknown":
+        tv.add_signal(f"content_{content_type}", base_weight * 0.5)
+    else:
+        # Fallback: determine from popularity/budget
+        popularity = movie_details.get("popularity", 0)
+        budget = movie_details.get("budget", 0)
+        
+        if popularity > 100 or budget > 100_000_000:
+            tv.add_signal("content_blockbuster", base_weight * 0.4)
+        elif popularity > 50 or budget > 30_000_000:
+            tv.add_signal("content_mainstream", base_weight * 0.3)
+        elif popularity < 20 and budget < 10_000_000:
+            tv.add_signal("content_indie", base_weight * 0.4)
     
     # ========================
-    # REASON-BASED LEARNING (Enhanced)
+    # 13. RUNTIME CATEGORY SIGNAL
+    # ========================
+    runtime_category = movie_details.get("runtime_category", "")
+    if runtime_category and runtime_category != "standard":
+        tv.add_signal(f"runtime_{runtime_category}", base_weight * 0.3)
+    
+    # ========================
+    # 14. QUALITY SIGNALS (Vote average based)
+    # ========================
+    vote_avg = movie_details.get("vote_average", 0)
+    vote_count = movie_details.get("vote_count", 0)
+    
+    if vote_avg >= 8.0 and vote_count >= 1000:
+        tv.add_signal("quality_critically_acclaimed", base_weight * 0.3)
+    elif vote_avg >= 7.0 and vote_count >= 500:
+        tv.add_signal("quality_well_received", base_weight * 0.2)
+    elif vote_avg < 5.0 and vote_count >= 100:
+        tv.add_signal("quality_cult_potential", base_weight * 0.1)
+    
+    # ========================
+    # 15. REASON-BASED LEARNING (User's explicit reasons)
     # ========================
     if reason:
         reason_lower = reason.lower()
         
-        # Cast-related reasons
-        if any(word in reason_lower for word in ['cast', 'actor', 'actress', 'performance', 'acting']):
-            for actor in movie_details.get("cast", [])[:3]:
-                actor_key = f"actor_{actor.lower().replace(' ', '_').replace('.', '')}"
-                tv.add_signal(actor_key, 0.5 if direction == 'right' else -0.3)
+        # Cast-related reasons - boost actors more
+        if any(word in reason_lower for word in ['cast', 'actor', 'actress', 'performance', 'acting', 'performances']):
+            for actor_name in movie_details.get("cast_names", movie_details.get("cast", []))[:3]:
+                if isinstance(actor_name, str):
+                    actor_key = f"actor_{actor_name.lower().replace(' ', '_').replace('.', '').replace('-', '_')}"
+                    tv.add_signal(actor_key, 0.6 if direction == 'right' else -0.4)
         
         # Director-related reasons
-        if any(word in reason_lower for word in ['director', 'directed', 'filmmaker', 'vision']):
+        if any(word in reason_lower for word in ['director', 'directed', 'filmmaker', 'vision', 'auteur']):
             for director in movie_details.get("directors", []):
-                director_key = f"director_{director.lower().replace(' ', '_').replace('.', '')}"
-                tv.add_signal(director_key, 0.6 if direction == 'right' else -0.3)
+                director_key = f"director_{director.lower().replace(' ', '_').replace('.', '').replace('-', '_')}"
+                tv.add_signal(director_key, 0.8 if direction == 'right' else -0.4)
         
-        # Genre-related reasons
-        if any(word in reason_lower for word in ['genre', 'type', 'kind', 'style']):
-            for genre in movie_details.get("genres", []):
-                genre_key = f"genre_{genre.lower().replace(' ', '_').replace('-', '_')}"
-                tv.add_signal(genre_key, 0.4 if direction == 'right' else -0.2)
+        # Story/writing-related
+        if any(word in reason_lower for word in ['story', 'plot', 'narrative', 'script', 'writing', 'screenplay']):
+            tv.add_signal("quality_story", 0.4 if direction == 'right' else -0.2)
+            for writer in movie_details.get("writers", [])[:2]:
+                writer_key = f"writer_{writer.lower().replace(' ', '_').replace('.', '').replace('-', '_')}"
+                tv.add_signal(writer_key, 0.5 if direction == 'right' else -0.3)
         
-        # Story/plot-related (boosts drama/thriller)
-        if any(word in reason_lower for word in ['story', 'plot', 'narrative', 'script', 'writing']):
-            tv.add_signal("quality_story", 0.3 if direction == 'right' else -0.2)
+        # Visuals/cinematography-related
+        if any(word in reason_lower for word in ['visual', 'cinematography', 'beautiful', 'stunning', 'gorgeous', 'shots']):
+            tv.add_signal("quality_visuals", 0.4 if direction == 'right' else -0.2)
+            for dop in movie_details.get("cinematographers", [])[:1]:
+                dop_key = f"dop_{dop.lower().replace(' ', '_').replace('.', '').replace('-', '_')}"
+                tv.add_signal(dop_key, 0.5 if direction == 'right' else -0.3)
         
-        # Visuals-related
-        if any(word in reason_lower for word in ['visual', 'cinematography', 'beautiful', 'stunning']):
-            tv.add_signal("quality_visuals", 0.3 if direction == 'right' else -0.2)
+        # Music/score-related
+        if any(word in reason_lower for word in ['music', 'score', 'soundtrack', 'songs', 'composer']):
+            tv.add_signal("quality_music", 0.4 if direction == 'right' else -0.2)
+            for composer in movie_details.get("composers", [])[:1]:
+                comp_key = f"composer_{composer.lower().replace(' ', '_').replace('.', '').replace('-', '_')}"
+                tv.add_signal(comp_key, 0.5 if direction == 'right' else -0.3)
+        
+        # Emotional connection
+        if any(word in reason_lower for word in ['emotional', 'touched', 'moved', 'cry', 'tears', 'heartfelt']):
+            tv.add_signal("quality_emotional", 0.4 if direction == 'right' else -0.2)
+        
+        # Fun/entertaining
+        if any(word in reason_lower for word in ['fun', 'entertaining', 'enjoyable', 'popcorn', 'laugh']):
+            tv.add_signal("quality_entertaining", 0.3 if direction == 'right' else -0.2)
+        
+        # Thought-provoking
+        if any(word in reason_lower for word in ['thought', 'think', 'deep', 'meaningful', 'profound']):
+            tv.add_signal("quality_thoughtful", 0.3 if direction == 'right' else -0.2)
         
         # "Didn't watch" handling - minimal negative impact
-        if any(word in reason_lower for word in ["didn't watch", "haven't seen", "not seen", "unwatched"]):
-            # Partially reverse the negative signals we added
+        if any(word in reason_lower for word in ["didn't watch", "haven't seen", "not seen", "unwatched", "not watched"]):
+            # Partially reverse the negative signals we added for genres
             for genre in movie_details.get("genres", []):
                 genre_key = f"genre_{genre.lower().replace(' ', '_').replace('-', '_')}"
-                tv.add_signal(genre_key, 0.25)  # Partial reversal
+                tv.add_signal(genre_key, 0.3)  # Partial reversal
     
     return tv
 

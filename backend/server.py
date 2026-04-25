@@ -18,6 +18,9 @@ from recommendation_engine import (
     update_taste_vector_from_swipe,
     get_personalized_feed,
     enrich_movie_with_details,
+    enrich_top_movies,
+    initialize_taste_vector_from_enriched_movies,
+    enrich_movie_with_full_details,
     GENRE_ID_TO_NAME
 )
 
@@ -367,12 +370,44 @@ async def get_movie_details(movie_id: int):
 @api_router.post("/user/profile")
 async def save_user_profile(req: UserProfileRequest):
     """
-    Save user profile and initialize taste vector.
+    Save user profile and initialize comprehensive taste vector.
     Called after user completes onboarding.
-    Uses ALL profile signals for comprehensive taste modeling.
+    
+    ENHANCED: Now fetches FULL TMDB details for Top 5 movies to extract:
+    - All cast members (actors)
+    - All crew (directors, writers, composers, cinematographers)
+    - Keywords/tags
+    - Production companies and countries
+    - Runtime, budget, popularity metrics
+    
+    This creates a highly accurate initial taste profile.
     """
     # Convert topMovies to dict format
     top_movies_data = [m.dict() for m in req.topMovies]
+    
+    # ========================
+    # ENRICH TOP MOVIES with full TMDB data
+    # ========================
+    enriched_top_movies = []
+    enrichment_stats = {
+        "total_movies": len(top_movies_data),
+        "enriched_count": 0,
+        "total_actors": 0,
+        "total_directors": 0,
+        "total_keywords": 0,
+    }
+    
+    if top_movies_data:
+        async with httpx.AsyncClient(timeout=15.0) as http_client:
+            enriched_top_movies = await enrich_top_movies(top_movies_data, http_client)
+            
+            # Calculate stats
+            for movie in enriched_top_movies:
+                if movie.get("directors"):  # Indicator of successful enrichment
+                    enrichment_stats["enriched_count"] += 1
+                    enrichment_stats["total_actors"] += len(movie.get("cast_names", movie.get("cast", [])))
+                    enrichment_stats["total_directors"] += len(movie.get("directors", []))
+                    enrichment_stats["total_keywords"] += len(movie.get("keywords", []))
     
     # Build complete profile data
     profile_data = {
@@ -383,7 +418,8 @@ async def save_user_profile(req: UserProfileRequest):
         "genres": req.genres,
         "filmLanguages": req.filmLanguages,
         "languagesSpoken": req.languagesSpoken,
-        "topMovies": top_movies_data,
+        "topMovies": top_movies_data,  # Store original data
+        "topMoviesEnriched": enriched_top_movies,  # Store enriched data
         "movieFrequency": req.movieFrequency,
         "ottTheatre": req.ottTheatre,
         "relationshipIntent": req.relationshipIntent,
@@ -397,8 +433,16 @@ async def save_user_profile(req: UserProfileRequest):
         upsert=True
     )
     
-    # Initialize comprehensive taste vector from profile
+    # ========================
+    # Initialize taste vector with basic profile signals
+    # ========================
     taste_vector = initialize_taste_vector_from_profile(profile_data)
+    
+    # ========================
+    # ENHANCE taste vector with enriched top movies
+    # ========================
+    if enriched_top_movies:
+        taste_vector = initialize_taste_vector_from_enriched_movies(taste_vector, enriched_top_movies)
     
     # Save taste vector with all metadata
     await db.user_taste_vectors.update_one(
@@ -413,12 +457,15 @@ async def save_user_profile(req: UserProfileRequest):
     
     # Log the initialization
     preferred_langs = list(taste_vector.preferred_languages)
-    logger.info(f"Saved profile for user {req.user_id} with {len(req.genres)} genres, "
-                f"{len(preferred_langs)} languages, {len(req.topMovies)} top movies")
+    logger.info(
+        f"Saved profile for user {req.user_id} with {len(req.genres)} genres, "
+        f"{len(preferred_langs)} languages, {len(req.topMovies)} top movies "
+        f"({enrichment_stats['enriched_count']} enriched with {enrichment_stats['total_keywords']} keywords)"
+    )
     
     return {
         "success": True,
-        "message": "Profile saved and taste vector initialized",
+        "message": "Profile saved with comprehensive taste vector",
         "taste_dimensions": len(taste_vector.vector),
         "preferred_languages": preferred_langs,
         "signals_used": {
@@ -426,6 +473,10 @@ async def save_user_profile(req: UserProfileRequest):
             "film_languages": len(req.filmLanguages),
             "spoken_languages": len(req.languagesSpoken),
             "top_movies": len(req.topMovies),
+            "top_movies_enriched": enrichment_stats["enriched_count"],
+            "total_actors_from_top_movies": enrichment_stats["total_actors"],
+            "total_directors_from_top_movies": enrichment_stats["total_directors"],
+            "total_keywords_from_top_movies": enrichment_stats["total_keywords"],
             "movie_frequency": req.movieFrequency or "not set",
             "ott_theatre": req.ottTheatre or "not set",
             "relationship_intents": len(req.relationshipIntent),

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Backend API Testing for Film Companion Movie APIs
-Tests the TMDB movie feed and details endpoints
+Tests the TMDB movie feed, details endpoints, and COMPREHENSIVE RECOMMENDATION ENGINE
 """
 
 import requests
@@ -149,18 +149,117 @@ def validate_movie_details_response(response_data):
     print(f"   - Cast: {len(response_data['cast'])} actors")
     return True
 
+def validate_profile_save_response(response_data):
+    """Validate the structure of profile save response with enrichment stats"""
+    print("\n🔍 Validating Profile Save Response Structure...")
+    
+    required_fields = ["success", "message", "signals_used"]
+    for field in required_fields:
+        if field not in response_data:
+            print(f"❌ Missing required field: {field}")
+            return False
+    
+    signals_used = response_data.get("signals_used", {})
+    expected_signals = ["top_movies_enriched", "total_actors_from_top_movies", 
+                       "total_directors_from_top_movies", "total_keywords_from_top_movies"]
+    
+    for signal in expected_signals:
+        if signal not in signals_used:
+            print(f"❌ Missing enrichment signal: {signal}")
+            return False
+    
+    print(f"✅ Profile save response structure is valid.")
+    print(f"   - Top movies enriched: {signals_used.get('top_movies_enriched', 0)}")
+    print(f"   - Total actors extracted: {signals_used.get('total_actors_from_top_movies', 0)}")
+    print(f"   - Total directors extracted: {signals_used.get('total_directors_from_top_movies', 0)}")
+    print(f"   - Total keywords extracted: {signals_used.get('total_keywords_from_top_movies', 0)}")
+    return True
+
+def validate_swipe_response(response_data):
+    """Validate the structure of swipe response"""
+    print("\n🔍 Validating Swipe Response Structure...")
+    
+    required_fields = ["success", "message", "total_swipes", "like_count", "dislike_count"]
+    for field in required_fields:
+        if field not in response_data:
+            print(f"❌ Missing required field: {field}")
+            return False
+    
+    print(f"✅ Swipe response structure is valid.")
+    print(f"   - Total swipes: {response_data.get('total_swipes', 0)}")
+    print(f"   - Like count: {response_data.get('like_count', 0)}")
+    print(f"   - Dislike count: {response_data.get('dislike_count', 0)}")
+    return True
+
+def validate_taste_profile_response(response_data):
+    """Validate the structure of taste profile response"""
+    print("\n🔍 Validating Taste Profile Response Structure...")
+    
+    required_fields = ["user_id", "total_swipes", "top_genres", "top_actors", "top_directors", "preferred_eras"]
+    for field in required_fields:
+        if field not in response_data:
+            print(f"❌ Missing required field: {field}")
+            return False
+    
+    # Check if we have rich data
+    top_genres = response_data.get("top_genres", [])
+    top_actors = response_data.get("top_actors", [])
+    top_directors = response_data.get("top_directors", [])
+    
+    print(f"✅ Taste profile response structure is valid.")
+    print(f"   - Total swipes: {response_data.get('total_swipes', 0)}")
+    print(f"   - Top genres: {len(top_genres)} ({[g.get('name', '') for g in top_genres[:3]]})")
+    print(f"   - Top actors: {len(top_actors)} ({[a.get('name', '') for a in top_actors[:3]]})")
+    print(f"   - Top directors: {len(top_directors)} ({[d.get('name', '') for d in top_directors[:3]]})")
+    return True
+
+def validate_recommendations_response(response_data):
+    """Validate the structure of recommendations response"""
+    print("\n🔍 Validating Recommendations Response Structure...")
+    
+    required_fields = ["results", "page", "total_swipes", "taste_dimensions"]
+    for field in required_fields:
+        if field not in response_data:
+            print(f"❌ Missing required field: {field}")
+            return False
+    
+    results = response_data.get("results", [])
+    if not isinstance(results, list):
+        print(f"❌ 'results' should be a list, got {type(results)}")
+        return False
+    
+    if len(results) > 0:
+        movie = results[0]
+        required_movie_fields = ["id", "title", "recommendation_score"]
+        for field in required_movie_fields:
+            if field not in movie:
+                print(f"❌ Missing required movie field: {field}")
+                return False
+    
+    print(f"✅ Recommendations response structure is valid.")
+    print(f"   - Movies returned: {len(results)}")
+    print(f"   - Taste dimensions: {response_data.get('taste_dimensions', 0)}")
+    return True
+
 def main():
     """Main test function"""
-    print("🎬 Film Companion Backend API Testing")
+    print("🎬 Film Companion Backend API Testing - COMPREHENSIVE RECOMMENDATION ENGINE")
     print(f"🌐 Base URL: {BASE_URL}")
     print(f"🎯 API Base: {API_BASE_URL}")
     
     test_results = {
+        # Original tests
         "movie_feed_basic": False,
         "movie_feed_with_genres": False,
         "movie_feed_with_exclude": False,
         "movie_details_fight_club": False,
-        "movie_details_inception": False
+        "movie_details_inception": False,
+        # New recommendation engine tests
+        "profile_save_with_enrichment": False,
+        "right_swipe_with_rating": False,
+        "left_swipe": False,
+        "taste_profile": False,
+        "personalized_recommendations": False,
     }
     
     # Test 1: Basic Movie Feed API
@@ -225,25 +324,164 @@ def main():
     if success and response:
         test_results["movie_details_inception"] = validate_movie_details_response(response)
     
+    # =============================================
+    # COMPREHENSIVE RECOMMENDATION ENGINE TESTS
+    # =============================================
+    
+    # Test 6: Profile Save with Top Movies Enrichment
+    print("\n" + "="*80)
+    print("TEST 6: Profile Save with Top Movies Enrichment")
+    print("="*80)
+    profile_data = {
+        "user_id": "test_user_12345",
+        "name": "Test User",
+        "age": 28,
+        "gender": "Male",
+        "genres": ["Action", "Sci-Fi", "Thriller"],
+        "filmLanguages": ["English", "Hindi"],
+        "languagesSpoken": ["English", "Hindi"],
+        "topMovies": [
+            {"id": 550, "title": "Fight Club", "poster_path": "/pB8BM7pdSp6B6Ih7QZ4DrQ3PmJK.jpg", "rating": 5, "reasons": ["Great performances", "Good story/plot"]},
+            {"id": 27205, "title": "Inception", "poster_path": "/9gk7adHYeDvHkCSEqAvQNLV5Uge.jpg", "rating": 5, "reasons": ["Good craftwork", "Good story/plot"]},
+            {"id": 155, "title": "The Dark Knight", "poster_path": "/qJ2tW6WMUDux911r6m7haRef0WH.jpg", "rating": 5, "reasons": ["Great performances"]},
+            {"id": 603, "title": "The Matrix", "poster_path": "/f89U3ADr1oiB1s9GkdPOEpXUk5H.jpg", "rating": 4, "reasons": ["Good craftwork"]},
+            {"id": 238, "title": "The Godfather", "poster_path": "/3bhkrj58Vtu7enYsRolD1fZdja1.jpg", "rating": 5, "reasons": ["Good story/plot", "Great performances"]}
+        ],
+        "movieFrequency": "Multiple times a week",
+        "ottTheatre": "Mostly OTT",
+        "relationshipIntent": ["Movie Buddy"]
+    }
+    success, response = test_api_endpoint(
+        "POST", 
+        "/user/profile", 
+        data=profile_data,
+        description="Save user profile with Top 5 movies and verify enrichment"
+    )
+    if success and response:
+        test_results["profile_save_with_enrichment"] = validate_profile_save_response(response)
+    
+    # Test 7: Right Swipe with Rating
+    print("\n" + "="*80)
+    print("TEST 7: Right Swipe with Rating")
+    print("="*80)
+    swipe_data = {
+        "user_id": "test_user_12345",
+        "movie_id": 157336,
+        "direction": "right",
+        "rating": 5,
+        "reason": "Amazing cinematography and emotional story"
+    }
+    success, response = test_api_endpoint(
+        "POST", 
+        "/user/swipe", 
+        data=swipe_data,
+        description="Record a right swipe with rating and verify signal extraction"
+    )
+    if success and response:
+        test_results["right_swipe_with_rating"] = validate_swipe_response(response)
+    
+    # Test 8: Left Swipe
+    print("\n" + "="*80)
+    print("TEST 8: Left Swipe")
+    print("="*80)
+    swipe_data = {
+        "user_id": "test_user_12345",
+        "movie_id": 299534,
+        "direction": "left",
+        "reason": "Not my type of movie"
+    }
+    success, response = test_api_endpoint(
+        "POST", 
+        "/user/swipe", 
+        data=swipe_data,
+        description="Record a left swipe"
+    )
+    if success and response:
+        test_results["left_swipe"] = validate_swipe_response(response)
+    
+    # Test 9: Get Taste Profile
+    print("\n" + "="*80)
+    print("TEST 9: Get User Taste Profile")
+    print("="*80)
+    success, response = test_api_endpoint(
+        "GET", 
+        "/user/test_user_12345/taste-profile", 
+        description="Get user's taste profile to verify signals are being extracted"
+    )
+    if success and response:
+        test_results["taste_profile"] = validate_taste_profile_response(response)
+    
+    # Test 10: Get Personalized Recommendations
+    print("\n" + "="*80)
+    print("TEST 10: Get Personalized Recommendations")
+    print("="*80)
+    recommendations_data = {
+        "user_id": "test_user_12345",
+        "page": 1,
+        "limit": 10
+    }
+    success, response = test_api_endpoint(
+        "POST", 
+        "/recommendations", 
+        data=recommendations_data,
+        description="Get personalized recommendations filtered by language preferences"
+    )
+    if success and response:
+        test_results["personalized_recommendations"] = validate_recommendations_response(response)
+    
     # Test Summary
     print("\n" + "="*80)
-    print("🎯 TEST SUMMARY")
+    print("🎯 TEST SUMMARY - COMPREHENSIVE RECOMMENDATION ENGINE")
     print("="*80)
     
     total_tests = len(test_results)
     passed_tests = sum(1 for result in test_results.values() if result)
     
-    for test_name, result in test_results.items():
+    # Group tests by category
+    original_tests = ["movie_feed_basic", "movie_feed_with_genres", "movie_feed_with_exclude", 
+                     "movie_details_fight_club", "movie_details_inception"]
+    recommendation_tests = ["profile_save_with_enrichment", "right_swipe_with_rating", 
+                           "left_swipe", "taste_profile", "personalized_recommendations"]
+    
+    print("\n📽️  ORIGINAL MOVIE API TESTS:")
+    for test_name in original_tests:
+        result = test_results[test_name]
         status = "✅ PASS" if result else "❌ FAIL"
-        print(f"{test_name:<30}: {status}")
+        print(f"  {test_name:<30}: {status}")
+    
+    print("\n🧠 RECOMMENDATION ENGINE TESTS:")
+    for test_name in recommendation_tests:
+        result = test_results[test_name]
+        status = "✅ PASS" if result else "❌ FAIL"
+        print(f"  {test_name:<30}: {status}")
     
     print(f"\nOverall: {passed_tests}/{total_tests} tests passed")
     
+    # Check backend logs for TMDB enrichment
+    print("\n🔍 BACKEND LOG VERIFICATION:")
+    print("Expected to see in backend logs:")
+    print("  - 'append_to_response=credits%2Ckeywords' in TMDB requests")
+    print("  - 'Saved profile for user ... enriched with ... keywords' message")
+    print("  - 'Recorded right/left swipe for user' messages")
+    
     if passed_tests == total_tests:
-        print("🎉 All tests passed! Both Movie Feed and Movie Details APIs are working correctly.")
+        print("\n🎉 All tests passed! Comprehensive Recommendation Engine is working correctly.")
+        print("✅ Profile enrichment with full TMDB data")
+        print("✅ Comprehensive swipe signal extraction")
+        print("✅ Rich taste profile generation")
+        print("✅ Personalized recommendations with language filtering")
         return True
     else:
-        print("⚠️  Some tests failed. Please check the issues above.")
+        print("\n⚠️  Some tests failed. Please check the issues above.")
+        
+        # Specific failure analysis
+        failed_tests = [name for name, result in test_results.items() if not result]
+        if any(test in failed_tests for test in recommendation_tests):
+            print("\n🚨 RECOMMENDATION ENGINE ISSUES DETECTED:")
+            for test in recommendation_tests:
+                if test in failed_tests:
+                    print(f"   - {test}: Check if enrichment/signal extraction is working")
+        
         return False
 
 if __name__ == "__main__":
