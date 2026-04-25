@@ -155,11 +155,19 @@ class TasteVector:
     - genre_* : Genre preferences
     - actor_* : Actor preferences  
     - director_* : Director preferences
+    - writer_* : Writer/Screenwriter preferences
+    - composer_* : Music composer preferences
+    - dop_* : Cinematographer preferences
+    - keyword_* : Thematic keyword preferences
+    - studio_* : Production company preferences
+    - country_* : Production country preferences
     - era_* : Era/decade preferences
-    - lang_* : Language preferences (from both spoken and film languages)
+    - lang_* : Language preferences (from spoken, film, and top movies)
     - rating_* : Rating preferences
-    - mood_* : Mood preferences (action-packed, emotional, etc.)
-    - content_* : Content type preferences (blockbuster, indie, international)
+    - quality_* : Quality attribute preferences (story, visuals, emotional)
+    - content_* : Content type preferences (blockbuster, indie, mainstream)
+    - runtime_* : Runtime category preferences
+    - unwatched_* : Patterns from "didn't watch" movies (negative signals)
     """
     
     def __init__(self):
@@ -167,9 +175,16 @@ class TasteVector:
         self.like_count = 0
         self.dislike_count = 0
         self.total_swipes = 0
-        self.preferred_languages: Set[str] = set()  # ISO codes for filtering
+        self.preferred_languages: Set[str] = set()  # All acceptable languages (ISO codes)
+        self.primary_languages: Set[str] = set()  # User's explicitly selected film languages
+        self.secondary_languages: Set[str] = set()  # Inferred from spoken/top movies
         self.movie_frequency: str = ''
         self.ott_theatre: str = ''
+        # Track cumulative reason signals
+        self.reason_stats: Dict[str, int] = {
+            "story": 0, "acting": 0, "visuals": 0, "music": 0,
+            "emotional": 0, "entertaining": 0, "thoughtful": 0
+        }
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -178,8 +193,11 @@ class TasteVector:
             "dislike_count": self.dislike_count,
             "total_swipes": self.total_swipes,
             "preferred_languages": list(self.preferred_languages),
+            "primary_languages": list(self.primary_languages),
+            "secondary_languages": list(self.secondary_languages),
             "movie_frequency": self.movie_frequency,
             "ott_theatre": self.ott_theatre,
+            "reason_stats": self.reason_stats,
         }
     
     @classmethod
@@ -190,8 +208,14 @@ class TasteVector:
         tv.dislike_count = data.get("dislike_count", 0)
         tv.total_swipes = data.get("total_swipes", 0)
         tv.preferred_languages = set(data.get("preferred_languages", []))
+        tv.primary_languages = set(data.get("primary_languages", []))
+        tv.secondary_languages = set(data.get("secondary_languages", []))
         tv.movie_frequency = data.get("movie_frequency", "")
         tv.ott_theatre = data.get("ott_theatre", "")
+        tv.reason_stats = data.get("reason_stats", {
+            "story": 0, "acting": 0, "visuals": 0, "music": 0,
+            "emotional": 0, "entertaining": 0, "thoughtful": 0
+        })
         return tv
     
     def add_signal(self, key: str, weight: float):
@@ -199,6 +223,11 @@ class TasteVector:
         if key not in self.vector:
             self.vector[key] = 0.0
         self.vector[key] += weight
+    
+    def track_reason(self, reason_type: str):
+        """Track cumulative reason stats"""
+        if reason_type in self.reason_stats:
+            self.reason_stats[reason_type] += 1
     
     def normalize(self):
         """Normalize the vector to unit length"""
@@ -220,10 +249,12 @@ def initialize_taste_vector_from_profile(profile: Dict[str, Any]) -> TasteVector
     - Favorite genres (strong signal)
     - Film languages (for filtering AND preference)
     - Languages spoken (secondary language signal)
+    - Languages from Top 5 movies (implicit language preference)
     - Top 5 movies (extract genres, actors, directors, era)
     - Movie frequency (mainstream vs niche preference)
     - OTT/Theatre preference (blockbuster vs indie)
     - Relationship intent (subtle genre affinity)
+    - ALL lifestyle preferences
     """
     tv = TasteVector()
     
@@ -233,18 +264,42 @@ def initialize_taste_vector_from_profile(profile: Dict[str, Any]) -> TasteVector
     film_languages = profile.get("filmLanguages", [])
     spoken_languages = profile.get("languagesSpoken", [])
     
-    # Combine both for filtering (union of languages user watches + speaks)
+    # Also extract languages from Top 5 movies
+    top_movies = profile.get("topMovies", [])
+    enriched_top_movies = profile.get("topMoviesEnriched", [])
+    
+    # Get languages from enriched top movies
+    top_movie_languages = set()
+    for movie in enriched_top_movies or top_movies:
+        orig_lang = movie.get("original_language", "")
+        if orig_lang:
+            top_movie_languages.add(orig_lang)
+    
+    # Combine ALL language sources for filtering
+    # Priority: Film Languages > Top Movie Languages > Spoken Languages
     all_languages = set(film_languages) | set(spoken_languages)
     tv.preferred_languages = get_language_codes(list(all_languages))
     
-    # Add language signals to vector (film languages weighted higher)
+    # Add top movie languages to preferred set (these are implicit preferences)
+    tv.preferred_languages.update(top_movie_languages)
+    
+    # Store primary vs secondary languages for ranking
+    tv.primary_languages = get_language_codes(film_languages)  # User explicitly selected
+    tv.secondary_languages = tv.preferred_languages - tv.primary_languages  # Inferred
+    
+    # Add language signals to vector with tiered weights
     for lang in film_languages:
-        lang_code = LANGUAGE_TO_CODE.get(lang, lang.lower()[:2])
-        tv.add_signal(f"lang_{lang_code}", 1.0)  # Strong signal for film languages
+        lang_code = LANGUAGE_TO_CODE.get(lang, lang.lower()[:2] if len(lang) >= 2 else "")
+        if lang_code:
+            tv.add_signal(f"lang_{lang_code}", 1.5)  # Strongest signal - explicitly selected film language
     
     for lang in spoken_languages:
-        lang_code = LANGUAGE_TO_CODE.get(lang, lang.lower()[:2])
-        tv.add_signal(f"lang_{lang_code}", 0.5)  # Moderate signal for spoken languages
+        lang_code = LANGUAGE_TO_CODE.get(lang, lang.lower()[:2] if len(lang) >= 2 else "")
+        if lang_code:
+            tv.add_signal(f"lang_{lang_code}", 0.7)  # Moderate signal for spoken languages
+    
+    for lang_code in top_movie_languages:
+        tv.add_signal(f"lang_{lang_code}", 1.0)  # Strong signal - user liked movies in this language
     
     # ========================
     # 2. GENRE PREFERENCES
@@ -257,7 +312,6 @@ def initialize_taste_vector_from_profile(profile: Dict[str, Any]) -> TasteVector
     # ========================
     # 3. TOP 5 MOVIES (Rich signal source)
     # ========================
-    top_movies = profile.get("topMovies", [])
     for i, movie in enumerate(top_movies):
         # Weight decreases slightly for lower-ranked movies
         rank_weight = 1.5 - (i * 0.1)  # 1.5, 1.4, 1.3, 1.2, 1.1
@@ -265,8 +319,9 @@ def initialize_taste_vector_from_profile(profile: Dict[str, Any]) -> TasteVector
         # Genre signals from top movies
         movie_genres = movie.get("genres", [])
         for genre in movie_genres:
-            genre_key = f"genre_{genre.lower().replace(' ', '_').replace('-', '_')}"
-            tv.add_signal(genre_key, rank_weight)
+            if isinstance(genre, str):
+                genre_key = f"genre_{genre.lower().replace(' ', '_').replace('-', '_')}"
+                tv.add_signal(genre_key, rank_weight)
         
         # Era signal
         release_date = movie.get("release_date", "")
@@ -287,6 +342,19 @@ def initialize_taste_vector_from_profile(profile: Dict[str, Any]) -> TasteVector
             tv.add_signal("quality_good", 0.3 * rank_weight)
         elif effective_rating >= 6.0:
             tv.add_signal("quality_decent", 0.2 * rank_weight)
+        
+        # User's reasons for liking this movie (IMPORTANT!)
+        user_reasons = movie.get("reasons", [])
+        for reason in user_reasons:
+            reason_lower = reason.lower() if isinstance(reason, str) else ""
+            if any(word in reason_lower for word in ['story', 'plot']):
+                tv.add_signal("quality_story_lover", rank_weight * 0.5)
+            if any(word in reason_lower for word in ['performance', 'acting', 'cast']):
+                tv.add_signal("quality_acting_lover", rank_weight * 0.5)
+            if any(word in reason_lower for word in ['emotional', 'connection']):
+                tv.add_signal("quality_emotional_lover", rank_weight * 0.5)
+            if any(word in reason_lower for word in ['craft', 'visual', 'technical']):
+                tv.add_signal("quality_craft_lover", rank_weight * 0.5)
     
     # ========================
     # 4. MOVIE FREQUENCY (Mainstream vs Niche)
@@ -913,6 +981,7 @@ def update_taste_vector_from_swipe(
         
         # Cast-related reasons - boost actors more
         if any(word in reason_lower for word in ['cast', 'actor', 'actress', 'performance', 'acting', 'performances']):
+            tv.track_reason("acting")  # Track cumulative stats
             for actor_name in movie_details.get("cast_names", movie_details.get("cast", []))[:3]:
                 if isinstance(actor_name, str):
                     actor_key = f"actor_{actor_name.lower().replace(' ', '_').replace('.', '').replace('-', '_')}"
@@ -926,6 +995,7 @@ def update_taste_vector_from_swipe(
         
         # Story/writing-related
         if any(word in reason_lower for word in ['story', 'plot', 'narrative', 'script', 'writing', 'screenplay']):
+            tv.track_reason("story")  # Track cumulative stats
             tv.add_signal("quality_story", 0.4 if direction == 'right' else -0.2)
             for writer in movie_details.get("writers", [])[:2]:
                 writer_key = f"writer_{writer.lower().replace(' ', '_').replace('.', '').replace('-', '_')}"
@@ -933,6 +1003,7 @@ def update_taste_vector_from_swipe(
         
         # Visuals/cinematography-related
         if any(word in reason_lower for word in ['visual', 'cinematography', 'beautiful', 'stunning', 'gorgeous', 'shots']):
+            tv.track_reason("visuals")  # Track cumulative stats
             tv.add_signal("quality_visuals", 0.4 if direction == 'right' else -0.2)
             for dop in movie_details.get("cinematographers", [])[:1]:
                 dop_key = f"dop_{dop.lower().replace(' ', '_').replace('.', '').replace('-', '_')}"
@@ -940,6 +1011,7 @@ def update_taste_vector_from_swipe(
         
         # Music/score-related
         if any(word in reason_lower for word in ['music', 'score', 'soundtrack', 'songs', 'composer']):
+            tv.track_reason("music")  # Track cumulative stats
             tv.add_signal("quality_music", 0.4 if direction == 'right' else -0.2)
             for composer in movie_details.get("composers", [])[:1]:
                 comp_key = f"composer_{composer.lower().replace(' ', '_').replace('.', '').replace('-', '_')}"
@@ -947,14 +1019,17 @@ def update_taste_vector_from_swipe(
         
         # Emotional connection
         if any(word in reason_lower for word in ['emotional', 'touched', 'moved', 'cry', 'tears', 'heartfelt']):
+            tv.track_reason("emotional")  # Track cumulative stats
             tv.add_signal("quality_emotional", 0.4 if direction == 'right' else -0.2)
         
         # Fun/entertaining
         if any(word in reason_lower for word in ['fun', 'entertaining', 'enjoyable', 'popcorn', 'laugh']):
+            tv.track_reason("entertaining")  # Track cumulative stats
             tv.add_signal("quality_entertaining", 0.3 if direction == 'right' else -0.2)
         
         # Thought-provoking
         if any(word in reason_lower for word in ['thought', 'think', 'deep', 'meaningful', 'profound']):
+            tv.track_reason("thoughtful")  # Track cumulative stats
             tv.add_signal("quality_thoughtful", 0.3 if direction == 'right' else -0.2)
         
         # "Didn't watch" handling - minimal negative impact
@@ -1034,6 +1109,11 @@ def score_movie_for_user(
     """
     Score a movie for a user based on their taste vector.
     
+    ENHANCED:
+    - Primary languages get higher priority than secondary
+    - Unwatched patterns are penalized
+    - Reason-based quality signals boost scores
+    
     Returns:
         Tuple of (score, passes_language_filter)
         - score: 0-1, higher is better match
@@ -1048,10 +1128,14 @@ def score_movie_for_user(
     # Check language filter
     movie_lang = movie.get("original_language", "")
     passes_language = True
+    is_primary_language = False
+    is_secondary_language = False
     
     if user_taste.preferred_languages:
         # Movie must be in one of user's preferred languages
         passes_language = movie_lang in user_taste.preferred_languages
+        is_primary_language = movie_lang in user_taste.primary_languages
+        is_secondary_language = movie_lang in user_taste.secondary_languages
     
     # Compute movie vector
     movie_vector = compute_movie_vector(movie)
@@ -1071,9 +1155,57 @@ def score_movie_for_user(
     elif rating >= 7.0 and vote_count >= 500:
         score *= 1.08
     
-    # Language match boost (if it matches preferred languages, extra boost)
-    if passes_language and movie_lang in user_taste.preferred_languages:
-        score *= 1.1
+    # ========================
+    # LANGUAGE PRIORITY BOOST
+    # ========================
+    if passes_language:
+        if is_primary_language:
+            # Primary language gets strong boost (user explicitly selected)
+            score *= 1.25
+        elif is_secondary_language:
+            # Secondary language gets moderate boost
+            score *= 1.1
+    
+    # ========================
+    # UNWATCHED PATTERNS PENALTY
+    # ========================
+    # Check if movie matches patterns from "didn't watch" swipes
+    movie_genres = [g.get("name", g) if isinstance(g, dict) else g for g in movie.get("genre_ids", [])]
+    
+    # Convert genre IDs to names
+    movie_genre_names = []
+    for gid in movie.get("genre_ids", []):
+        if isinstance(gid, int) and gid in GENRE_ID_TO_NAME:
+            movie_genre_names.append(GENRE_ID_TO_NAME[gid])
+    
+    for genre in movie_genre_names:
+        unwatched_key = f"unwatched_genre_{genre.lower().replace(' ', '_').replace('-', '_')}"
+        if unwatched_key in user_taste.vector and user_taste.vector[unwatched_key] < -0.5:
+            # Apply mild penalty for unwatched content patterns
+            score *= 0.9
+            break  # Only apply once
+    
+    # ========================
+    # REASON-BASED QUALITY MATCHING
+    # ========================
+    # If user values certain qualities, boost movies that might have them
+    if user_taste.reason_stats:
+        total_reasons = sum(user_taste.reason_stats.values())
+        if total_reasons > 0:
+            # Story lovers get drama/thriller boost
+            if user_taste.reason_stats.get("story", 0) > total_reasons * 0.3:
+                if any(g in movie_genre_names for g in ["Drama", "Thriller", "Mystery"]):
+                    score *= 1.05
+            
+            # Visuals lovers get action/sci-fi boost
+            if user_taste.reason_stats.get("visuals", 0) > total_reasons * 0.3:
+                if any(g in movie_genre_names for g in ["Action", "Science Fiction", "Fantasy"]):
+                    score *= 1.05
+            
+            # Emotional lovers get drama/romance boost
+            if user_taste.reason_stats.get("emotional", 0) > total_reasons * 0.3:
+                if any(g in movie_genre_names for g in ["Drama", "Romance", "Family"]):
+                    score *= 1.05
     
     # Cold start: boost popular movies for new users
     if user_taste.total_swipes < 10:

@@ -140,7 +140,7 @@ backend:
         agent: "testing"
         comment: "✅ TESTED SUCCESSFULLY: Movie details API working correctly. Tested Fight Club (ID: 550) and Inception (ID: 27205). Returns proper JSON with id, title, overview, runtime, genres, cast, directors. All required fields present and correctly formatted."
 
-  - task: "Comprehensive Recommendation Engine"
+  - task: "Enhanced Comprehensive Recommendation Engine"
     implemented: true
     working: true
     file: "/app/backend/recommendation_engine.py"
@@ -154,6 +154,9 @@ backend:
       - working: true
         agent: "testing"
         comment: "✅ TESTED SUCCESSFULLY: Comprehensive recommendation engine working perfectly. All 5 new endpoints tested: 1) Profile save with top movies enrichment (5/5 movies enriched, 50 actors, 6 directors, 110 keywords extracted), 2) Right swipe with rating (comprehensive signal extraction), 3) Left swipe recording, 4) Rich taste profile generation (Action/Thriller/Drama genres, Michael Caine/Edward Norton/Brad Pitt actors, Christopher Nolan/David Fincher directors), 5) Personalized recommendations with language filtering (10 movies returned, 198 taste dimensions). Backend logs confirm 'append_to_response=credits%2Ckeywords' in TMDB requests and proper enrichment logging."
+      - working: true
+        agent: "testing"
+        comment: "✅ ENHANCED FEATURES VERIFIED: All enhanced recommendation engine features working correctly. Tested: 1) TasteVector with primary_languages (hi, en) and secondary_languages (mr, pa) correctly separated, 2) Profile save with ALL fields (30 actors, 59 keywords extracted from 3 top movies), 3) 'Didn't watch' tracking with unwatched patterns (didnt_watch flag correctly set), 4) Reason-based learning for story/acting preferences (Drama genre boosted to weight 8.42), 5) Language prioritization working (20/20 recommendations in primary languages with 1.25x boost), 6) Cumulative reason stats tracking. Backend logs show language-specific discovery calls and comprehensive TMDB enrichment. All 6/6 enhanced tests passed."
 
   - task: "Top Movies Enrichment"
     implemented: true
@@ -487,3 +490,52 @@ agent_communication:
       ✅ Rich taste profile generation with multi-dimensional vectors
       ✅ Personalized recommendations with language filtering
       ✅ All endpoints working correctly with proper error handling
+  - agent: "testing"
+    message: |
+      ✅ ENHANCED RECOMMENDATION ENGINE TESTING COMPLETE
+      
+      TESTED ALL ENHANCED FEATURES (6/6 PASSED):
+      
+      🧠 ENHANCED FEATURES VERIFIED:
+      1. TasteVector Class Enhancements ✅
+         - primary_languages: Correctly separated (hi, en) from filmLanguages
+         - secondary_languages: Correctly inferred (mr, pa) from languagesSpoken
+         - reason_stats: Cumulative tracking working (story/acting preferences)
+      
+      2. Profile Save with ALL Fields ✅
+         - Comprehensive profile data stored (30+ fields)
+         - Top movies enrichment: 3/3 movies enriched with 59 keywords
+         - Actor extraction: 30 actors from top movies
+         - Language prioritization setup working
+      
+      3. "Didn't Watch" Tracking ✅
+         - didnt_watch flag correctly set to True
+         - Unwatched patterns stored separately
+         - Negative signals applied with mild weights (-0.15 for genres)
+         - Backend logs: "Recorded 'didn't watch' for user on movie"
+      
+      4. Reason-Based Learning ✅
+         - Story-focused reasons boost Drama genre (weight: 8.42)
+         - Acting-focused reasons boost actor signals
+         - Cumulative reason stats tracking functional
+         - Quality signals properly applied
+      
+      5. Language Prioritization ✅
+         - Primary languages get 1.25x boost (verified in code)
+         - Secondary languages get 1.1x boost (verified in code)
+         - Recommendations: 20/20 movies in primary languages
+         - Language-specific discovery calls in backend logs
+      
+      6. Comprehensive TMDB Integration ✅
+         - Full movie enrichment with credits + keywords
+         - Backend logs show: "append_to_response=credits%2Ckeywords"
+         - Multi-language discovery API calls working
+         - Rich taste vector generation (165 dimensions)
+      
+      🔍 BACKEND LOG VERIFICATION:
+      ✅ "Saved profile for user with 2 genres, 4 languages, 2 top movies (2 enriched with 40 keywords)"
+      ✅ "Recorded 'didn't watch' for user on movie 11"
+      ✅ Language-specific discovery calls for pa, en, mr, hi
+      ✅ Comprehensive TMDB enrichment working
+      
+      🎉 ALL ENHANCED RECOMMENDATION ENGINE FEATURES WORKING PERFECTLY!

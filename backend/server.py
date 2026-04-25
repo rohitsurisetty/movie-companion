@@ -61,20 +61,50 @@ class MovieSelection(BaseModel):
     vote_average: float = 0
     rating: float = 0  # User's personal rating
     genres: List[str] = []
+    reasons: List[str] = []  # User's reasons for liking this movie
 
 
 class UserProfileRequest(BaseModel):
+    """
+    Complete user profile with ALL signup fields.
+    Every field matters for accurate taste profiling!
+    """
     user_id: str
+    # Basic Info
     name: str = ""
     age: int = 0
     gender: str = ""
+    location: str = ""
+    # Dating Preferences
+    partnerPreference: str = ""
+    relationshipIntent: List[str] = []
+    # Movie Preferences (Critical for recommendations)
     genres: List[str] = []
     filmLanguages: List[str] = []
-    languagesSpoken: List[str] = []  # Added
+    languagesSpoken: List[str] = []
     topMovies: List[MovieSelection] = []
     movieFrequency: str = ""
     ottTheatre: str = ""
-    relationshipIntent: List[str] = []  # Added
+    # Personal Details
+    height: str = ""
+    religion: str = ""
+    maritalStatus: str = ""
+    foodPreference: str = ""
+    bio: str = ""
+    # Lifestyle
+    smoking: str = ""
+    drinking: str = ""
+    exercise: str = ""
+    zodiac: str = ""
+    pets: str = ""
+    familyPlanning: str = ""
+    siblings: str = ""
+    education: str = ""
+    workProfile: str = ""
+    travel: str = ""
+    # App modes
+    movieBuddyMode: bool = False
+    movieDateMode: bool = False
 
 
 class SwipeRequest(BaseModel):
@@ -83,6 +113,7 @@ class SwipeRequest(BaseModel):
     direction: str  # 'right' or 'left'
     rating: Optional[int] = None  # 1-5 stars (for right swipes)
     reason: Optional[str] = None  # Reason for like/dislike
+    didnt_watch: bool = False  # User hasn't watched this movie
 
 
 class RecommendationRequest(BaseModel):
@@ -409,20 +440,46 @@ async def save_user_profile(req: UserProfileRequest):
                     enrichment_stats["total_directors"] += len(movie.get("directors", []))
                     enrichment_stats["total_keywords"] += len(movie.get("keywords", []))
     
-    # Build complete profile data
+    # Build complete profile data with ALL fields
     profile_data = {
         "user_id": req.user_id,
+        # Basic Info
         "name": req.name,
         "age": req.age,
         "gender": req.gender,
+        "location": req.location,
+        # Dating Preferences
+        "partnerPreference": req.partnerPreference,
+        "relationshipIntent": req.relationshipIntent,
+        # Movie Preferences (Critical)
         "genres": req.genres,
         "filmLanguages": req.filmLanguages,
         "languagesSpoken": req.languagesSpoken,
-        "topMovies": top_movies_data,  # Store original data
-        "topMoviesEnriched": enriched_top_movies,  # Store enriched data
+        "topMovies": top_movies_data,
+        "topMoviesEnriched": enriched_top_movies,
         "movieFrequency": req.movieFrequency,
         "ottTheatre": req.ottTheatre,
-        "relationshipIntent": req.relationshipIntent,
+        # Personal Details
+        "height": req.height,
+        "religion": req.religion,
+        "maritalStatus": req.maritalStatus,
+        "foodPreference": req.foodPreference,
+        "bio": req.bio,
+        # Lifestyle
+        "smoking": req.smoking,
+        "drinking": req.drinking,
+        "exercise": req.exercise,
+        "zodiac": req.zodiac,
+        "pets": req.pets,
+        "familyPlanning": req.familyPlanning,
+        "siblings": req.siblings,
+        "education": req.education,
+        "workProfile": req.workProfile,
+        "travel": req.travel,
+        # App Modes
+        "movieBuddyMode": req.movieBuddyMode,
+        "movieDateMode": req.movieDateMode,
+        # Metadata
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     
@@ -490,15 +547,26 @@ async def record_swipe(req: SwipeRequest):
     """
     Record a swipe action and update user's taste vector.
     This is the core learning mechanism.
+    
+    ENHANCED:
+    - Tracks "didn't watch" movies separately to avoid recommending similar content
+    - Extracts comprehensive signals from all TMDB data
+    - Uses reasons to understand what user values in films
     """
     # Get movie details from TMDB for extracting features
     async with httpx.AsyncClient(timeout=10.0) as http_client:
-        movie_details = await enrich_movie_with_details(req.movie_id, http_client)
+        movie_details = await enrich_movie_with_full_details(req.movie_id, http_client)
     
     if not movie_details:
         raise HTTPException(status_code=404, detail="Could not fetch movie details")
     
-    # Record the swipe
+    # Determine if this is a "didn't watch" swipe
+    is_didnt_watch = req.didnt_watch or (req.reason and any(
+        phrase in req.reason.lower() 
+        for phrase in ["didn't watch", "haven't seen", "not seen", "not watched", "unwatched"]
+    ))
+    
+    # Record the swipe with comprehensive data
     swipe_record = {
         "user_id": req.user_id,
         "movie_id": req.movie_id,
@@ -506,9 +574,15 @@ async def record_swipe(req: SwipeRequest):
         "direction": req.direction,
         "rating": req.rating,
         "reason": req.reason,
+        "didnt_watch": is_didnt_watch,
+        # Store comprehensive movie data for analysis
         "movie_genres": movie_details.get("genres", []),
-        "movie_actors": movie_details.get("cast", []),
+        "movie_keywords": movie_details.get("keywords", [])[:15],
+        "movie_actors": movie_details.get("cast_names", [])[:5],
         "movie_directors": movie_details.get("directors", []),
+        "movie_language": movie_details.get("original_language", ""),
+        "movie_content_type": movie_details.get("content_type", ""),
+        "movie_era": movie_details.get("release_date", "")[:4] if movie_details.get("release_date") else "",
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     
@@ -523,14 +597,44 @@ async def record_swipe(req: SwipeRequest):
         # Initialize empty taste vector if not exists
         taste_vector = TasteVector()
     
-    # Update taste vector based on swipe
-    taste_vector = update_taste_vector_from_swipe(
-        taste_vector,
-        movie_details,
-        req.direction,
-        req.rating,
-        req.reason
-    )
+    # Handle "didn't watch" movies differently
+    if is_didnt_watch:
+        # Track what types of films user hasn't watched (to deprioritize similar content)
+        await db.user_unwatched_patterns.update_one(
+            {"user_id": req.user_id},
+            {
+                "$push": {
+                    "unwatched_genres": {"$each": movie_details.get("genres", [])},
+                    "unwatched_keywords": {"$each": movie_details.get("keywords", [])[:10]},
+                    "unwatched_languages": movie_details.get("original_language", ""),
+                },
+                "$inc": {"unwatched_count": 1},
+                "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}
+            },
+            upsert=True
+        )
+        
+        # Add negative signals for unwatched content patterns (mild negative weight)
+        for genre in movie_details.get("genres", []):
+            genre_key = f"unwatched_genre_{genre.lower().replace(' ', '_').replace('-', '_')}"
+            taste_vector.add_signal(genre_key, -0.15)  # Mild negative
+        
+        for keyword in movie_details.get("keywords", [])[:5]:
+            keyword_key = f"unwatched_keyword_{keyword.lower().replace(' ', '_').replace('-', '_')}"
+            taste_vector.add_signal(keyword_key, -0.1)  # Very mild negative
+        
+        logger.info(f"Recorded 'didn't watch' for user {req.user_id} on movie {req.movie_id}")
+    else:
+        # Normal swipe - update taste vector with full learning
+        taste_vector = update_taste_vector_from_swipe(
+            taste_vector,
+            movie_details,
+            req.direction,
+            req.rating,
+            req.reason
+        )
+        
+        logger.info(f"Recorded {req.direction} swipe for user {req.user_id} on movie {req.movie_id}")
     
     # Save updated taste vector
     await db.user_taste_vectors.update_one(
@@ -543,14 +647,13 @@ async def record_swipe(req: SwipeRequest):
         upsert=True
     )
     
-    logger.info(f"Recorded {req.direction} swipe for user {req.user_id} on movie {req.movie_id}")
-    
     return {
         "success": True,
         "message": f"Swipe recorded and taste vector updated",
         "total_swipes": taste_vector.total_swipes,
         "like_count": taste_vector.like_count,
         "dislike_count": taste_vector.dislike_count,
+        "didnt_watch": is_didnt_watch,
     }
 
 

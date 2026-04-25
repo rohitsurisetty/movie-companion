@@ -497,11 +497,87 @@ export default function ProfileScreen() {
     setLoading(false);
   };
 
+  // Sync profile to backend recommendation engine
+  const syncProfileToBackend = async (profileData: ProfileData) => {
+    try {
+      const userId = profileData.userId || `user_${Date.now()}`;
+      
+      // Build the payload with ALL profile fields
+      const payload = {
+        user_id: userId,
+        name: profileData.name || '',
+        age: profileData.age || 0,
+        gender: profileData.gender || '',
+        location: profileData.location || '',
+        partnerPreference: profileData.partnerPreference || '',
+        relationshipIntent: profileData.relationshipIntent || [],
+        genres: profileData.genres || [],
+        filmLanguages: profileData.filmLanguages || [],
+        languagesSpoken: profileData.languagesSpoken || [],
+        topMovies: (profileData.topMovies || []).map(m => ({
+          id: m.id,
+          title: m.title,
+          poster_path: m.poster_path || '',
+          release_date: m.release_date || '',
+          vote_average: m.vote_average || 0,
+          rating: m.rating || 0,
+          genres: m.genres || [],
+          reasons: m.reasons || [],
+        })),
+        movieFrequency: profileData.movieFrequency || '',
+        ottTheatre: profileData.ottTheatre || '',
+        height: profileData.height || '',
+        religion: profileData.religion || '',
+        maritalStatus: profileData.maritalStatus || '',
+        foodPreference: profileData.foodPreference || '',
+        bio: profileData.bio || '',
+        smoking: profileData.smoking || '',
+        drinking: profileData.drinking || '',
+        exercise: profileData.exercise || '',
+        zodiac: profileData.zodiac || '',
+        pets: profileData.pets || '',
+        familyPlanning: profileData.familyPlanning || '',
+        siblings: profileData.siblings || '',
+        education: profileData.education || '',
+        workProfile: profileData.workProfile || '',
+        travel: profileData.travel || '',
+        movieBuddyMode: profileData.movieBuddyMode || false,
+        movieDateMode: profileData.movieDateMode || false,
+      };
+      
+      const response = await fetch(`${BACKEND_URL}/api/user/profile`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        console.log('Profile synced to backend:', result.signals_used);
+      }
+    } catch (error) {
+      console.log('Error syncing profile to backend:', error);
+      // Non-critical, don't show error to user
+    }
+  };
+
   const updateField = useCallback(async (field: string, value: any) => {
     const updatedProfile = { ...profile, [field]: value };
     setProfile(updatedProfile);
     setSaving(true);
+    
+    // Save locally
     await saveProfile(updatedProfile);
+    
+    // Sync to backend for recommendation engine (debounced for important fields)
+    const importantFields = [
+      'genres', 'filmLanguages', 'languagesSpoken', 'topMovies',
+      'movieFrequency', 'ottTheatre', 'relationshipIntent'
+    ];
+    if (importantFields.includes(field)) {
+      await syncProfileToBackend(updatedProfile);
+    }
+    
     setSaving(false);
   }, [profile]);
 
