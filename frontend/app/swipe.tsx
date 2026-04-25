@@ -237,20 +237,33 @@ function LeftSwipeModal({
 }: {
   visible: boolean;
   onClose: () => void;
-  onSubmit: (reasons: string[]) => void;
+  onSubmit: (reasons: string[], didntWatch: boolean) => void;
   movieTitle: string;
   colors: ReturnType<typeof getThemeColors>;
 }) {
   const [selectedReasons, setSelectedReasons] = useState<string[]>([]);
+  const didntWatch = selectedReasons.includes('not_watched');
 
   const toggleReason = (id: string) => {
-    setSelectedReasons(prev =>
-      prev.includes(id) ? prev.filter(r => r !== id) : [...prev, id]
-    );
+    if (id === 'not_watched') {
+      // If selecting "Didn't watch", clear all other reasons and only keep this one
+      if (!didntWatch) {
+        setSelectedReasons(['not_watched']);
+      } else {
+        setSelectedReasons([]);
+      }
+    } else {
+      // If "Didn't watch" is already selected, don't allow other selections
+      if (didntWatch) return;
+      
+      setSelectedReasons(prev =>
+        prev.includes(id) ? prev.filter(r => r !== id) : [...prev, id]
+      );
+    }
   };
 
   const handleSubmit = () => {
-    onSubmit(selectedReasons);
+    onSubmit(selectedReasons, didntWatch);
     setSelectedReasons([]);
   };
 
@@ -266,29 +279,40 @@ function LeftSwipeModal({
           <Text style={[modalStyles.subtitle, { color: colors.textSecondary }]}>Tell us why (optional)</Text>
 
           <View style={modalStyles.reasonsContainer}>
-            {LEFT_SWIPE_REASONS.map((reason) => (
-              <TouchableOpacity
-                key={reason.id}
-                style={[
-                  modalStyles.reasonChip,
-                  { borderColor: colors.border },
-                  selectedReasons.includes(reason.id) && { borderColor: '#FF6B6B', backgroundColor: 'rgba(255,107,107,0.15)' }
-                ]}
-                onPress={() => toggleReason(reason.id)}
-                testID={`left-reason-${reason.id}`}
-              >
-                <Ionicons
-                  name={reason.icon as any}
-                  size={18}
-                  color={selectedReasons.includes(reason.id) ? '#FF6B6B' : colors.textMuted}
-                />
-                <Text style={[
-                  modalStyles.reasonText,
-                  { color: selectedReasons.includes(reason.id) ? '#FF6B6B' : colors.textSecondary }
-                ]}>{reason.label}</Text>
-              </TouchableOpacity>
-            ))}
+            {LEFT_SWIPE_REASONS.map((reason) => {
+              const isDisabled = didntWatch && reason.id !== 'not_watched';
+              return (
+                <TouchableOpacity
+                  key={reason.id}
+                  style={[
+                    modalStyles.reasonChip,
+                    { borderColor: colors.border },
+                    selectedReasons.includes(reason.id) && { borderColor: '#FF6B6B', backgroundColor: 'rgba(255,107,107,0.15)' },
+                    isDisabled && { opacity: 0.4 }
+                  ]}
+                  onPress={() => toggleReason(reason.id)}
+                  testID={`left-reason-${reason.id}`}
+                  disabled={isDisabled}
+                >
+                  <Ionicons
+                    name={reason.icon as any}
+                    size={18}
+                    color={selectedReasons.includes(reason.id) ? '#FF6B6B' : colors.textMuted}
+                  />
+                  <Text style={[
+                    modalStyles.reasonText,
+                    { color: selectedReasons.includes(reason.id) ? '#FF6B6B' : colors.textSecondary }
+                  ]}>{reason.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
+
+          {didntWatch && (
+            <Text style={[modalStyles.didntWatchNote, { color: colors.textMuted }]}>
+              This movie won't affect your taste profile
+            </Text>
+          )}
 
           <TouchableOpacity
             style={[modalStyles.submitBtn, { backgroundColor: '#FF6B6B' }]}
@@ -678,6 +702,7 @@ const modalStyles = StyleSheet.create({
   reasonText: { fontSize: 12, fontWeight: '500' },
   submitBtn: { paddingVertical: 14, borderRadius: BORDER_RADIUS.full, width: '100%' },
   submitBtnText: { fontSize: 16, fontWeight: 'bold', color: '#FFF', textAlign: 'center' },
+  didntWatchNote: { fontSize: 12, textAlign: 'center', marginBottom: SPACING.m, fontStyle: 'italic' },
 });
 
 function SwipeCard({
@@ -904,16 +929,20 @@ export default function SwipeScreen() {
   }, []);
 
   const recordSwipe = useCallback(async (
-    movie: FeedMovie, direction: 'left' | 'right', rating: number, reasons: string[]
+    movie: FeedMovie, direction: 'left' | 'right', rating: number, reasons: string[], didntWatch: boolean = false
   ) => {
     const record: SwipeRecord = {
       movieId: movie.id, title: movie.title, direction, rating, reasons,
       genreIds: movie.genre_ids || [], timestamp: new Date().toISOString(),
     };
 
+    // If user didn't watch the movie, don't count it toward taste profile
+    const countsForProfile = !didntWatch;
+    
     const newState: SwipeState = {
       swipes: [...swipeState.swipes, record],
-      totalSwipes: swipeState.totalSwipes + 1,
+      // Only increment totalSwipes if the movie counts for taste profiling
+      totalSwipes: countsForProfile ? swipeState.totalSwipes + 1 : swipeState.totalSwipes,
       swipedMovieIds: [...swipeState.swipedMovieIds, movie.id],
     };
 
@@ -929,9 +958,10 @@ export default function SwipeScreen() {
     setShowRatingModal(false);
   }, [pendingMovie, recordSwipe]);
 
-  const handleLeftSubmit = useCallback((reasons: string[]) => {
+  const handleLeftSubmit = useCallback((reasons: string[], didntWatch: boolean) => {
     if (pendingMovie) {
-      recordSwipe(pendingMovie, 'left', 0, reasons);
+      // If user didn't watch the movie, don't count it for taste profiling
+      recordSwipe(pendingMovie, 'left', 0, reasons, didntWatch);
       setPendingMovie(null);
     }
     setShowLeftModal(false);
@@ -1094,7 +1124,7 @@ export default function SwipeScreen() {
         visible={showProfileDrawer}
         onClose={() => setShowProfileDrawer(false)}
         onLogout={handleLogout}
-        onFilters={() => { setShowProfileDrawer(false); router.push('/filters'); }}
+        onFilters={() => { setShowProfileDrawer(false); router.push('/filters?from=profile'); }}
         onViewProfile={() => { setShowProfileDrawer(false); router.push('/profile'); }}
         colors={colors}
       />

@@ -170,7 +170,7 @@ export default function OnboardingScreen() {
           <View style={styles.backPlaceholder} />
         )}
         <Text style={styles.stepLabel}>{STEP_LABELS[step]}</Text>
-        <Text style={styles.stepCounter}>{step + 1}/{TOTAL_STEPS}</Text>
+        <View style={styles.backPlaceholder} />
       </View>
 
       {/* Progress Bar */}

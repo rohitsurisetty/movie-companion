@@ -1,10 +1,10 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  PanResponder, Platform, Animated, Modal,
+  PanResponder, Platform, Animated, Modal, GestureResponderEvent,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, BORDER_RADIUS } from '../src/theme';
 import { FiltersData, initialFiltersData, FilterSection, HeightFilter, AgeFilter } from '../src/types';
@@ -38,11 +38,11 @@ const FILTER_CONFIGS: FilterConfig[] = [
   { key: 'intent', title: 'Intent Preference', options: ['Casual', 'Friendship', 'Serious relationship', 'Exploring'] },
 ];
 
-// Distance Slider Component with proper dragging
+// Distance Slider Component with web-compatible touch handling
 function DistanceSlider({ value, onChange }: { value: number; onChange: (v: number) => void }) {
   const [trackWidth, setTrackWidth] = useState(0);
-  const translateX = useRef(new Animated.Value(0)).current;
-  const lastValue = useRef(value);
+  const trackRef = useRef<View>(null);
+  const [isDragging, setIsDragging] = useState(false);
 
   const getPercent = useCallback(() => {
     if (value < 0) return 1; // Infinite
@@ -59,18 +59,20 @@ function DistanceSlider({ value, onChange }: { value: number; onChange: (v: numb
     }
   }, [trackWidth, onChange]);
 
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: (evt) => {
-        updateValue(evt.nativeEvent.locationX);
-      },
-      onPanResponderMove: (evt) => {
-        updateValue(evt.nativeEvent.locationX);
-      },
-    })
-  ).current;
+  const handleTouchStart = (e: GestureResponderEvent) => {
+    setIsDragging(true);
+    updateValue(e.nativeEvent.locationX);
+  };
+
+  const handleTouchMove = (e: GestureResponderEvent) => {
+    if (isDragging) {
+      updateValue(e.nativeEvent.locationX);
+    }
+  };
+
+  const handleTouchEnd = () => {
+    setIsDragging(false);
+  };
 
   const label = value < 0 ? 'Upto: Infinite distance' : `Upto: ${value} kms`;
   const thumbPosition = `${getPercent() * 100}%`;
@@ -79,15 +81,21 @@ function DistanceSlider({ value, onChange }: { value: number; onChange: (v: numb
     <View style={sliderStyles.container}>
       <Text style={sliderStyles.label}>{label}</Text>
       <View
+        ref={trackRef}
         style={sliderStyles.trackContainer}
         onLayout={(e) => setTrackWidth(e.nativeEvent.layout.width)}
-        {...panResponder.panHandlers}
+        onStartShouldSetResponder={() => true}
+        onMoveShouldSetResponder={() => true}
+        onResponderGrant={handleTouchStart}
+        onResponderMove={handleTouchMove}
+        onResponderRelease={handleTouchEnd}
+        onResponderTerminate={handleTouchEnd}
       >
         <View style={sliderStyles.track}>
           <View style={[sliderStyles.fill, { width: thumbPosition }]} />
         </View>
         <View style={[sliderStyles.thumbContainer, { left: thumbPosition }]}>
-          <View style={sliderStyles.thumb} />
+          <View style={[sliderStyles.thumb, isDragging && sliderStyles.thumbActive]} />
         </View>
       </View>
       <View style={sliderStyles.labels}>
@@ -98,10 +106,11 @@ function DistanceSlider({ value, onChange }: { value: number; onChange: (v: numb
   );
 }
 
-// Age Range Slider Component with proper dual thumbs
+// Age Range Slider Component with web-compatible dual thumbs
 function AgeRangeSlider({ value, onChange }: { value: AgeFilter; onChange: (v: AgeFilter) => void }) {
   const [trackWidth, setTrackWidth] = useState(0);
   const [activeThumb, setActiveThumb] = useState<'min' | 'max' | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
   const MIN_AGE = 18;
   const MAX_AGE = 60;
   const RANGE = MAX_AGE - MIN_AGE;
@@ -109,7 +118,7 @@ function AgeRangeSlider({ value, onChange }: { value: AgeFilter; onChange: (v: A
   const getMinPercent = () => ((value.min - MIN_AGE) / RANGE) * 100;
   const getMaxPercent = () => ((value.max - MIN_AGE) / RANGE) * 100;
 
-  const handleTouch = useCallback((locationX: number) => {
+  const handleTouch = useCallback((locationX: number, isStart: boolean = false) => {
     if (trackWidth === 0) return;
     const percent = Math.max(0, Math.min(1, locationX / trackWidth));
     const newAge = Math.round(MIN_AGE + percent * RANGE);
@@ -120,35 +129,38 @@ function AgeRangeSlider({ value, onChange }: { value: AgeFilter; onChange: (v: A
     const distToMin = Math.abs(percent - minPos);
     const distToMax = Math.abs(percent - maxPos);
     
-    if (activeThumb === 'min' || (activeThumb === null && distToMin < distToMax)) {
+    let thumb = activeThumb;
+    if (isStart || activeThumb === null) {
+      thumb = distToMin < distToMax ? 'min' : 'max';
+      setActiveThumb(thumb);
+    }
+    
+    if (thumb === 'min') {
       if (newAge < value.max - 1) {
         onChange({ ...value, min: Math.max(MIN_AGE, newAge) });
       }
-      setActiveThumb('min');
     } else {
       if (newAge > value.min + 1) {
         onChange({ ...value, max: Math.min(MAX_AGE, newAge) });
       }
-      setActiveThumb('max');
     }
   }, [trackWidth, value, onChange, activeThumb]);
 
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: (evt) => {
-        setActiveThumb(null);
-        handleTouch(evt.nativeEvent.locationX);
-      },
-      onPanResponderMove: (evt) => {
-        handleTouch(evt.nativeEvent.locationX);
-      },
-      onPanResponderRelease: () => {
-        setActiveThumb(null);
-      },
-    })
-  ).current;
+  const handleTouchStart = (e: GestureResponderEvent) => {
+    setIsDragging(true);
+    handleTouch(e.nativeEvent.locationX, true);
+  };
+
+  const handleTouchMove = (e: GestureResponderEvent) => {
+    if (isDragging) {
+      handleTouch(e.nativeEvent.locationX);
+    }
+  };
+
+  const handleTouchEnd = () => {
+    setIsDragging(false);
+    setActiveThumb(null);
+  };
 
   return (
     <View style={sliderStyles.container}>
@@ -156,7 +168,12 @@ function AgeRangeSlider({ value, onChange }: { value: AgeFilter; onChange: (v: A
       <View
         style={sliderStyles.trackContainer}
         onLayout={(e) => setTrackWidth(e.nativeEvent.layout.width)}
-        {...panResponder.panHandlers}
+        onStartShouldSetResponder={() => true}
+        onMoveShouldSetResponder={() => true}
+        onResponderGrant={handleTouchStart}
+        onResponderMove={handleTouchMove}
+        onResponderRelease={handleTouchEnd}
+        onResponderTerminate={handleTouchEnd}
       >
         <View style={sliderStyles.track}>
           <View style={[
@@ -542,10 +559,11 @@ const fStyles = StyleSheet.create({
 
 export default function FiltersScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams();
+  const fromProfile = params.from === 'profile';
   const [filters, setFilters] = useState<FiltersData>(initialFiltersData);
-  const [showDistanceInfo, setShowDistanceInfo] = useState(false);
-  const [showAgeInfo, setShowAgeInfo] = useState(false);
-  const [showHeightInfo, setShowHeightInfo] = useState(false);
+  const [showExclusiveInfo, setShowExclusiveInfo] = useState(false);
+  const [showExpandInfo, setShowExpandInfo] = useState(false);
 
   const updateFilter = (key: keyof FiltersData, section: FilterSection) => {
     setFilters(prev => ({ ...prev, [key]: section }));
@@ -555,6 +573,8 @@ export default function FiltersScreen() {
     await saveFilters(filters);
     router.replace('/swipe');
   };
+
+  const buttonText = fromProfile ? 'Resume the show' : "Let's Start";
 
   return (
     <SafeAreaView style={styles.container} testID="filters-screen">
@@ -575,7 +595,7 @@ export default function FiltersScreen() {
           activeOpacity={0.8}
         >
           <Ionicons name="film-outline" size={20} color={COLORS.white} />
-          <Text style={styles.startBtnTopText}>Let's Start</Text>
+          <Text style={styles.startBtnTopText}>{buttonText}</Text>
           <Ionicons name="arrow-forward" size={18} color={COLORS.white} />
         </TouchableOpacity>
 
@@ -587,9 +607,6 @@ export default function FiltersScreen() {
         <View style={fStyles.section}>
           <View style={fStyles.header}>
             <Text style={fStyles.title}>Distance Radius</Text>
-            <TouchableOpacity onPress={() => setShowDistanceInfo(true)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-              <Ionicons name="information-circle-outline" size={20} color={COLORS.gold} />
-            </TouchableOpacity>
           </View>
           <View style={fStyles.checkboxRow}>
             <TouchableOpacity
@@ -604,6 +621,9 @@ export default function FiltersScreen() {
                 {filters.distance.exclusive && <Ionicons name="checkmark" size={12} color={COLORS.white} />}
               </View>
               <Text style={fStyles.checkLabel}>Exclusive</Text>
+              <TouchableOpacity onPress={() => setShowExclusiveInfo(true)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Ionicons name="information-circle-outline" size={16} color={COLORS.gold} />
+              </TouchableOpacity>
             </TouchableOpacity>
             <TouchableOpacity
               style={fStyles.checkItem}
@@ -617,6 +637,9 @@ export default function FiltersScreen() {
                 {filters.distance.expandIfRunOut && <Ionicons name="checkmark" size={12} color={COLORS.white} />}
               </View>
               <Text style={fStyles.checkLabel}>Expand if I run out</Text>
+              <TouchableOpacity onPress={() => setShowExpandInfo(true)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Ionicons name="information-circle-outline" size={16} color={COLORS.gold} />
+              </TouchableOpacity>
             </TouchableOpacity>
           </View>
           <DistanceSlider
@@ -629,9 +652,6 @@ export default function FiltersScreen() {
         <View style={fStyles.section}>
           <View style={fStyles.header}>
             <Text style={fStyles.title}>Age Range</Text>
-            <TouchableOpacity onPress={() => setShowAgeInfo(true)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-              <Ionicons name="information-circle-outline" size={20} color={COLORS.gold} />
-            </TouchableOpacity>
           </View>
           <View style={fStyles.checkboxRow}>
             <TouchableOpacity
@@ -646,6 +666,9 @@ export default function FiltersScreen() {
                 {filters.age.exclusive && <Ionicons name="checkmark" size={12} color={COLORS.white} />}
               </View>
               <Text style={fStyles.checkLabel}>Exclusive</Text>
+              <TouchableOpacity onPress={() => setShowExclusiveInfo(true)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Ionicons name="information-circle-outline" size={16} color={COLORS.gold} />
+              </TouchableOpacity>
             </TouchableOpacity>
             <TouchableOpacity
               style={fStyles.checkItem}
@@ -659,6 +682,9 @@ export default function FiltersScreen() {
                 {filters.age.expandIfRunOut && <Ionicons name="checkmark" size={12} color={COLORS.white} />}
               </View>
               <Text style={fStyles.checkLabel}>Expand if I run out</Text>
+              <TouchableOpacity onPress={() => setShowExpandInfo(true)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Ionicons name="information-circle-outline" size={16} color={COLORS.gold} />
+              </TouchableOpacity>
             </TouchableOpacity>
           </View>
           <AgeRangeSlider
@@ -671,9 +697,6 @@ export default function FiltersScreen() {
         <View style={fStyles.section}>
           <View style={fStyles.header}>
             <Text style={fStyles.title}>Height Preference</Text>
-            <TouchableOpacity onPress={() => setShowHeightInfo(true)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-              <Ionicons name="information-circle-outline" size={20} color={COLORS.gold} />
-            </TouchableOpacity>
           </View>
           <View style={fStyles.checkboxRow}>
             <TouchableOpacity
@@ -688,6 +711,9 @@ export default function FiltersScreen() {
                 {filters.height.exclusive && <Ionicons name="checkmark" size={12} color={COLORS.white} />}
               </View>
               <Text style={fStyles.checkLabel}>Exclusive</Text>
+              <TouchableOpacity onPress={() => setShowExclusiveInfo(true)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Ionicons name="information-circle-outline" size={16} color={COLORS.gold} />
+              </TouchableOpacity>
             </TouchableOpacity>
             <TouchableOpacity
               style={fStyles.checkItem}
@@ -701,6 +727,9 @@ export default function FiltersScreen() {
                 {filters.height.expandIfRunOut && <Ionicons name="checkmark" size={12} color={COLORS.white} />}
               </View>
               <Text style={fStyles.checkLabel}>Expand if I run out</Text>
+              <TouchableOpacity onPress={() => setShowExpandInfo(true)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Ionicons name="information-circle-outline" size={16} color={COLORS.gold} />
+              </TouchableOpacity>
             </TouchableOpacity>
           </View>
           <HeightPicker
@@ -727,9 +756,23 @@ export default function FiltersScreen() {
           activeOpacity={0.8}
         >
           <Ionicons name="film-outline" size={22} color={COLORS.white} />
-          <Text style={styles.startBtnText}>Let's Start</Text>
+          <Text style={styles.startBtnText}>{buttonText}</Text>
         </TouchableOpacity>
       </ScrollView>
+
+      {/* Info Tooltips */}
+      <InfoTooltip
+        visible={showExclusiveInfo}
+        onClose={() => setShowExclusiveInfo(false)}
+        title="Exclusive Filter"
+        description="When enabled, you will only see profiles that exactly match the selected preferences. This creates a strict filter."
+      />
+      <InfoTooltip
+        visible={showExpandInfo}
+        onClose={() => setShowExpandInfo(false)}
+        title="Expand If Run Out"
+        description="When enabled, if we run out of matches with your current filters, we'll automatically expand to show more profiles that closely match your preferences."
+      />
 
       {/* Info Tooltips for Distance, Age, Height */}
       <InfoTooltip
