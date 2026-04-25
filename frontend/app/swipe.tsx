@@ -20,7 +20,7 @@ import {
   FeedMovie, SwipeState, SwipeRecord, initialSwipeState, TMDB_GENRE_MAP, ProfileData, MovieDetail, initialProfileData,
 } from '../src/types';
 import { saveSwipeState, getSwipeState, getFilters, getProfile, saveMode, getMode, AppMode, clearAll } from '../src/store';
-import PublicProfilePreviewStep from '../src/components/PublicProfilePreviewStep';
+import InAppProfilePreview from '../src/components/InAppProfilePreview';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const CARD_WIDTH = SCREEN_WIDTH * 0.88;
@@ -993,7 +993,6 @@ export default function SwipeScreen() {
   const [pendingMovie, setPendingMovie] = useState<FeedMovie | null>(null);
   const [page, setPage] = useState(1);
   const [mode, setMode] = useState<AppMode>('date');
-  const [profileData, setProfileData] = useState<ProfileData | null>(null);
   const fetchingRef = useRef(false);
 
   const colors = getThemeColors(mode);
@@ -1009,13 +1008,6 @@ export default function SwipeScreen() {
     })();
   }, []);
 
-  // Load profile data when preview is shown
-  useEffect(() => {
-    if (showProfilePreview) {
-      getProfile().then(setProfileData);
-    }
-  }, [showProfilePreview]);
-
   const handleModeChange = async (newMode: AppMode) => {
     setMode(newMode);
     await saveMode(newMode);
@@ -1027,16 +1019,16 @@ export default function SwipeScreen() {
     router.replace('/');
   };
 
-  // Handle profile preview - navigate to profile for editing
-  const handleProfilePreviewEdit = () => {
-    setShowProfilePreview(false);
-    router.push('/profile');
+  // Handle opening profile preview from profile drawer
+  const handleOpenProfilePreview = () => {
+    setShowProfileDrawer(false);
+    setShowProfilePreview(true);
   };
 
-  // Handle profile preview done - close and return to swipe
-  const handleProfilePreviewContinue = () => {
+  // Handle closing profile preview - returns to profile drawer
+  const handleCloseProfilePreview = () => {
     setShowProfilePreview(false);
-    setShowProfileDrawer(false);
+    setShowProfileDrawer(true);
   };
 
   const handleShowDetails = (movieId: number) => {
@@ -1299,7 +1291,7 @@ export default function SwipeScreen() {
         onLogout={handleLogout}
         onFilters={() => { setShowProfileDrawer(false); router.push('/filters?from=profile'); }}
         onViewProfile={() => { setShowProfileDrawer(false); router.push('/profile'); }}
-        onProfilePreview={() => { setShowProfileDrawer(false); setShowProfilePreview(true); }}
+        onProfilePreview={handleOpenProfilePreview}
         colors={colors}
       />
       <MovieDetailsBottomSheet
@@ -1308,22 +1300,11 @@ export default function SwipeScreen() {
         movieId={selectedMovieId}
         colors={colors}
       />
-      {/* In-App Profile Preview Modal - Reuses the same PublicProfilePreviewStep from onboarding */}
-      <Modal
+      {/* In-App Profile Preview - Self-contained component with visibility editing */}
+      <InAppProfilePreview
         visible={showProfilePreview}
-        animationType="slide"
-        onRequestClose={() => setShowProfilePreview(false)}
-      >
-        <SafeAreaView style={[{ flex: 1 }, { backgroundColor: colors.bg }]} edges={['top', 'bottom']}>
-          <View style={{ flex: 1, padding: SPACING.l }}>
-            <PublicProfilePreviewStep
-              data={profileData || initialProfileData}
-              onEdit={handleProfilePreviewEdit}
-              onContinue={handleProfilePreviewContinue}
-            />
-          </View>
-        </SafeAreaView>
-      </Modal>
+        onClose={handleCloseProfilePreview}
+      />
     </SafeAreaView>
   );
 }
