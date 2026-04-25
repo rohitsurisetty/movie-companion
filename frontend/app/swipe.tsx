@@ -42,7 +42,6 @@ function MovieDetailsModal({
   const [details, setDetails] = useState<MovieDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [translateY, setTranslateY] = useState(0);
-  const [isDragging, setIsDragging] = useState(false);
 
   useEffect(() => {
     if (visible && movieId > 0) {
@@ -66,27 +65,18 @@ function MovieDetailsModal({
     }
   };
 
-  // PanResponder for swipe down to dismiss
+  // PanResponder ONLY for the handle area - not the whole modal
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, gestureState) => {
-        // Only respond to vertical swipes starting from the top
-        return Math.abs(gestureState.dy) > 5 && Math.abs(gestureState.dx) < 20;
-      },
-      onPanResponderGrant: () => {
-        setIsDragging(true);
-      },
+      onMoveShouldSetPanResponder: () => true,
       onPanResponderMove: (_, gestureState) => {
-        // Only allow downward movement
         if (gestureState.dy > 0) {
           setTranslateY(gestureState.dy);
         }
       },
       onPanResponderRelease: (_, gestureState) => {
-        setIsDragging(false);
-        // Close if dragged down enough
-        if (gestureState.dy > 100 || gestureState.vy > 0.5) {
+        if (gestureState.dy > 80 || gestureState.vy > 0.5) {
           onClose();
           setTranslateY(0);
         } else {
@@ -94,7 +84,6 @@ function MovieDetailsModal({
         }
       },
       onPanResponderTerminate: () => {
-        setIsDragging(false);
         setTranslateY(0);
       },
     })
@@ -109,19 +98,16 @@ function MovieDetailsModal({
             { 
               backgroundColor: colors.bgCard,
               transform: [{ translateY }],
-              opacity: isDragging ? 0.95 : 1,
             }
           ]} 
           onPress={(e) => e.stopPropagation()}
         >
-          {/* Swipe Handle */}
-          <View {...panResponder.panHandlers}>
-            <View style={detailStyles.handleArea}>
-              <View style={detailStyles.handle} />
-              <Text style={[detailStyles.swipeHint, { color: colors.textMuted }]}>
-                Swipe down to close
-              </Text>
-            </View>
+          {/* Swipe Handle - Only this area triggers swipe to close */}
+          <View {...panResponder.panHandlers} style={detailStyles.handleArea}>
+            <View style={detailStyles.handle} />
+            <Text style={[detailStyles.swipeHint, { color: colors.textMuted }]}>
+              Pull down to close
+            </Text>
           </View>
           
           {loading ? (
@@ -135,6 +121,7 @@ function MovieDetailsModal({
               showsVerticalScrollIndicator={true}
               contentContainerStyle={detailStyles.scrollContent}
               bounces={true}
+              nestedScrollEnabled={true}
             >
               {/* Header with poster and title */}
               <View style={detailStyles.header}>
@@ -236,7 +223,7 @@ function MovieDetailsModal({
               )}
               
               {/* Bottom padding for scroll */}
-              <View style={{ height: 40 }} />
+              <View style={{ height: 60 }} />
             </ScrollView>
           ) : (
             <View style={detailStyles.errorContainer}>
