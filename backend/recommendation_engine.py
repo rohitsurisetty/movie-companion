@@ -1111,6 +1111,7 @@ def score_movie_for_user(
     
     ENHANCED:
     - Primary languages get higher priority than secondary
+    - Related Indian languages are also considered acceptable
     - Unwatched patterns are penalized
     - Reason-based quality signals boost scores
     
@@ -1125,17 +1126,36 @@ def score_movie_for_user(
     if movie_id in swiped_ids:
         return (-1.0, False)
     
+    # Define related Indian languages for flexible filtering
+    INDIAN_LANG_RELATIONS = {
+        'te': {'ta', 'ml', 'kn', 'hi'},  # Telugu users might like Tamil, Malayalam, Kannada, Hindi
+        'ta': {'ml', 'te', 'kn', 'hi'},  # Tamil users
+        'hi': {'te', 'ta', 'ml', 'mr', 'bn'},  # Hindi users
+        'ml': {'ta', 'te', 'kn', 'hi'},  # Malayalam users
+        'kn': {'te', 'ta', 'ml', 'hi'},  # Kannada users
+    }
+    
+    # Get related languages for current user
+    related_langs = set()
+    for lang in user_taste.preferred_languages:
+        if lang in INDIAN_LANG_RELATIONS:
+            related_langs.update(INDIAN_LANG_RELATIONS[lang])
+    
     # Check language filter
     movie_lang = movie.get("original_language", "")
     passes_language = True
     is_primary_language = False
     is_secondary_language = False
+    is_related_language = False
     
     if user_taste.preferred_languages:
-        # Movie must be in one of user's preferred languages
-        passes_language = movie_lang in user_taste.preferred_languages
+        # Check if movie is in preferred or related languages
         is_primary_language = movie_lang in user_taste.primary_languages
         is_secondary_language = movie_lang in user_taste.secondary_languages
+        is_related_language = movie_lang in related_langs
+        
+        # Movie passes if in preferred OR related languages
+        passes_language = (movie_lang in user_taste.preferred_languages) or is_related_language
     
     # Compute movie vector
     movie_vector = compute_movie_vector(movie)
@@ -1165,6 +1185,9 @@ def score_movie_for_user(
         elif is_secondary_language:
             # Secondary language gets moderate boost
             score *= 1.1
+        elif is_related_language:
+            # Related language gets smaller boost (but still acceptable)
+            score *= 1.0  # No penalty, but no boost either
     
     # ========================
     # UNWATCHED PATTERNS PENALTY
@@ -1269,18 +1292,37 @@ async def get_candidate_movies(
     
     async with httpx.AsyncClient(timeout=15.0) as http_client:
         
-        # 1. LANGUAGE-SPECIFIC DISCOVERY (Primary source)
+        # Define related Indian languages for better recommendations
+        INDIAN_LANGUAGES = {'te', 'ta', 'hi', 'ml', 'kn', 'bn', 'mr', 'gu', 'pa'}
+        INDIAN_LANG_RELATIONS = {
+            'te': ['ta', 'ml', 'kn', 'hi'],  # Telugu users might like Tamil, Malayalam, Kannada, Hindi
+            'ta': ['ml', 'te', 'kn', 'hi'],  # Tamil users
+            'hi': ['te', 'ta', 'ml', 'mr', 'bn'],  # Hindi users
+            'ml': ['ta', 'te', 'kn', 'hi'],  # Malayalam users
+            'kn': ['te', 'ta', 'ml', 'hi'],  # Kannada users
+        }
+        
+        # Get related languages for diversity
+        related_langs = set()
+        for lang in preferred_langs:
+            if lang in INDIAN_LANG_RELATIONS:
+                related_langs.update(INDIAN_LANG_RELATIONS[lang][:2])  # Top 2 related
+        
+        # 1. PRIMARY LANGUAGE DISCOVERY (Lowest vote threshold for regional content)
         if preferred_langs:
-            for lang_code in preferred_langs[:3]:  # Top 3 languages
+            for lang_code in preferred_langs[:3]:
+                # For Indian regional languages, use very low vote threshold
+                min_votes = 10 if lang_code in INDIAN_LANGUAGES else 50
+                
                 params = {
                     "with_original_language": lang_code,
                     "sort_by": "popularity.desc",
-                    "vote_count.gte": 50,
+                    "vote_count.gte": min_votes,
                     "page": page
                 }
                 
-                # Add genre filter if available
-                if top_genre_ids:
+                # Only add genre filter if NOT first page (get variety first)
+                if page > 1 and top_genre_ids:
                     params["with_genres"] = ','.join(str(g) for g in top_genre_ids[:2])
                 
                 try:
@@ -1295,9 +1337,40 @@ async def get_candidate_movies(
                 except Exception as e:
                     print(f"Error fetching {lang_code} movies: {e}")
         
-        # 2. GENRE-BASED DISCOVERY (if we have genre preferences)
+        # 2. RELATED LANGUAGES (Indian multilingual recommendations)
+        if len(all_movies) < 30 and related_langs:
+            for lang_code in related_langs:
+                if lang_code not in preferred_langs:  # Don't duplicate
+                    params = {
+                        "with_original_language": lang_code,
+                        "sort_by": "vote_average.desc",
+                        "vote_count.gte": 100,  # Higher threshold for related languages
+                        "page": page
+                    }
+                    
+                    if top_genre_ids:
+                        params["with_genres"] = ','.join(str(g) for g in top_genre_ids[:2])
+                    
+                    try:
+                        resp = await http_client.get(
+                            "https://api.themoviedb.org/3/discover/movie",
+                            params=params,
+                            headers={"Authorization": f"Bearer {TMDB_ACCESS_TOKEN}"}
+                        )
+                        if resp.status_code == 200:
+                            results = resp.json().get("results", [])
+                            # Mark these as related language recommendations
+                            for m in results:
+                                m['_is_related_lang'] = True
+                            all_movies.extend(results)
+                    except:
+                        pass
+        
+        # 3. GENRE-BASED DISCOVERY (if we have genre preferences)
         if top_genre_ids and len(all_movies) < 40:
             genre_str = ','.join(str(g) for g in top_genre_ids)
+            
+            # First try with language filter
             params = {
                 "with_genres": genre_str,
                 "sort_by": "vote_average.desc",
@@ -1305,9 +1378,10 @@ async def get_candidate_movies(
                 "page": page
             }
             
-            # Add language filter if available
             if preferred_langs:
-                params["with_original_language"] = '|'.join(preferred_langs[:5])
+                # Use OR operator for multiple languages
+                all_lang_codes = list(preferred_langs) + list(related_langs)
+                params["with_original_language"] = '|'.join(all_lang_codes[:6])
             
             try:
                 resp = await http_client.get(
@@ -1320,7 +1394,7 @@ async def get_candidate_movies(
             except:
                 pass
         
-        # 3. TRENDING MOVIES (for diversity)
+        # 4. TRENDING MOVIES (for diversity)
         try:
             resp = await http_client.get(
                 "https://api.themoviedb.org/3/trending/movie/week",
@@ -1331,12 +1405,13 @@ async def get_candidate_movies(
                 trending = resp.json().get("results", [])
                 # Filter trending by language if preferences exist
                 if preferred_langs:
-                    trending = [m for m in trending if m.get("original_language") in preferred_langs]
+                    all_lang_codes = list(preferred_langs) + list(related_langs)
+                    trending = [m for m in trending if m.get("original_language") in all_lang_codes]
                 all_movies.extend(trending)
         except:
             pass
         
-        # 4. TOP RATED (quality content)
+        # 5. TOP RATED (quality content)
         try:
             resp = await http_client.get(
                 "https://api.themoviedb.org/3/movie/top_rated",

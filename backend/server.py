@@ -762,6 +762,73 @@ async def get_swipe_history(user_id: str, limit: int = 50):
 
 app.include_router(api_router)
 
+
+@api_router.delete("/user/{user_id}/reset-feed")
+async def reset_user_feed(user_id: str):
+    """
+    Reset user's swipe history to get fresh recommendations.
+    Useful for:
+    - Testing with fresh data
+    - When user wants to re-explore content
+    - When user's preferences have changed significantly
+    
+    Note: This does NOT reset the taste profile, only swipe history.
+    """
+    # Delete swipe history
+    swipe_result = await db.user_swipes.delete_many({"user_id": user_id})
+    
+    # Reset swipe counts in taste vector (but keep preferences)
+    taste_doc = await db.user_taste_vectors.find_one({"user_id": user_id})
+    if taste_doc:
+        vector_data = taste_doc.get("vector", {})
+        vector_data["like_count"] = 0
+        vector_data["dislike_count"] = 0
+        vector_data["total_swipes"] = 0
+        
+        await db.user_taste_vectors.update_one(
+            {"user_id": user_id},
+            {"$set": {"vector": vector_data, "updated_at": datetime.now(timezone.utc).isoformat()}}
+        )
+    
+    # Delete unwatched patterns
+    await db.user_unwatched_patterns.delete_many({"user_id": user_id})
+    
+    logger.info(f"Reset feed for user {user_id}: deleted {swipe_result.deleted_count} swipes")
+    
+    return {
+        "success": True,
+        "message": f"Feed reset successfully. Deleted {swipe_result.deleted_count} swipes.",
+        "swipes_deleted": swipe_result.deleted_count,
+    }
+
+
+@api_router.delete("/user/{user_id}/reset-all")
+async def reset_user_completely(user_id: str):
+    """
+    Completely reset user - removes profile, taste vector, and swipes.
+    User will need to go through onboarding again.
+    """
+    # Delete everything
+    profile_result = await db.user_profiles.delete_many({"user_id": user_id})
+    taste_result = await db.user_taste_vectors.delete_many({"user_id": user_id})
+    swipe_result = await db.user_swipes.delete_many({"user_id": user_id})
+    unwatched_result = await db.user_unwatched_patterns.delete_many({"user_id": user_id})
+    
+    logger.info(f"Complete reset for user {user_id}: {profile_result.deleted_count} profiles, "
+                f"{taste_result.deleted_count} taste vectors, {swipe_result.deleted_count} swipes")
+    
+    return {
+        "success": True,
+        "message": "User completely reset. Please complete onboarding again.",
+        "deleted": {
+            "profiles": profile_result.deleted_count,
+            "taste_vectors": taste_result.deleted_count,
+            "swipes": swipe_result.deleted_count,
+            "unwatched_patterns": unwatched_result.deleted_count,
+        }
+    }
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
