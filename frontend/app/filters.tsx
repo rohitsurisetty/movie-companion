@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView, Modal, Animated, 
+  View, Text, TouchableOpacity, StyleSheet, ScrollView, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -10,8 +10,7 @@ import { FiltersData, initialFiltersData, FilterSection, HeightFilter, AgeFilter
 import { saveFilters } from '../src/store';
 
 const MAX_KM = 500;
-const ITEM_HEIGHT = 44;
-const VISIBLE_ITEMS = 3;
+const ITEM_WIDTH = 70;
 
 type FilterConfig = {
   key: keyof FiltersData;
@@ -39,455 +38,203 @@ const FILTER_CONFIGS: FilterConfig[] = [
   { key: 'intent', title: 'Intent Preference', options: ['Casual', 'Friendship', 'Serious relationship', 'Exploring'] },
 ];
 
-// Generate height arrays
-const FEET = [3, 4, 5, 6, 7];
-const INCHES = Array.from({ length: 12 }, (_, i) => i);
-const CM_VALUES = Array.from({ length: 91 }, (_, i) => 120 + i); // 120cm to 210cm
-
-// Distance values for wheel picker
-const DISTANCE_VALUES = [
-  ...Array.from({ length: 10 }, (_, i) => (i + 1) * 5), // 5, 10, 15...50
-  ...Array.from({ length: 9 }, (_, i) => 60 + i * 10), // 60, 70...140
-  ...Array.from({ length: 7 }, (_, i) => 150 + i * 25), // 150, 175...300
-  400, 500, -1 // -1 represents infinite
-];
+// Distance values for horizontal picker
+const DISTANCE_VALUES = [5, 10, 15, 20, 25, 30, 40, 50, 75, 100, 150, 200, 300, 500, -1];
 
 // Age values
-const AGE_MIN_VALUES = Array.from({ length: 43 }, (_, i) => 18 + i); // 18-60
-const AGE_MAX_VALUES = Array.from({ length: 43 }, (_, i) => 18 + i); // 18-60
+const AGE_VALUES = Array.from({ length: 43 }, (_, i) => 18 + i); // 18-60
 
-// Smooth iOS-style Distance Wheel Picker
-function DistanceWheelPicker({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+// Horizontal Scrollable Distance Picker
+function HorizontalDistancePicker({ value, onChange }: { value: number; onChange: (v: number) => void }) {
   const scrollRef = useRef<ScrollView>(null);
-  const initialIndex = DISTANCE_VALUES.indexOf(value >= 0 ? value : -1);
-  const [selectedIndex, setSelectedIndex] = useState(initialIndex >= 0 ? initialIndex : DISTANCE_VALUES.length - 1);
+  const [containerWidth, setContainerWidth] = useState(0);
+  const selectedIndex = DISTANCE_VALUES.indexOf(value >= 0 ? value : -1);
 
   useEffect(() => {
-    setTimeout(() => {
-      scrollRef.current?.scrollTo({ y: selectedIndex * ITEM_HEIGHT, animated: false });
-    }, 100);
-  }, []);
+    if (containerWidth > 0 && selectedIndex >= 0) {
+      const offset = selectedIndex * ITEM_WIDTH - (containerWidth / 2) + (ITEM_WIDTH / 2);
+      setTimeout(() => {
+        scrollRef.current?.scrollTo({ x: Math.max(0, offset), animated: false });
+      }, 100);
+    }
+  }, [containerWidth]);
 
   const handleScroll = (event: any) => {
-    const y = event.nativeEvent.contentOffset.y;
-    const index = Math.round(y / ITEM_HEIGHT);
+    const x = event.nativeEvent.contentOffset.x;
+    const centerOffset = containerWidth / 2;
+    const index = Math.round((x + centerOffset - ITEM_WIDTH / 2) / ITEM_WIDTH);
     const clampedIndex = Math.max(0, Math.min(DISTANCE_VALUES.length - 1, index));
-    if (clampedIndex !== selectedIndex) {
-      setSelectedIndex(clampedIndex);
+    if (DISTANCE_VALUES[clampedIndex] !== value) {
       onChange(DISTANCE_VALUES[clampedIndex]);
     }
   };
 
-  const getLabel = (val: number) => val < 0 ? 'Infinite' : `${val} km`;
-  const label = value < 0 ? 'Upto: Infinite distance' : `Upto: ${value} km`;
+  const getLabel = (val: number) => val < 0 ? '∞' : `${val}`;
+  const displayLabel = value < 0 ? 'Infinite distance' : `${value} km`;
 
   return (
-    <View style={wheelStyles.container}>
-      <Text style={wheelStyles.valueLabel}>{label}</Text>
-      <View style={wheelStyles.pickerRow}>
-        <View style={wheelStyles.column}>
-          <View style={wheelStyles.wrapper}>
-            <View style={wheelStyles.highlight} />
-            <ScrollView
-              ref={scrollRef}
-              style={wheelStyles.scroll}
-              showsVerticalScrollIndicator={false}
-              snapToInterval={ITEM_HEIGHT}
-              decelerationRate="fast"
-              onMomentumScrollEnd={handleScroll}
-              contentContainerStyle={{ paddingVertical: ITEM_HEIGHT }}
-              nestedScrollEnabled
-            >
-              {DISTANCE_VALUES.map((d, i) => (
-                <View key={i} style={wheelStyles.item}>
-                  <Text style={[wheelStyles.itemText, selectedIndex === i && wheelStyles.itemTextActive]}>
-                    {getLabel(d)}
-                  </Text>
-                </View>
-              ))}
-            </ScrollView>
-          </View>
-        </View>
+    <View style={hStyles.container}>
+      <Text style={hStyles.valueLabel}>Upto: {displayLabel}</Text>
+      <View 
+        style={hStyles.scrollContainer}
+        onLayout={(e) => setContainerWidth(e.nativeEvent.layout.width)}
+      >
+        <View style={hStyles.centerIndicator} />
+        <ScrollView
+          ref={scrollRef}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          snapToInterval={ITEM_WIDTH}
+          decelerationRate="fast"
+          onMomentumScrollEnd={handleScroll}
+          contentContainerStyle={{ paddingHorizontal: containerWidth / 2 - ITEM_WIDTH / 2 }}
+        >
+          {DISTANCE_VALUES.map((d, i) => {
+            const isSelected = d === value || (d === -1 && value < 0);
+            return (
+              <TouchableOpacity 
+                key={i} 
+                style={hStyles.item}
+                onPress={() => {
+                  onChange(d);
+                  const offset = i * ITEM_WIDTH - (containerWidth / 2) + (ITEM_WIDTH / 2);
+                  scrollRef.current?.scrollTo({ x: Math.max(0, offset), animated: true });
+                }}
+              >
+                <Text style={[hStyles.itemText, isSelected && hStyles.itemTextActive]}>
+                  {getLabel(d)}
+                </Text>
+                {d !== -1 && <Text style={[hStyles.unitText, isSelected && hStyles.unitTextActive]}>km</Text>}
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
       </View>
     </View>
   );
 }
 
-// Age Range Wheel Picker with Min and Max
-function AgeRangeWheelPicker({ value, onChange }: { value: AgeFilter; onChange: (v: AgeFilter) => void }) {
+// Horizontal Scrollable Age Range Picker
+function HorizontalAgeRangePicker({ value, onChange }: { value: AgeFilter; onChange: (v: AgeFilter) => void }) {
   const minScrollRef = useRef<ScrollView>(null);
   const maxScrollRef = useRef<ScrollView>(null);
-  const [minIndex, setMinIndex] = useState(value.min - 18);
-  const [maxIndex, setMaxIndex] = useState(value.max - 18);
+  const [containerWidth, setContainerWidth] = useState(0);
+  const minIndex = value.min - 18;
+  const maxIndex = value.max - 18;
 
   useEffect(() => {
-    setTimeout(() => {
-      minScrollRef.current?.scrollTo({ y: minIndex * ITEM_HEIGHT, animated: false });
-      maxScrollRef.current?.scrollTo({ y: maxIndex * ITEM_HEIGHT, animated: false });
-    }, 100);
-  }, []);
+    if (containerWidth > 0) {
+      const minOffset = minIndex * ITEM_WIDTH - (containerWidth / 2) + (ITEM_WIDTH / 2);
+      const maxOffset = maxIndex * ITEM_WIDTH - (containerWidth / 2) + (ITEM_WIDTH / 2);
+      setTimeout(() => {
+        minScrollRef.current?.scrollTo({ x: Math.max(0, minOffset), animated: false });
+        maxScrollRef.current?.scrollTo({ x: Math.max(0, maxOffset), animated: false });
+      }, 100);
+    }
+  }, [containerWidth]);
 
   const handleMinScroll = (event: any) => {
-    const y = event.nativeEvent.contentOffset.y;
-    const index = Math.round(y / ITEM_HEIGHT);
-    const clampedIndex = Math.max(0, Math.min(AGE_MIN_VALUES.length - 1, index));
-    const newMin = AGE_MIN_VALUES[clampedIndex];
-    if (clampedIndex !== minIndex && newMin < value.max) {
-      setMinIndex(clampedIndex);
+    const x = event.nativeEvent.contentOffset.x;
+    const centerOffset = containerWidth / 2;
+    const index = Math.round((x + centerOffset - ITEM_WIDTH / 2) / ITEM_WIDTH);
+    const clampedIndex = Math.max(0, Math.min(AGE_VALUES.length - 1, index));
+    const newMin = AGE_VALUES[clampedIndex];
+    if (newMin !== value.min && newMin < value.max) {
       onChange({ ...value, min: newMin });
     }
   };
 
   const handleMaxScroll = (event: any) => {
-    const y = event.nativeEvent.contentOffset.y;
-    const index = Math.round(y / ITEM_HEIGHT);
-    const clampedIndex = Math.max(0, Math.min(AGE_MAX_VALUES.length - 1, index));
-    const newMax = AGE_MAX_VALUES[clampedIndex];
-    if (clampedIndex !== maxIndex && newMax > value.min) {
-      setMaxIndex(clampedIndex);
+    const x = event.nativeEvent.contentOffset.x;
+    const centerOffset = containerWidth / 2;
+    const index = Math.round((x + centerOffset - ITEM_WIDTH / 2) / ITEM_WIDTH);
+    const clampedIndex = Math.max(0, Math.min(AGE_VALUES.length - 1, index));
+    const newMax = AGE_VALUES[clampedIndex];
+    if (newMax !== value.max && newMax > value.min) {
       onChange({ ...value, max: newMax });
     }
   };
 
   return (
-    <View style={wheelStyles.container}>
-      <Text style={wheelStyles.valueLabel}>{value.min} - {value.max} years</Text>
-      <View style={wheelStyles.pickerRow}>
-        {/* Min Age Wheel */}
-        <View style={wheelStyles.column}>
-          <Text style={wheelStyles.columnLabel}>Min</Text>
-          <View style={wheelStyles.wrapper}>
-            <View style={wheelStyles.highlight} />
-            <ScrollView
-              ref={minScrollRef}
-              style={wheelStyles.scroll}
-              showsVerticalScrollIndicator={false}
-              snapToInterval={ITEM_HEIGHT}
-              decelerationRate="fast"
-              onMomentumScrollEnd={handleMinScroll}
-              contentContainerStyle={{ paddingVertical: ITEM_HEIGHT }}
-              nestedScrollEnabled
-            >
-              {AGE_MIN_VALUES.map((age, i) => (
-                <View key={i} style={wheelStyles.item}>
-                  <Text style={[wheelStyles.itemText, minIndex === i && wheelStyles.itemTextActive]}>
-                    {age}
-                  </Text>
-                </View>
-              ))}
-            </ScrollView>
-          </View>
-        </View>
+    <View style={hStyles.container}>
+      <Text style={hStyles.valueLabel}>{value.min} - {value.max} years</Text>
+      
+      {/* Min Age */}
+      <Text style={hStyles.rangeLabel}>Min Age</Text>
+      <View 
+        style={hStyles.scrollContainer}
+        onLayout={(e) => setContainerWidth(e.nativeEvent.layout.width)}
+      >
+        <View style={hStyles.centerIndicator} />
+        <ScrollView
+          ref={minScrollRef}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          snapToInterval={ITEM_WIDTH}
+          decelerationRate="fast"
+          onMomentumScrollEnd={handleMinScroll}
+          contentContainerStyle={{ paddingHorizontal: containerWidth / 2 - ITEM_WIDTH / 2 }}
+        >
+          {AGE_VALUES.map((age, i) => {
+            const isSelected = age === value.min;
+            return (
+              <TouchableOpacity 
+                key={i} 
+                style={hStyles.item}
+                onPress={() => {
+                  if (age < value.max) {
+                    onChange({ ...value, min: age });
+                    const offset = i * ITEM_WIDTH - (containerWidth / 2) + (ITEM_WIDTH / 2);
+                    minScrollRef.current?.scrollTo({ x: Math.max(0, offset), animated: true });
+                  }
+                }}
+              >
+                <Text style={[hStyles.itemText, isSelected && hStyles.itemTextActive]}>{age}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </View>
 
-        <Text style={wheelStyles.separator}>-</Text>
-
-        {/* Max Age Wheel */}
-        <View style={wheelStyles.column}>
-          <Text style={wheelStyles.columnLabel}>Max</Text>
-          <View style={wheelStyles.wrapper}>
-            <View style={wheelStyles.highlight} />
-            <ScrollView
-              ref={maxScrollRef}
-              style={wheelStyles.scroll}
-              showsVerticalScrollIndicator={false}
-              snapToInterval={ITEM_HEIGHT}
-              decelerationRate="fast"
-              onMomentumScrollEnd={handleMaxScroll}
-              contentContainerStyle={{ paddingVertical: ITEM_HEIGHT }}
-              nestedScrollEnabled
-            >
-              {AGE_MAX_VALUES.map((age, i) => (
-                <View key={i} style={wheelStyles.item}>
-                  <Text style={[wheelStyles.itemText, maxIndex === i && wheelStyles.itemTextActive]}>
-                    {age}
-                  </Text>
-                </View>
-              ))}
-            </ScrollView>
-          </View>
-        </View>
+      {/* Max Age */}
+      <Text style={[hStyles.rangeLabel, { marginTop: SPACING.m }]}>Max Age</Text>
+      <View style={hStyles.scrollContainer}>
+        <View style={hStyles.centerIndicator} />
+        <ScrollView
+          ref={maxScrollRef}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          snapToInterval={ITEM_WIDTH}
+          decelerationRate="fast"
+          onMomentumScrollEnd={handleMaxScroll}
+          contentContainerStyle={{ paddingHorizontal: containerWidth / 2 - ITEM_WIDTH / 2 }}
+        >
+          {AGE_VALUES.map((age, i) => {
+            const isSelected = age === value.max;
+            return (
+              <TouchableOpacity 
+                key={i} 
+                style={hStyles.item}
+                onPress={() => {
+                  if (age > value.min) {
+                    onChange({ ...value, max: age });
+                    const offset = i * ITEM_WIDTH - (containerWidth / 2) + (ITEM_WIDTH / 2);
+                    maxScrollRef.current?.scrollTo({ x: Math.max(0, offset), animated: true });
+                  }
+                }}
+              >
+                <Text style={[hStyles.itemText, isSelected && hStyles.itemTextActive]}>{age}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
       </View>
     </View>
   );
 }
 
-// iOS-style Height Wheel Picker (exactly like DOB picker)
-function HeightWheelPicker({ value, onChange }: { value: HeightFilter; onChange: (v: HeightFilter) => void }) {
-  const [isMetric, setIsMetric] = useState(false);
-  
-  const minFeetRef = useRef<ScrollView>(null);
-  const minInchRef = useRef<ScrollView>(null);
-  const maxFeetRef = useRef<ScrollView>(null);
-  const maxInchRef = useRef<ScrollView>(null);
-  const minCmRef = useRef<ScrollView>(null);
-  const maxCmRef = useRef<ScrollView>(null);
-
-  const [minFeetIdx, setMinFeetIdx] = useState(FEET.indexOf(value.minFeet) >= 0 ? FEET.indexOf(value.minFeet) : 1);
-  const [minInchIdx, setMinInchIdx] = useState(value.minInches || 0);
-  const [maxFeetIdx, setMaxFeetIdx] = useState(FEET.indexOf(value.maxFeet) >= 0 ? FEET.indexOf(value.maxFeet) : 3);
-  const [maxInchIdx, setMaxInchIdx] = useState(value.maxInches || 0);
-  const [minCmIdx, setMinCmIdx] = useState(CM_VALUES.indexOf(value.minCm) >= 0 ? CM_VALUES.indexOf(value.minCm) : 30);
-  const [maxCmIdx, setMaxCmIdx] = useState(CM_VALUES.indexOf(value.maxCm) >= 0 ? CM_VALUES.indexOf(value.maxCm) : 70);
-
-  useEffect(() => {
-    setTimeout(() => {
-      if (isMetric) {
-        minCmRef.current?.scrollTo({ y: minCmIdx * ITEM_HEIGHT, animated: false });
-        maxCmRef.current?.scrollTo({ y: maxCmIdx * ITEM_HEIGHT, animated: false });
-      } else {
-        minFeetRef.current?.scrollTo({ y: minFeetIdx * ITEM_HEIGHT, animated: false });
-        minInchRef.current?.scrollTo({ y: minInchIdx * ITEM_HEIGHT, animated: false });
-        maxFeetRef.current?.scrollTo({ y: maxFeetIdx * ITEM_HEIGHT, animated: false });
-        maxInchRef.current?.scrollTo({ y: maxInchIdx * ITEM_HEIGHT, animated: false });
-      }
-    }, 100);
-  }, [isMetric]);
-
-  const updateHeight = (field: string, val: number) => {
-    const newValue = { ...value, [field]: val };
-    onChange(newValue);
-  };
-
-  const handleMinFeetScroll = (e: any) => {
-    const idx = Math.round(e.nativeEvent.contentOffset.y / ITEM_HEIGHT);
-    const clampedIdx = Math.max(0, Math.min(FEET.length - 1, idx));
-    if (clampedIdx !== minFeetIdx) {
-      setMinFeetIdx(clampedIdx);
-      updateHeight('minFeet', FEET[clampedIdx]);
-    }
-  };
-
-  const handleMinInchScroll = (e: any) => {
-    const idx = Math.round(e.nativeEvent.contentOffset.y / ITEM_HEIGHT);
-    const clampedIdx = Math.max(0, Math.min(INCHES.length - 1, idx));
-    if (clampedIdx !== minInchIdx) {
-      setMinInchIdx(clampedIdx);
-      updateHeight('minInches', INCHES[clampedIdx]);
-    }
-  };
-
-  const handleMaxFeetScroll = (e: any) => {
-    const idx = Math.round(e.nativeEvent.contentOffset.y / ITEM_HEIGHT);
-    const clampedIdx = Math.max(0, Math.min(FEET.length - 1, idx));
-    if (clampedIdx !== maxFeetIdx) {
-      setMaxFeetIdx(clampedIdx);
-      updateHeight('maxFeet', FEET[clampedIdx]);
-    }
-  };
-
-  const handleMaxInchScroll = (e: any) => {
-    const idx = Math.round(e.nativeEvent.contentOffset.y / ITEM_HEIGHT);
-    const clampedIdx = Math.max(0, Math.min(INCHES.length - 1, idx));
-    if (clampedIdx !== maxInchIdx) {
-      setMaxInchIdx(clampedIdx);
-      updateHeight('maxInches', INCHES[clampedIdx]);
-    }
-  };
-
-  const handleMinCmScroll = (e: any) => {
-    const idx = Math.round(e.nativeEvent.contentOffset.y / ITEM_HEIGHT);
-    const clampedIdx = Math.max(0, Math.min(CM_VALUES.length - 1, idx));
-    if (clampedIdx !== minCmIdx) {
-      setMinCmIdx(clampedIdx);
-      updateHeight('minCm', CM_VALUES[clampedIdx]);
-    }
-  };
-
-  const handleMaxCmScroll = (e: any) => {
-    const idx = Math.round(e.nativeEvent.contentOffset.y / ITEM_HEIGHT);
-    const clampedIdx = Math.max(0, Math.min(CM_VALUES.length - 1, idx));
-    if (clampedIdx !== maxCmIdx) {
-      setMaxCmIdx(clampedIdx);
-      updateHeight('maxCm', CM_VALUES[clampedIdx]);
-    }
-  };
-
-  const minDisplay = isMetric ? `${CM_VALUES[minCmIdx]} cm` : `${FEET[minFeetIdx]}'${INCHES[minInchIdx]}"`;
-  const maxDisplay = isMetric ? `${CM_VALUES[maxCmIdx]} cm` : `${FEET[maxFeetIdx]}'${INCHES[maxInchIdx]}"`;
-
-  return (
-    <View style={wheelStyles.container}>
-      {/* Unit Toggle */}
-      <View style={wheelStyles.toggleRow}>
-        <TouchableOpacity
-          style={[wheelStyles.toggleBtn, !isMetric && wheelStyles.toggleBtnActive]}
-          onPress={() => setIsMetric(false)}
-        >
-          <Text style={[wheelStyles.toggleText, !isMetric && wheelStyles.toggleTextActive]}>ft/in</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[wheelStyles.toggleBtn, isMetric && wheelStyles.toggleBtnActive]}
-          onPress={() => setIsMetric(true)}
-        >
-          <Text style={[wheelStyles.toggleText, isMetric && wheelStyles.toggleTextActive]}>cm</Text>
-        </TouchableOpacity>
-      </View>
-
-      <Text style={wheelStyles.valueLabel}>{minDisplay} - {maxDisplay}</Text>
-
-      {!isMetric ? (
-        <View style={wheelStyles.heightContainer}>
-          {/* Min Height */}
-          <View style={wheelStyles.heightSection}>
-            <Text style={wheelStyles.sectionLabel}>Min Height</Text>
-            <View style={wheelStyles.heightWheels}>
-              <View style={wheelStyles.columnSmall}>
-                <Text style={wheelStyles.columnLabel}>ft</Text>
-                <View style={wheelStyles.wrapper}>
-                  <View style={wheelStyles.highlight} />
-                  <ScrollView
-                    ref={minFeetRef}
-                    style={wheelStyles.scroll}
-                    showsVerticalScrollIndicator={false}
-                    snapToInterval={ITEM_HEIGHT}
-                    decelerationRate="fast"
-                    onMomentumScrollEnd={handleMinFeetScroll}
-                    contentContainerStyle={{ paddingVertical: ITEM_HEIGHT }}
-                    nestedScrollEnabled
-                  >
-                    {FEET.map((f, i) => (
-                      <View key={i} style={wheelStyles.item}>
-                        <Text style={[wheelStyles.itemText, minFeetIdx === i && wheelStyles.itemTextActive]}>{f}'</Text>
-                      </View>
-                    ))}
-                  </ScrollView>
-                </View>
-              </View>
-              <View style={wheelStyles.columnSmall}>
-                <Text style={wheelStyles.columnLabel}>in</Text>
-                <View style={wheelStyles.wrapper}>
-                  <View style={wheelStyles.highlight} />
-                  <ScrollView
-                    ref={minInchRef}
-                    style={wheelStyles.scroll}
-                    showsVerticalScrollIndicator={false}
-                    snapToInterval={ITEM_HEIGHT}
-                    decelerationRate="fast"
-                    onMomentumScrollEnd={handleMinInchScroll}
-                    contentContainerStyle={{ paddingVertical: ITEM_HEIGHT }}
-                    nestedScrollEnabled
-                  >
-                    {INCHES.map((inch, i) => (
-                      <View key={i} style={wheelStyles.item}>
-                        <Text style={[wheelStyles.itemText, minInchIdx === i && wheelStyles.itemTextActive]}>{inch}"</Text>
-                      </View>
-                    ))}
-                  </ScrollView>
-                </View>
-              </View>
-            </View>
-          </View>
-
-          {/* Max Height */}
-          <View style={wheelStyles.heightSection}>
-            <Text style={wheelStyles.sectionLabel}>Max Height</Text>
-            <View style={wheelStyles.heightWheels}>
-              <View style={wheelStyles.columnSmall}>
-                <Text style={wheelStyles.columnLabel}>ft</Text>
-                <View style={wheelStyles.wrapper}>
-                  <View style={wheelStyles.highlight} />
-                  <ScrollView
-                    ref={maxFeetRef}
-                    style={wheelStyles.scroll}
-                    showsVerticalScrollIndicator={false}
-                    snapToInterval={ITEM_HEIGHT}
-                    decelerationRate="fast"
-                    onMomentumScrollEnd={handleMaxFeetScroll}
-                    contentContainerStyle={{ paddingVertical: ITEM_HEIGHT }}
-                    nestedScrollEnabled
-                  >
-                    {FEET.map((f, i) => (
-                      <View key={i} style={wheelStyles.item}>
-                        <Text style={[wheelStyles.itemText, maxFeetIdx === i && wheelStyles.itemTextActive]}>{f}'</Text>
-                      </View>
-                    ))}
-                  </ScrollView>
-                </View>
-              </View>
-              <View style={wheelStyles.columnSmall}>
-                <Text style={wheelStyles.columnLabel}>in</Text>
-                <View style={wheelStyles.wrapper}>
-                  <View style={wheelStyles.highlight} />
-                  <ScrollView
-                    ref={maxInchRef}
-                    style={wheelStyles.scroll}
-                    showsVerticalScrollIndicator={false}
-                    snapToInterval={ITEM_HEIGHT}
-                    decelerationRate="fast"
-                    onMomentumScrollEnd={handleMaxInchScroll}
-                    contentContainerStyle={{ paddingVertical: ITEM_HEIGHT }}
-                    nestedScrollEnabled
-                  >
-                    {INCHES.map((inch, i) => (
-                      <View key={i} style={wheelStyles.item}>
-                        <Text style={[wheelStyles.itemText, maxInchIdx === i && wheelStyles.itemTextActive]}>{inch}"</Text>
-                      </View>
-                    ))}
-                  </ScrollView>
-                </View>
-              </View>
-            </View>
-          </View>
-        </View>
-      ) : (
-        <View style={wheelStyles.pickerRow}>
-          {/* Min CM */}
-          <View style={wheelStyles.column}>
-            <Text style={wheelStyles.columnLabel}>Min</Text>
-            <View style={wheelStyles.wrapper}>
-              <View style={wheelStyles.highlight} />
-              <ScrollView
-                ref={minCmRef}
-                style={wheelStyles.scroll}
-                showsVerticalScrollIndicator={false}
-                snapToInterval={ITEM_HEIGHT}
-                decelerationRate="fast"
-                onMomentumScrollEnd={handleMinCmScroll}
-                contentContainerStyle={{ paddingVertical: ITEM_HEIGHT }}
-                nestedScrollEnabled
-              >
-                {CM_VALUES.map((cm, i) => (
-                  <View key={i} style={wheelStyles.item}>
-                    <Text style={[wheelStyles.itemText, minCmIdx === i && wheelStyles.itemTextActive]}>{cm} cm</Text>
-                  </View>
-                ))}
-              </ScrollView>
-            </View>
-          </View>
-
-          <Text style={wheelStyles.separator}>-</Text>
-
-          {/* Max CM */}
-          <View style={wheelStyles.column}>
-            <Text style={wheelStyles.columnLabel}>Max</Text>
-            <View style={wheelStyles.wrapper}>
-              <View style={wheelStyles.highlight} />
-              <ScrollView
-                ref={maxCmRef}
-                style={wheelStyles.scroll}
-                showsVerticalScrollIndicator={false}
-                snapToInterval={ITEM_HEIGHT}
-                decelerationRate="fast"
-                onMomentumScrollEnd={handleMaxCmScroll}
-                contentContainerStyle={{ paddingVertical: ITEM_HEIGHT }}
-                nestedScrollEnabled
-              >
-                {CM_VALUES.map((cm, i) => (
-                  <View key={i} style={wheelStyles.item}>
-                    <Text style={[wheelStyles.itemText, maxCmIdx === i && wheelStyles.itemTextActive]}>{cm} cm</Text>
-                  </View>
-                ))}
-              </ScrollView>
-            </View>
-          </View>
-        </View>
-      )}
-    </View>
-  );
-}
-
-// Wheel Picker Styles
-const wheelStyles = StyleSheet.create({
+// Horizontal Picker Styles
+const hStyles = StyleSheet.create({
   container: {
     backgroundColor: COLORS.bgCard,
     borderRadius: BORDER_RADIUS.l,
@@ -501,65 +248,209 @@ const wheelStyles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: SPACING.m,
   },
-  pickerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  column: {
-    flex: 1,
-    alignItems: 'center',
-    maxWidth: 120,
-  },
-  columnSmall: {
-    flex: 1,
-    alignItems: 'center',
-    maxWidth: 70,
-  },
-  columnLabel: {
-    fontSize: 11,
+  rangeLabel: {
+    fontSize: 12,
     color: COLORS.textMuted,
     marginBottom: SPACING.xs,
     fontWeight: '600',
-    letterSpacing: 0.5,
   },
-  wrapper: {
-    height: ITEM_HEIGHT * VISIBLE_ITEMS,
+  scrollContainer: {
+    height: 60,
     position: 'relative',
-    width: '100%',
   },
-  highlight: {
+  centerIndicator: {
     position: 'absolute',
-    top: ITEM_HEIGHT,
-    left: 4,
-    right: 4,
-    height: ITEM_HEIGHT,
+    top: 8,
+    left: '50%',
+    marginLeft: -35,
+    width: 70,
+    height: 44,
     backgroundColor: COLORS.primary,
-    borderRadius: BORDER_RADIUS.s,
-    opacity: 0.15,
-  },
-  scroll: {
-    height: ITEM_HEIGHT * VISIBLE_ITEMS,
+    borderRadius: BORDER_RADIUS.m,
+    opacity: 0.2,
+    zIndex: 0,
   },
   item: {
-    height: ITEM_HEIGHT,
+    width: ITEM_WIDTH,
+    height: 60,
     justifyContent: 'center',
     alignItems: 'center',
   },
   itemText: {
-    fontSize: 18,
+    fontSize: 20,
     color: COLORS.textMuted,
     fontWeight: '500',
   },
   itemTextActive: {
     color: COLORS.text,
     fontWeight: '700',
-    fontSize: 20,
-  },
-  separator: {
     fontSize: 24,
+  },
+  unitText: {
+    fontSize: 10,
     color: COLORS.textMuted,
-    marginHorizontal: SPACING.m,
+    marginTop: -2,
+  },
+  unitTextActive: {
+    color: COLORS.text,
+  },
+});
+
+// Height Picker Component (Old style with feet/inches selection)
+function HeightPicker({ value, onChange }: { value: HeightFilter; onChange: (v: HeightFilter) => void }) {
+  const [isMetric, setIsMetric] = useState(value.unit === 'metric');
+  const FEET = [3, 4, 5, 6, 7];
+  const INCHES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+  const CM_MIN = 120;
+  const CM_MAX = 220;
+
+  const toggleUnit = () => {
+    const newIsMetric = !isMetric;
+    setIsMetric(newIsMetric);
+    onChange({ ...value, unit: newIsMetric ? 'metric' : 'imperial' });
+  };
+
+  const updateHeight = (field: string, val: number) => {
+    onChange({ ...value, [field]: val });
+  };
+
+  const minDisplay = isMetric ? `${value.minCm} cm` : `${value.minFeet}'${value.minInches}"`;
+  const maxDisplay = isMetric ? `${value.maxCm} cm` : `${value.maxFeet}'${value.maxInches}"`;
+
+  return (
+    <View style={heightStyles.container}>
+      {/* Unit Toggle */}
+      <View style={heightStyles.toggleRow}>
+        <TouchableOpacity
+          style={[heightStyles.toggleBtn, !isMetric && heightStyles.toggleBtnActive]}
+          onPress={() => { setIsMetric(false); onChange({ ...value, unit: 'imperial' }); }}
+        >
+          <Text style={[heightStyles.toggleText, !isMetric && heightStyles.toggleTextActive]}>ft/in</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[heightStyles.toggleBtn, isMetric && heightStyles.toggleBtnActive]}
+          onPress={() => { setIsMetric(true); onChange({ ...value, unit: 'metric' }); }}
+        >
+          <Text style={[heightStyles.toggleText, isMetric && heightStyles.toggleTextActive]}>cm</Text>
+        </TouchableOpacity>
+      </View>
+
+      <Text style={heightStyles.valueLabel}>{minDisplay} - {maxDisplay}</Text>
+
+      {!isMetric ? (
+        <View style={heightStyles.pickerRow}>
+          {/* Min Height */}
+          <View style={heightStyles.pickerCol}>
+            <Text style={heightStyles.colLabel}>Min Height</Text>
+            <View style={heightStyles.selectRow}>
+              <View style={heightStyles.selectBox}>
+                <Text style={heightStyles.selectLabel}>ft</Text>
+                <ScrollView style={heightStyles.selectScroll} showsVerticalScrollIndicator={false}>
+                  {FEET.map(f => (
+                    <TouchableOpacity
+                      key={f}
+                      style={[heightStyles.selectItem, value.minFeet === f && heightStyles.selectItemActive]}
+                      onPress={() => updateHeight('minFeet', f)}
+                    >
+                      <Text style={[heightStyles.selectText, value.minFeet === f && heightStyles.selectTextActive]}>{f}'</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+              <View style={heightStyles.selectBox}>
+                <Text style={heightStyles.selectLabel}>in</Text>
+                <ScrollView style={heightStyles.selectScroll} showsVerticalScrollIndicator={false}>
+                  {INCHES.map(i => (
+                    <TouchableOpacity
+                      key={i}
+                      style={[heightStyles.selectItem, value.minInches === i && heightStyles.selectItemActive]}
+                      onPress={() => updateHeight('minInches', i)}
+                    >
+                      <Text style={[heightStyles.selectText, value.minInches === i && heightStyles.selectTextActive]}>{i}"</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            </View>
+          </View>
+
+          {/* Max Height */}
+          <View style={heightStyles.pickerCol}>
+            <Text style={heightStyles.colLabel}>Max Height</Text>
+            <View style={heightStyles.selectRow}>
+              <View style={heightStyles.selectBox}>
+                <Text style={heightStyles.selectLabel}>ft</Text>
+                <ScrollView style={heightStyles.selectScroll} showsVerticalScrollIndicator={false}>
+                  {FEET.map(f => (
+                    <TouchableOpacity
+                      key={f}
+                      style={[heightStyles.selectItem, value.maxFeet === f && heightStyles.selectItemActive]}
+                      onPress={() => updateHeight('maxFeet', f)}
+                    >
+                      <Text style={[heightStyles.selectText, value.maxFeet === f && heightStyles.selectTextActive]}>{f}'</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+              <View style={heightStyles.selectBox}>
+                <Text style={heightStyles.selectLabel}>in</Text>
+                <ScrollView style={heightStyles.selectScroll} showsVerticalScrollIndicator={false}>
+                  {INCHES.map(i => (
+                    <TouchableOpacity
+                      key={i}
+                      style={[heightStyles.selectItem, value.maxInches === i && heightStyles.selectItemActive]}
+                      onPress={() => updateHeight('maxInches', i)}
+                    >
+                      <Text style={[heightStyles.selectText, value.maxInches === i && heightStyles.selectTextActive]}>{i}"</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            </View>
+          </View>
+        </View>
+      ) : (
+        <View style={heightStyles.cmRow}>
+          <View style={heightStyles.cmCol}>
+            <Text style={heightStyles.colLabel}>Min (cm)</Text>
+            <ScrollView style={heightStyles.cmScroll} showsVerticalScrollIndicator={false}>
+              {Array.from({ length: CM_MAX - CM_MIN + 1 }, (_, i) => CM_MIN + i).map(cm => (
+                <TouchableOpacity
+                  key={cm}
+                  style={[heightStyles.selectItem, value.minCm === cm && heightStyles.selectItemActive]}
+                  onPress={() => updateHeight('minCm', cm)}
+                >
+                  <Text style={[heightStyles.selectText, value.minCm === cm && heightStyles.selectTextActive]}>{cm}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+          <View style={heightStyles.cmCol}>
+            <Text style={heightStyles.colLabel}>Max (cm)</Text>
+            <ScrollView style={heightStyles.cmScroll} showsVerticalScrollIndicator={false}>
+              {Array.from({ length: CM_MAX - CM_MIN + 1 }, (_, i) => CM_MIN + i).map(cm => (
+                <TouchableOpacity
+                  key={cm}
+                  style={[heightStyles.selectItem, value.maxCm === cm && heightStyles.selectItemActive]}
+                  onPress={() => updateHeight('maxCm', cm)}
+                >
+                  <Text style={[heightStyles.selectText, value.maxCm === cm && heightStyles.selectTextActive]}>{cm}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      )}
+    </View>
+  );
+}
+
+const heightStyles = StyleSheet.create({
+  container: {
+    backgroundColor: COLORS.bgCard,
+    borderRadius: BORDER_RADIUS.l,
+    padding: SPACING.m,
+    marginTop: SPACING.s,
   },
   toggleRow: {
     flexDirection: 'row',
@@ -584,21 +475,70 @@ const wheelStyles = StyleSheet.create({
   toggleTextActive: {
     color: COLORS.white,
   },
-  heightContainer: {
+  valueLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.gold,
+    textAlign: 'center',
+    marginBottom: SPACING.m,
+  },
+  pickerRow: {
     flexDirection: 'row',
     justifyContent: 'space-around',
   },
-  heightSection: {
+  pickerCol: {
     alignItems: 'center',
   },
-  sectionLabel: {
+  colLabel: {
     fontSize: 12,
     color: COLORS.textSecondary,
     marginBottom: SPACING.s,
     fontWeight: '600',
   },
-  heightWheels: {
+  selectRow: {
     flexDirection: 'row',
+    gap: SPACING.s,
+  },
+  selectBox: {
+    alignItems: 'center',
+  },
+  selectLabel: {
+    fontSize: 10,
+    color: COLORS.textMuted,
+    marginBottom: 4,
+  },
+  selectScroll: {
+    height: 120,
+    width: 50,
+  },
+  selectItem: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: BORDER_RADIUS.s,
+    alignItems: 'center',
+  },
+  selectItemActive: {
+    backgroundColor: 'rgba(229,9,20,0.2)',
+  },
+  selectText: {
+    fontSize: 16,
+    color: COLORS.textMuted,
+  },
+  selectTextActive: {
+    color: COLORS.primary,
+    fontWeight: '700',
+  },
+  cmRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+  },
+  cmCol: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  cmScroll: {
+    height: 150,
+    width: 80,
   },
 });
 
@@ -635,7 +575,7 @@ const tooltipStyles = StyleSheet.create({
   closeBtnText: { fontSize: 14, fontWeight: '600', color: COLORS.white, textAlign: 'center' },
 });
 
-// Filter Section Component
+// Filter Section Component (Collapsible cards)
 function FilterSectionCard({ config, section, onUpdate }: {
   config: FilterConfig; section: FilterSection; onUpdate: (s: FilterSection) => void;
 }) {
@@ -790,7 +730,7 @@ export default function FiltersScreen() {
               </TouchableOpacity>
             </TouchableOpacity>
           </View>
-          <DistanceWheelPicker
+          <HorizontalDistancePicker
             value={filters.distance.radius}
             onChange={(v) => setFilters(prev => ({ ...prev, distance: { ...prev.distance, radius: v } }))}
           />
@@ -825,7 +765,7 @@ export default function FiltersScreen() {
               </TouchableOpacity>
             </TouchableOpacity>
           </View>
-          <AgeRangeWheelPicker
+          <HorizontalAgeRangePicker
             value={filters.age}
             onChange={(v) => setFilters(prev => ({ ...prev, age: v }))}
           />
@@ -860,7 +800,7 @@ export default function FiltersScreen() {
               </TouchableOpacity>
             </TouchableOpacity>
           </View>
-          <HeightWheelPicker
+          <HeightPicker
             value={filters.height}
             onChange={(v) => setFilters(prev => ({ ...prev, height: v }))}
           />
