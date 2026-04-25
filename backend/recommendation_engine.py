@@ -1233,11 +1233,22 @@ async def get_candidate_movies(
     2. Query by top genres
     3. Add trending/popular for diversity
     4. Filter and deduplicate
+    
+    NOTE: TMDB API has max page limit of 500. We cap pages at 500 and use
+    randomized page selection for variety when user has swiped through many movies.
     """
     if exclude_ids is None:
         exclude_ids = set()
     
     all_movies = []
+    
+    # CRITICAL: TMDB API max page is 500. Cap the page number.
+    # For high page numbers, use randomization within valid range
+    MAX_TMDB_PAGE = 500
+    if page > MAX_TMDB_PAGE:
+        # Use a random page within a reasonable range for variety
+        import random
+        page = random.randint(1, min(50, MAX_TMDB_PAGE))  # Random page 1-50
     
     # Extract top genres from taste vector
     genre_scores = []

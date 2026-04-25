@@ -1108,13 +1108,21 @@ export default function SwipeScreen() {
     }
   };
 
-  // Fetch movie feed using recommendation API
-  const fetchMovies = useCallback(async (pageNum: number) => {
+  // Network error retry count
+  const networkErrorCount = useRef(0);
+  const MAX_NETWORK_ERRORS = 3;
+
+  // Fetch movie feed using recommendation API with retry logic
+  const fetchMovies = useCallback(async (pageNum: number, retryCount: number = 0) => {
     if (fetchingRef.current || !userId) return;
     fetchingRef.current = true;
     setLoading(true);
 
     try {
+      // Create AbortController for timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+
       // Use the new recommendation API with cosine similarity
       const res = await fetch(`${BACKEND_URL}/api/recommendations`, {
         method: 'POST',
@@ -1124,11 +1132,15 @@ export default function SwipeScreen() {
           page: pageNum,
           limit: 20,
         }),
+        signal: controller.signal,
       });
+
+      clearTimeout(timeoutId);
 
       if (!res.ok) {
         console.warn('Recommendation API failed, using fallback');
         await fetchMoviesFallback(pageNum);
+        networkErrorCount.current = 0; // Reset on success
         return;
       }
 
@@ -1154,16 +1166,49 @@ export default function SwipeScreen() {
       });
       
       console.log(`Fetched ${newMovies.length} personalized recommendations (page ${pageNum})`);
-    } catch (err) {
-      console.error('Error fetching recommendations:', err);
-      await fetchMoviesFallback(pageNum);
+      networkErrorCount.current = 0; // Reset on success
+    } catch (err: any) {
+      // Handle abort/timeout silently
+      if (err.name === 'AbortError') {
+        console.log('Request timed out, retrying...');
+      }
+      
+      // Check if it's a network error (transient)
+      const isNetworkError = err.message?.includes('Network request failed') || 
+                            err.message?.includes('Failed to fetch') ||
+                            err.name === 'AbortError';
+      
+      if (isNetworkError && retryCount < 2) {
+        // Retry with exponential backoff for network errors
+        console.log(`Network error, retrying (attempt ${retryCount + 1}/2)...`);
+        await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1)));
+        fetchingRef.current = false;
+        return fetchMovies(pageNum, retryCount + 1);
+      }
+      
+      networkErrorCount.current++;
+      
+      // Only log error for non-network issues or after max retries
+      if (!isNetworkError) {
+        console.error('Error fetching recommendations:', err);
+      } else {
+        console.log('Network temporarily unavailable, using fallback');
+      }
+      
+      // Try fallback silently
+      try {
+        await fetchMoviesFallback(pageNum);
+      } catch (fallbackErr) {
+        // If even fallback fails, don't show error - just wait for next attempt
+        console.log('Fallback also failed, will retry on next page');
+      }
     } finally {
       setLoading(false);
       fetchingRef.current = false;
     }
   }, [userId, swipeState.swipedMovieIds]);
 
-  // Fallback to old feed API
+  // Fallback to old feed API with page capping
   const fetchMoviesFallback = async (pageNum: number) => {
     try {
       const [filters, profile] = await Promise.all([getFilters(), getProfile()]);
@@ -1171,12 +1216,24 @@ export default function SwipeScreen() {
       const genres = filters?.genres?.selected?.join(',') || profile?.genres?.join(',') || '';
       const languages = filters?.languages?.selected?.join(',') || '';
 
+      // Cap page number for TMDB API
+      const cappedPage = Math.min(pageNum, 100);
+      
+      // Create AbortController for timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
       const params = new URLSearchParams({
-        genres, languages, page: String(pageNum), exclude: excludeIds,
+        genres, languages, page: String(cappedPage), exclude: excludeIds,
         seed_movie_id: '0', liked_genres: '',
       });
 
-      const res = await fetch(`${BACKEND_URL}/api/tmdb/feed?${params.toString()}`);
+      const res = await fetch(`${BACKEND_URL}/api/tmdb/feed?${params.toString()}`, {
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+      
       if (!res.ok) throw new Error('Failed to fetch feed');
       const data = await res.json();
 
@@ -1189,8 +1246,15 @@ export default function SwipeScreen() {
         const filtered = newMovies.filter((m: FeedMovie) => !existingIds.has(m.id));
         return [...prev, ...filtered];
       });
-    } catch (err) {
-      console.error('Error in fallback fetch:', err);
+      
+      console.log(`Fallback fetched ${newMovies.length} movies (page ${cappedPage})`);
+    } catch (err: any) {
+      // Handle quietly - don't show error to user for transient network issues
+      if (err.name === 'AbortError') {
+        console.log('Fallback request timed out');
+      } else {
+        console.log('Fallback fetch issue:', err.message || err);
+      }
     }
   };
 
@@ -1201,8 +1265,23 @@ export default function SwipeScreen() {
     }
   }, [page, userId]);
 
+  // Track consecutive empty fetches
+  const emptyFetchCount = useRef(0);
+
   useEffect(() => {
-    if (movies.length < 5 && !loading && userId && page > 0) setPage((p) => p + 1);
+    // Cap page at 100 to prevent TMDB 400 errors (API max is 500, but we use randomization after 100)
+    const MAX_PAGE = 100;
+    
+    if (movies.length < 5 && !loading && userId && page > 0) {
+      if (page >= MAX_PAGE) {
+        // Reset to page 1 with new random offset for variety
+        console.log('Reached page limit, resetting to page 1');
+        setPage(1);
+        emptyFetchCount.current = 0;
+      } else {
+        setPage((p) => p + 1);
+      }
+    }
   }, [movies.length, loading, userId, page]);
 
   const handleSwipe = useCallback((direction: 'left' | 'right', movie: FeedMovie) => {
