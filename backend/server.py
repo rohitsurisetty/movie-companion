@@ -63,11 +63,15 @@ class MovieSelection(BaseModel):
 class UserProfileRequest(BaseModel):
     user_id: str
     name: str = ""
+    age: int = 0
+    gender: str = ""
     genres: List[str] = []
     filmLanguages: List[str] = []
+    languagesSpoken: List[str] = []  # Added
     topMovies: List[MovieSelection] = []
     movieFrequency: str = ""
     ottTheatre: str = ""
+    relationshipIntent: List[str] = []  # Added
 
 
 class SwipeRequest(BaseModel):
@@ -365,19 +369,24 @@ async def save_user_profile(req: UserProfileRequest):
     """
     Save user profile and initialize taste vector.
     Called after user completes onboarding.
+    Uses ALL profile signals for comprehensive taste modeling.
     """
     # Convert topMovies to dict format
     top_movies_data = [m.dict() for m in req.topMovies]
     
-    # Build profile data
+    # Build complete profile data
     profile_data = {
         "user_id": req.user_id,
         "name": req.name,
+        "age": req.age,
+        "gender": req.gender,
         "genres": req.genres,
         "filmLanguages": req.filmLanguages,
+        "languagesSpoken": req.languagesSpoken,
         "topMovies": top_movies_data,
         "movieFrequency": req.movieFrequency,
         "ottTheatre": req.ottTheatre,
+        "relationshipIntent": req.relationshipIntent,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     
@@ -388,10 +397,10 @@ async def save_user_profile(req: UserProfileRequest):
         upsert=True
     )
     
-    # Initialize taste vector from profile
+    # Initialize comprehensive taste vector from profile
     taste_vector = initialize_taste_vector_from_profile(profile_data)
     
-    # Save taste vector
+    # Save taste vector with all metadata
     await db.user_taste_vectors.update_one(
         {"user_id": req.user_id},
         {"$set": {
@@ -402,12 +411,26 @@ async def save_user_profile(req: UserProfileRequest):
         upsert=True
     )
     
-    logger.info(f"Saved profile and initialized taste vector for user {req.user_id}")
+    # Log the initialization
+    preferred_langs = list(taste_vector.preferred_languages)
+    logger.info(f"Saved profile for user {req.user_id} with {len(req.genres)} genres, "
+                f"{len(preferred_langs)} languages, {len(req.topMovies)} top movies")
     
     return {
         "success": True,
         "message": "Profile saved and taste vector initialized",
-        "taste_dimensions": len(taste_vector.vector)
+        "taste_dimensions": len(taste_vector.vector),
+        "preferred_languages": preferred_langs,
+        "signals_used": {
+            "genres": len(req.genres),
+            "film_languages": len(req.filmLanguages),
+            "spoken_languages": len(req.languagesSpoken),
+            "top_movies": len(req.topMovies),
+            "movie_frequency": req.movieFrequency or "not set",
+            "ott_theatre": req.ottTheatre or "not set",
+            "relationship_intents": len(req.relationshipIntent),
+            "age": req.age,
+        }
     }
 
 

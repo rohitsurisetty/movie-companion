@@ -1066,23 +1066,43 @@ export default function SwipeScreen() {
     initUserId();
   }, []);
 
-  // Sync profile to backend recommendation engine
+  // Sync profile to backend recommendation engine (with ALL signals)
   const syncProfileToBackend = async (id: string, profile: ProfileData) => {
     try {
-      await fetch(`${BACKEND_URL}/api/user/profile`, {
+      const response = await fetch(`${BACKEND_URL}/api/user/profile`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user_id: id,
           name: profile.name || '',
+          age: profile.age || 0,
+          gender: profile.gender || '',
           genres: profile.genres || [],
           filmLanguages: profile.filmLanguages || [],
-          topMovies: profile.topMovies || [],
+          languagesSpoken: profile.languagesSpoken || [],
+          topMovies: (profile.topMovies || []).map(m => ({
+            id: m.id,
+            title: m.title,
+            poster_path: m.poster_path || '',
+            release_date: m.release_date || '',
+            vote_average: m.vote_average || 0,
+            rating: m.rating || 0,
+            genres: m.genres || [],
+          })),
           movieFrequency: profile.movieFrequency || '',
           ottTheatre: profile.ottTheatre || '',
+          relationshipIntent: profile.relationshipIntent || [],
         }),
       });
-      console.log('Profile synced to recommendation engine');
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log('Profile synced to recommendation engine:', {
+          dimensions: data.taste_dimensions,
+          languages: data.preferred_languages,
+          signals: data.signals_used,
+        });
+      }
     } catch (e) {
       console.error('Error syncing profile to backend:', e);
     }
