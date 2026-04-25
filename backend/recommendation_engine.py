@@ -1308,21 +1308,18 @@ async def get_candidate_movies(
             if lang in INDIAN_LANG_RELATIONS:
                 related_langs.update(INDIAN_LANG_RELATIONS[lang][:2])  # Top 2 related
         
-        # 1. PRIMARY LANGUAGE DISCOVERY (Lowest vote threshold for regional content)
+        # 1. PRIMARY LANGUAGE DISCOVERY - NO VOTE THRESHOLD to get all movies!
         if preferred_langs:
             for lang_code in preferred_langs[:3]:
-                # For Indian regional languages, use very low vote threshold
-                min_votes = 10 if lang_code in INDIAN_LANGUAGES else 50
-                
                 params = {
                     "with_original_language": lang_code,
                     "sort_by": "popularity.desc",
-                    "vote_count.gte": min_votes,
                     "page": page
                 }
+                # NO vote_count filter - get ALL movies in user's preferred language!
                 
-                # Only add genre filter if NOT first page (get variety first)
-                if page > 1 and top_genre_ids:
+                # Add genre filter only if we have genre preferences AND not first few pages
+                if page > 3 and top_genre_ids:
                     params["with_genres"] = ','.join(str(g) for g in top_genre_ids[:2])
                 
                 try:
