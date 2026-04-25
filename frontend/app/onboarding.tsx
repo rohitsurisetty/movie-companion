@@ -11,14 +11,15 @@ import BasicInfoStep from '../src/components/BasicInfoStep';
 import TopMoviesStep from '../src/components/TopMoviesStep';
 import OptionalProfileStep from '../src/components/OptionalProfileStep';
 import ProfilePreviewStep from '../src/components/ProfilePreviewStep';
+import PublicProfilePreviewStep from '../src/components/PublicProfilePreviewStep';
 import ModeSelectionStep from '../src/components/ModeSelectionStep';
 
-const TOTAL_STEPS = 12;
+const TOTAL_STEPS = 13; // Added PublicProfilePreview step
 
 const STEP_LABELS = [
   'Basic Info', 'Looking For', 'Want to Meet', 'Languages',
   'Movie Frequency', 'OTT / Theatre', 'Film Languages', 'Genres',
-  'Top Movies', 'Optional Info', 'Preview', 'Mode',
+  'Top Movies', 'Optional Info', 'Preview', 'Public Preview', 'Mode',
 ];
 
 type SelectionConfig = {
@@ -114,8 +115,13 @@ export default function OnboardingScreen() {
     return val !== undefined && val !== null && val !== '';
   };
 
-  const STEPS_WITH_OWN_BUTTON = [0, 8, 9, 10, 11];
+  const STEPS_WITH_OWN_BUTTON = [0, 8, 9, 10, 11, 12];
   const showSharedButton = !STEPS_WITH_OWN_BUTTON.includes(step);
+
+  // Go back to edit step from public preview
+  const handleEditFromPreview = () => {
+    setStep(10); // Go back to ProfilePreviewStep (visibility toggles)
+  };
 
   const renderStep = () => {
     if (step === 0) {
@@ -153,6 +159,9 @@ export default function OnboardingScreen() {
       return <ProfilePreviewStep data={data} onUpdate={updateField} onNext={handleNext} />;
     }
     if (step === 11) {
+      return <PublicProfilePreviewStep data={data} onEdit={handleEditFromPreview} onContinue={handleNext} />;
+    }
+    if (step === 12) {
       return <ModeSelectionStep data={data} onUpdate={updateField} onNext={handleNext} />;
     }
     return null;

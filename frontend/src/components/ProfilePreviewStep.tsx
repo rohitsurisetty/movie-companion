@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Switch } from 're
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, BORDER_RADIUS } from '../theme';
 import { ProfileData } from '../types';
+import { getPartialLocation } from '../utils/location';
 
 const AVATAR_COLORS: Record<string, string> = {
   av1: '#E50914', av2: '#FFD700', av3: '#4CAF50', av4: '#2196F3',
@@ -95,7 +96,7 @@ export default function ProfilePreviewStep({ data, onUpdate, onNext }: Props) {
         </View>
         <Text style={styles.profileName}>{data.name || 'Your Name'}</Text>
         {data.age > 0 && <Text style={styles.profileAge}>{data.age} years old</Text>}
-        {data.location ? <Text style={styles.profileLocation}>{data.location}</Text> : null}
+        {data.location ? <Text style={styles.profileLocation}>{getPartialLocation(data.location)}</Text> : null}
       </View>
 
       {/* Fields with toggles */}

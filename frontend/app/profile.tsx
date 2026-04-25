@@ -11,6 +11,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, BORDER_RADIUS } from '../src/theme';
 import { ProfileData, initialProfileData, MovieSelection } from '../src/types';
 import { getProfile, saveProfile, clearAll } from '../src/store';
+import { getPartialLocation } from '../src/utils/location';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -568,7 +569,7 @@ export default function ProfileScreen() {
           </View>
           <Text style={styles.profileName}>{profile.name || 'Your Name'}</Text>
           {profile.age > 0 && <Text style={styles.profileAge}>{profile.age} years old</Text>}
-          {profile.location && <Text style={styles.profileLocation}>{profile.location}</Text>}
+          {profile.location && <Text style={styles.profileLocation}>{getPartialLocation(profile.location)}</Text>}
         </TouchableOpacity>
 
         {/* Basic Info Section */}
@@ -576,7 +577,7 @@ export default function ProfileScreen() {
           <Text style={styles.sectionTitle}>Basic Information</Text>
           <ProfileField icon="person-outline" label="Name" value={profile.name} onPress={() => setEditModal('name')} isEmpty={!profile.name} />
           <ProfileField icon="male-female-outline" label="Gender" value={profile.gender} onPress={() => setEditModal('gender')} isEmpty={!profile.gender} />
-          <ProfileField icon="location-outline" label="Location" value={profile.location} onPress={() => setEditModal('location')} isEmpty={!profile.location} />
+          <ProfileField icon="location-outline" label="Location" value={getPartialLocation(profile.location)} onPress={() => setEditModal('location')} isEmpty={!profile.location} />
           <ProfileField icon="document-text-outline" label="Bio" value={profile.bio} onPress={() => setEditModal('bio')} isEmpty={!profile.bio} />
         </View>
 
