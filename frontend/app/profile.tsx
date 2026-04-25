@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput,
-  Modal, Image, Switch, ActivityIndicator, Alert,
+  View, Text, TouchableOpacity, StyleSheet, TextInput,
+  Modal, Image, Switch, ActivityIndicator, Alert, Platform,
+  ScrollView as RNScrollView,
 } from 'react-native';
+import { ScrollView } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -70,7 +72,7 @@ function SingleSelectModal({
       <TouchableOpacity style={modalStyles.overlay} activeOpacity={1} onPress={onClose}>
         <View style={modalStyles.container}>
           <Text style={modalStyles.title}>{title}</Text>
-          <ScrollView style={modalStyles.scroll} showsVerticalScrollIndicator={false}>
+          <RNScrollView style={modalStyles.scroll} showsVerticalScrollIndicator={false}>
             {options.map(opt => (
               <TouchableOpacity
                 key={opt}
@@ -83,7 +85,7 @@ function SingleSelectModal({
                 {selected === opt && <Ionicons name="checkmark-circle" size={22} color={COLORS.primary} />}
               </TouchableOpacity>
             ))}
-          </ScrollView>
+          </RNScrollView>
           <TouchableOpacity style={modalStyles.cancelBtn} onPress={onClose}>
             <Text style={modalStyles.cancelText}>Cancel</Text>
           </TouchableOpacity>
@@ -127,7 +129,7 @@ function MultiSelectModal({
         <View style={modalStyles.container}>
           <Text style={modalStyles.title}>{title}</Text>
           <Text style={modalStyles.subtitle}>Select all that apply</Text>
-          <ScrollView style={modalStyles.scroll} showsVerticalScrollIndicator={false}>
+          <RNScrollView style={modalStyles.scroll} showsVerticalScrollIndicator={false}>
             <View style={modalStyles.chipsContainer}>
               {options.map(opt => (
                 <TouchableOpacity
@@ -141,7 +143,7 @@ function MultiSelectModal({
                 </TouchableOpacity>
               ))}
             </View>
-          </ScrollView>
+          </RNScrollView>
           <View style={modalStyles.buttonRow}>
             <TouchableOpacity style={modalStyles.cancelBtn} onPress={onClose}>
               <Text style={modalStyles.cancelText}>Cancel</Text>
@@ -313,7 +315,7 @@ function HeightEditModal({
             <View style={modalStyles.heightPickerRow}>
               <View style={modalStyles.heightColumn}>
                 <Text style={modalStyles.heightLabel}>Feet</Text>
-                <ScrollView style={modalStyles.heightScroll} showsVerticalScrollIndicator={false}>
+                <RNScrollView style={modalStyles.heightScroll} showsVerticalScrollIndicator={false}>
                   {feetOptions.map(f => (
                     <TouchableOpacity
                       key={f}
@@ -323,11 +325,11 @@ function HeightEditModal({
                       <Text style={[modalStyles.heightItemText, feet === f && modalStyles.heightItemTextActive]}>{f}'</Text>
                     </TouchableOpacity>
                   ))}
-                </ScrollView>
+                </RNScrollView>
               </View>
               <View style={modalStyles.heightColumn}>
                 <Text style={modalStyles.heightLabel}>Inches</Text>
-                <ScrollView style={modalStyles.heightScroll} showsVerticalScrollIndicator={false}>
+                <RNScrollView style={modalStyles.heightScroll} showsVerticalScrollIndicator={false}>
                   {inchOptions.map(i => (
                     <TouchableOpacity
                       key={i}
@@ -337,11 +339,11 @@ function HeightEditModal({
                       <Text style={[modalStyles.heightItemText, inches === i && modalStyles.heightItemTextActive]}>{i}"</Text>
                     </TouchableOpacity>
                   ))}
-                </ScrollView>
+                </RNScrollView>
               </View>
             </View>
           ) : (
-            <ScrollView style={modalStyles.cmScroll} showsVerticalScrollIndicator={false}>
+            <RNScrollView style={modalStyles.cmScroll} showsVerticalScrollIndicator={false}>
               {cmOptions.map(c => (
                 <TouchableOpacity
                   key={c}
@@ -351,7 +353,7 @@ function HeightEditModal({
                   <Text style={[modalStyles.heightItemText, cm === c && modalStyles.heightItemTextActive]}>{c} cm</Text>
                 </TouchableOpacity>
               ))}
-            </ScrollView>
+            </RNScrollView>
           )}
 
           <View style={modalStyles.heightDisplay}>
@@ -628,7 +630,7 @@ export default function ProfileScreen() {
           <Text style={styles.sectionTitle}>Personal Details</Text>
           <ProfileField icon="resize-outline" label="Height" value={profile.height} onPress={() => setEditModal('height')} isEmpty={!profile.height} />
           <ProfileField icon="moon-outline" label="Religion" value={profile.religion} onPress={() => setEditModal('religion')} isEmpty={!profile.religion} />
-          <ProfileField icon="ring-outline" label="Marital Status" value={profile.maritalStatus} onPress={() => setEditModal('maritalStatus')} isEmpty={!profile.maritalStatus} />
+          <ProfileField icon="ellipse-outline" label="Marital Status" value={profile.maritalStatus} onPress={() => setEditModal('maritalStatus')} isEmpty={!profile.maritalStatus} />
           <ProfileField icon="restaurant-outline" label="Food Preference" value={profile.foodPreference} onPress={() => setEditModal('foodPreference')} isEmpty={!profile.foodPreference} />
         </View>
 

@@ -9,7 +9,7 @@ import Slider from '@react-native-community/slider';
 import MultiSlider from '@ptomasroos/react-native-multi-slider';
 import { COLORS, SPACING, BORDER_RADIUS } from '../src/theme';
 import { FiltersData, initialFiltersData, FilterSection, HeightFilter, AgeFilter } from '../src/types';
-import { saveFilters } from '../src/store';
+import { saveFilters, getFilters } from '../src/store';
 
 const MAX_KM = 500;
 const ITEM_HEIGHT = 44;
@@ -816,12 +816,42 @@ export default function FiltersScreen() {
   const params = useLocalSearchParams();
   const fromProfile = params.from === 'profile';
   const [filters, setFilters] = useState<FiltersData>(initialFiltersData);
+  const [loading, setLoading] = useState(true);
   const [showExclusiveInfo, setShowExclusiveInfo] = useState(false);
   const [showExpandInfo, setShowExpandInfo] = useState(false);
   const [showFloatingBtn, setShowFloatingBtn] = useState(false);
 
+  // Load saved filters on mount
+  useEffect(() => {
+    loadSavedFilters();
+  }, []);
+
+  const loadSavedFilters = async () => {
+    setLoading(true);
+    try {
+      const savedFilters = await getFilters();
+      if (savedFilters) {
+        // Merge saved filters with initial to handle any new fields
+        setFilters({ ...initialFiltersData, ...savedFilters });
+      }
+    } catch (e) {
+      console.error('Error loading filters:', e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const updateFilter = (key: keyof FiltersData, section: FilterSection) => {
-    setFilters(prev => ({ ...prev, [key]: section }));
+    const newFilters = { ...filters, [key]: section };
+    setFilters(newFilters);
+    // Auto-save on every change for immediate persistence
+    saveFilters(newFilters);
+  };
+
+  // Auto-save helper for non-FilterSection updates (distance, age, height)
+  const updateAndSave = (newFilters: FiltersData) => {
+    setFilters(newFilters);
+    saveFilters(newFilters);
   };
 
   const handleStart = async () => {
@@ -836,6 +866,16 @@ export default function FiltersScreen() {
   };
 
   const buttonText = fromProfile ? 'Resume the show' : "Let's Start";
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <View style={styles.loadingContainer}>
+          <Text style={styles.loadingText}>Loading preferences...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -880,7 +920,10 @@ export default function FiltersScreen() {
           <View style={pStyles.checkboxRow}>
             <TouchableOpacity
               style={pStyles.checkItem}
-              onPress={() => setFilters(prev => ({ ...prev, distance: { ...prev.distance, exclusive: !prev.distance.exclusive } }))}
+              onPress={() => {
+                const newFilters = { ...filters, distance: { ...filters.distance, exclusive: !filters.distance.exclusive } };
+                updateAndSave(newFilters);
+              }}
             >
               <View style={[pStyles.checkBox, filters.distance.exclusive && pStyles.checkBoxChecked]}>
                 {filters.distance.exclusive && <Ionicons name="checkmark" size={12} color={COLORS.white} />}
@@ -892,7 +935,10 @@ export default function FiltersScreen() {
             </TouchableOpacity>
             <TouchableOpacity
               style={pStyles.checkItem}
-              onPress={() => setFilters(prev => ({ ...prev, distance: { ...prev.distance, expandIfRunOut: !prev.distance.expandIfRunOut } }))}
+              onPress={() => {
+                const newFilters = { ...filters, distance: { ...filters.distance, expandIfRunOut: !filters.distance.expandIfRunOut } };
+                updateAndSave(newFilters);
+              }}
             >
               <View style={[pStyles.checkBox, filters.distance.expandIfRunOut && pStyles.checkBoxChecked]}>
                 {filters.distance.expandIfRunOut && <Ionicons name="checkmark" size={12} color={COLORS.white} />}
@@ -905,7 +951,10 @@ export default function FiltersScreen() {
           </View>
           <DistanceSliderComponent
             value={filters.distance.radius}
-            onChange={(v) => setFilters(prev => ({ ...prev, distance: { ...prev.distance, radius: v } }))}
+            onChange={(v) => {
+              const newFilters = { ...filters, distance: { ...filters.distance, radius: v } };
+              updateAndSave(newFilters);
+            }}
           />
         </View>
 
@@ -915,7 +964,10 @@ export default function FiltersScreen() {
           <View style={pStyles.checkboxRow}>
             <TouchableOpacity
               style={pStyles.checkItem}
-              onPress={() => setFilters(prev => ({ ...prev, age: { ...prev.age, exclusive: !prev.age.exclusive } }))}
+              onPress={() => {
+                const newFilters = { ...filters, age: { ...filters.age, exclusive: !filters.age.exclusive } };
+                updateAndSave(newFilters);
+              }}
             >
               <View style={[pStyles.checkBox, filters.age.exclusive && pStyles.checkBoxChecked]}>
                 {filters.age.exclusive && <Ionicons name="checkmark" size={12} color={COLORS.white} />}
@@ -927,7 +979,10 @@ export default function FiltersScreen() {
             </TouchableOpacity>
             <TouchableOpacity
               style={pStyles.checkItem}
-              onPress={() => setFilters(prev => ({ ...prev, age: { ...prev.age, expandIfRunOut: !prev.age.expandIfRunOut } }))}
+              onPress={() => {
+                const newFilters = { ...filters, age: { ...filters.age, expandIfRunOut: !filters.age.expandIfRunOut } };
+                updateAndSave(newFilters);
+              }}
             >
               <View style={[pStyles.checkBox, filters.age.expandIfRunOut && pStyles.checkBoxChecked]}>
                 {filters.age.expandIfRunOut && <Ionicons name="checkmark" size={12} color={COLORS.white} />}
@@ -940,7 +995,10 @@ export default function FiltersScreen() {
           </View>
           <AgeRangeSliderComponent
             value={filters.age}
-            onChange={(v) => setFilters(prev => ({ ...prev, age: v }))}
+            onChange={(v) => {
+              const newFilters = { ...filters, age: v };
+              updateAndSave(newFilters);
+            }}
           />
         </View>
 
@@ -950,7 +1008,10 @@ export default function FiltersScreen() {
           <View style={pStyles.checkboxRow}>
             <TouchableOpacity
               style={pStyles.checkItem}
-              onPress={() => setFilters(prev => ({ ...prev, height: { ...prev.height, exclusive: !prev.height.exclusive } }))}
+              onPress={() => {
+                const newFilters = { ...filters, height: { ...filters.height, exclusive: !filters.height.exclusive } };
+                updateAndSave(newFilters);
+              }}
             >
               <View style={[pStyles.checkBox, filters.height.exclusive && pStyles.checkBoxChecked]}>
                 {filters.height.exclusive && <Ionicons name="checkmark" size={12} color={COLORS.white} />}
@@ -962,7 +1023,10 @@ export default function FiltersScreen() {
             </TouchableOpacity>
             <TouchableOpacity
               style={pStyles.checkItem}
-              onPress={() => setFilters(prev => ({ ...prev, height: { ...prev.height, expandIfRunOut: !prev.height.expandIfRunOut } }))}
+              onPress={() => {
+                const newFilters = { ...filters, height: { ...filters.height, expandIfRunOut: !filters.height.expandIfRunOut } };
+                updateAndSave(newFilters);
+              }}
             >
               <View style={[pStyles.checkBox, filters.height.expandIfRunOut && pStyles.checkBoxChecked]}>
                 {filters.height.expandIfRunOut && <Ionicons name="checkmark" size={12} color={COLORS.white} />}
@@ -975,7 +1039,10 @@ export default function FiltersScreen() {
           </View>
           <HeightWheelPicker
             value={filters.height}
-            onChange={(v) => setFilters(prev => ({ ...prev, height: v }))}
+            onChange={(v) => {
+              const newFilters = { ...filters, height: v };
+              updateAndSave(newFilters);
+            }}
           />
         </View>
 
@@ -1027,6 +1094,8 @@ const pStyles = StyleSheet.create({
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
+  loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  loadingText: { fontSize: 16, color: COLORS.textSecondary },
   headerBar: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: SPACING.l, paddingVertical: SPACING.m,
