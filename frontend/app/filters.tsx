@@ -1,6 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, Modal,
+  PanResponder, Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -10,7 +11,13 @@ import { FiltersData, initialFiltersData, FilterSection, HeightFilter, AgeFilter
 import { saveFilters } from '../src/store';
 
 const MAX_KM = 500;
-const ITEM_WIDTH = 70;
+const ITEM_HEIGHT = 44;
+const VISIBLE_ITEMS = 3;
+
+// Height arrays for wheel picker
+const FEET = [3, 4, 5, 6, 7];
+const INCHES = Array.from({ length: 12 }, (_, i) => i);
+const CM_VALUES = Array.from({ length: 101 }, (_, i) => 120 + i); // 120cm to 220cm
 
 type FilterConfig = {
   key: keyof FiltersData;
@@ -38,406 +45,538 @@ const FILTER_CONFIGS: FilterConfig[] = [
   { key: 'intent', title: 'Intent Preference', options: ['Casual', 'Friendship', 'Serious relationship', 'Exploring'] },
 ];
 
-// Distance values for horizontal picker
-const DISTANCE_VALUES = [5, 10, 15, 20, 25, 30, 40, 50, 75, 100, 150, 200, 300, 500, -1];
+// ============================================
+// HORIZONTAL SLIDER BAR - Distance
+// ============================================
+function DistanceSlider({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const [trackWidth, setTrackWidth] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const trackRef = useRef<View>(null);
 
-// Age values
-const AGE_VALUES = Array.from({ length: 43 }, (_, i) => 18 + i); // 18-60
+  // Convert value to percentage (0-1)
+  const getPercent = useCallback(() => {
+    if (value < 0) return 1; // Infinite = 100%
+    return Math.min(value / MAX_KM, 1);
+  }, [value]);
 
-// Horizontal Scrollable Distance Picker
-function HorizontalDistancePicker({ value, onChange }: { value: number; onChange: (v: number) => void }) {
-  const scrollRef = useRef<ScrollView>(null);
-  const [containerWidth, setContainerWidth] = useState(0);
-  const selectedIndex = DISTANCE_VALUES.indexOf(value >= 0 ? value : -1);
+  // Convert position to value
+  const positionToValue = useCallback((x: number) => {
+    if (trackWidth === 0) return value;
+    const percent = Math.max(0, Math.min(1, x / trackWidth));
+    if (percent >= 0.95) return -1; // Infinite
+    return Math.round(percent * MAX_KM);
+  }, [trackWidth, value]);
 
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (e) => {
+        setIsDragging(true);
+        const x = e.nativeEvent.locationX;
+        onChange(positionToValue(x));
+      },
+      onPanResponderMove: (e) => {
+        const x = e.nativeEvent.locationX;
+        onChange(positionToValue(x));
+      },
+      onPanResponderRelease: () => {
+        setIsDragging(false);
+      },
+      onPanResponderTerminate: () => {
+        setIsDragging(false);
+      },
+    })
+  ).current;
+
+  // Update panResponder when trackWidth changes
   useEffect(() => {
-    if (containerWidth > 0 && selectedIndex >= 0) {
-      const offset = selectedIndex * ITEM_WIDTH - (containerWidth / 2) + (ITEM_WIDTH / 2);
-      setTimeout(() => {
-        scrollRef.current?.scrollTo({ x: Math.max(0, offset), animated: false });
-      }, 100);
-    }
-  }, [containerWidth]);
+    panResponder.panHandlers.onResponderMove = (e: any) => {
+      const x = e.nativeEvent.locationX;
+      onChange(positionToValue(x));
+    };
+  }, [trackWidth, positionToValue, onChange]);
 
-  const handleScroll = (event: any) => {
-    const x = event.nativeEvent.contentOffset.x;
-    const centerOffset = containerWidth / 2;
-    const index = Math.round((x + centerOffset - ITEM_WIDTH / 2) / ITEM_WIDTH);
-    const clampedIndex = Math.max(0, Math.min(DISTANCE_VALUES.length - 1, index));
-    if (DISTANCE_VALUES[clampedIndex] !== value) {
-      onChange(DISTANCE_VALUES[clampedIndex]);
-    }
-  };
-
-  const getLabel = (val: number) => val < 0 ? '∞' : `${val}`;
-  const displayLabel = value < 0 ? 'Infinite distance' : `${value} km`;
+  const thumbLeft = `${getPercent() * 100}%`;
+  const label = value < 0 ? 'Infinite distance' : `${value} km`;
 
   return (
-    <View style={hStyles.container}>
-      <Text style={hStyles.valueLabel}>Upto: {displayLabel}</Text>
-      <View 
-        style={hStyles.scrollContainer}
-        onLayout={(e) => setContainerWidth(e.nativeEvent.layout.width)}
+    <View style={sliderStyles.container}>
+      <Text style={sliderStyles.label}>Upto: {label}</Text>
+      <View
+        ref={trackRef}
+        style={sliderStyles.trackWrapper}
+        onLayout={(e) => setTrackWidth(e.nativeEvent.layout.width)}
+        {...panResponder.panHandlers}
       >
-        <View style={hStyles.centerIndicator} />
-        <ScrollView
-          ref={scrollRef}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          snapToInterval={ITEM_WIDTH}
-          decelerationRate="fast"
-          onMomentumScrollEnd={handleScroll}
-          contentContainerStyle={{ paddingHorizontal: containerWidth / 2 - ITEM_WIDTH / 2 }}
-        >
-          {DISTANCE_VALUES.map((d, i) => {
-            const isSelected = d === value || (d === -1 && value < 0);
-            return (
-              <TouchableOpacity 
-                key={i} 
-                style={hStyles.item}
-                onPress={() => {
-                  onChange(d);
-                  const offset = i * ITEM_WIDTH - (containerWidth / 2) + (ITEM_WIDTH / 2);
-                  scrollRef.current?.scrollTo({ x: Math.max(0, offset), animated: true });
-                }}
-              >
-                <Text style={[hStyles.itemText, isSelected && hStyles.itemTextActive]}>
-                  {getLabel(d)}
-                </Text>
-                {d !== -1 && <Text style={[hStyles.unitText, isSelected && hStyles.unitTextActive]}>km</Text>}
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
+        <View style={sliderStyles.track}>
+          <View style={[sliderStyles.trackFill, { width: thumbLeft }]} />
+        </View>
+        <View style={[sliderStyles.thumbOuter, { left: thumbLeft }]}>
+          <View style={[sliderStyles.thumb, isDragging && sliderStyles.thumbActive]} />
+        </View>
+      </View>
+      <View style={sliderStyles.labelsRow}>
+        <Text style={sliderStyles.minLabel}>0</Text>
+        <Text style={sliderStyles.maxLabel}>∞</Text>
       </View>
     </View>
   );
 }
 
-// Horizontal Scrollable Age Range Picker
-function HorizontalAgeRangePicker({ value, onChange }: { value: AgeFilter; onChange: (v: AgeFilter) => void }) {
-  const minScrollRef = useRef<ScrollView>(null);
-  const maxScrollRef = useRef<ScrollView>(null);
-  const [containerWidth, setContainerWidth] = useState(0);
-  const minIndex = value.min - 18;
-  const maxIndex = value.max - 18;
+// ============================================
+// HORIZONTAL SLIDER BAR - Age Range (Dual Thumb)
+// ============================================
+function AgeRangeSlider({ value, onChange }: { value: AgeFilter; onChange: (v: AgeFilter) => void }) {
+  const [trackWidth, setTrackWidth] = useState(0);
+  const [activeThumb, setActiveThumb] = useState<'min' | 'max' | null>(null);
+  const MIN_AGE = 18;
+  const MAX_AGE = 60;
+  const RANGE = MAX_AGE - MIN_AGE;
 
-  useEffect(() => {
-    if (containerWidth > 0) {
-      const minOffset = minIndex * ITEM_WIDTH - (containerWidth / 2) + (ITEM_WIDTH / 2);
-      const maxOffset = maxIndex * ITEM_WIDTH - (containerWidth / 2) + (ITEM_WIDTH / 2);
-      setTimeout(() => {
-        minScrollRef.current?.scrollTo({ x: Math.max(0, minOffset), animated: false });
-        maxScrollRef.current?.scrollTo({ x: Math.max(0, maxOffset), animated: false });
-      }, 100);
-    }
-  }, [containerWidth]);
+  const getMinPercent = () => ((value.min - MIN_AGE) / RANGE) * 100;
+  const getMaxPercent = () => ((value.max - MIN_AGE) / RANGE) * 100;
 
-  const handleMinScroll = (event: any) => {
-    const x = event.nativeEvent.contentOffset.x;
-    const centerOffset = containerWidth / 2;
-    const index = Math.round((x + centerOffset - ITEM_WIDTH / 2) / ITEM_WIDTH);
-    const clampedIndex = Math.max(0, Math.min(AGE_VALUES.length - 1, index));
-    const newMin = AGE_VALUES[clampedIndex];
-    if (newMin !== value.min && newMin < value.max) {
-      onChange({ ...value, min: newMin });
-    }
-  };
+  const positionToAge = useCallback((x: number) => {
+    if (trackWidth === 0) return MIN_AGE;
+    const percent = Math.max(0, Math.min(1, x / trackWidth));
+    return Math.round(MIN_AGE + percent * RANGE);
+  }, [trackWidth]);
 
-  const handleMaxScroll = (event: any) => {
-    const x = event.nativeEvent.contentOffset.x;
-    const centerOffset = containerWidth / 2;
-    const index = Math.round((x + centerOffset - ITEM_WIDTH / 2) / ITEM_WIDTH);
-    const clampedIndex = Math.max(0, Math.min(AGE_VALUES.length - 1, index));
-    const newMax = AGE_VALUES[clampedIndex];
-    if (newMax !== value.max && newMax > value.min) {
-      onChange({ ...value, max: newMax });
-    }
-  };
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (e) => {
+        const x = e.nativeEvent.locationX;
+        const touchAge = positionToAge(x);
+        
+        // Determine which thumb is closer
+        const distToMin = Math.abs(touchAge - value.min);
+        const distToMax = Math.abs(touchAge - value.max);
+        
+        if (distToMin <= distToMax) {
+          setActiveThumb('min');
+          if (touchAge < value.max) {
+            onChange({ ...value, min: touchAge });
+          }
+        } else {
+          setActiveThumb('max');
+          if (touchAge > value.min) {
+            onChange({ ...value, max: touchAge });
+          }
+        }
+      },
+      onPanResponderMove: (e) => {
+        const x = e.nativeEvent.locationX;
+        const touchAge = positionToAge(x);
+        
+        if (activeThumb === 'min' && touchAge < value.max) {
+          onChange({ ...value, min: Math.max(MIN_AGE, touchAge) });
+        } else if (activeThumb === 'max' && touchAge > value.min) {
+          onChange({ ...value, max: Math.min(MAX_AGE, touchAge) });
+        }
+      },
+      onPanResponderRelease: () => {
+        setActiveThumb(null);
+      },
+      onPanResponderTerminate: () => {
+        setActiveThumb(null);
+      },
+    })
+  ).current;
 
   return (
-    <View style={hStyles.container}>
-      <Text style={hStyles.valueLabel}>{value.min} - {value.max} years</Text>
-      
-      {/* Min Age */}
-      <Text style={hStyles.rangeLabel}>Min Age</Text>
-      <View 
-        style={hStyles.scrollContainer}
-        onLayout={(e) => setContainerWidth(e.nativeEvent.layout.width)}
+    <View style={sliderStyles.container}>
+      <Text style={sliderStyles.label}>{value.min} - {value.max} years</Text>
+      <View
+        style={sliderStyles.trackWrapper}
+        onLayout={(e) => setTrackWidth(e.nativeEvent.layout.width)}
+        {...panResponder.panHandlers}
       >
-        <View style={hStyles.centerIndicator} />
-        <ScrollView
-          ref={minScrollRef}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          snapToInterval={ITEM_WIDTH}
-          decelerationRate="fast"
-          onMomentumScrollEnd={handleMinScroll}
-          contentContainerStyle={{ paddingHorizontal: containerWidth / 2 - ITEM_WIDTH / 2 }}
-        >
-          {AGE_VALUES.map((age, i) => {
-            const isSelected = age === value.min;
-            return (
-              <TouchableOpacity 
-                key={i} 
-                style={hStyles.item}
-                onPress={() => {
-                  if (age < value.max) {
-                    onChange({ ...value, min: age });
-                    const offset = i * ITEM_WIDTH - (containerWidth / 2) + (ITEM_WIDTH / 2);
-                    minScrollRef.current?.scrollTo({ x: Math.max(0, offset), animated: true });
-                  }
-                }}
-              >
-                <Text style={[hStyles.itemText, isSelected && hStyles.itemTextActive]}>{age}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
+        <View style={sliderStyles.track}>
+          <View style={[
+            sliderStyles.trackFillRange,
+            { left: `${getMinPercent()}%`, width: `${getMaxPercent() - getMinPercent()}%` }
+          ]} />
+        </View>
+        {/* Min thumb */}
+        <View style={[sliderStyles.thumbOuter, { left: `${getMinPercent()}%` }]}>
+          <View style={[sliderStyles.thumb, activeThumb === 'min' && sliderStyles.thumbActive]} />
+        </View>
+        {/* Max thumb */}
+        <View style={[sliderStyles.thumbOuter, { left: `${getMaxPercent()}%` }]}>
+          <View style={[sliderStyles.thumb, activeThumb === 'max' && sliderStyles.thumbActive]} />
+        </View>
       </View>
-
-      {/* Max Age */}
-      <Text style={[hStyles.rangeLabel, { marginTop: SPACING.m }]}>Max Age</Text>
-      <View style={hStyles.scrollContainer}>
-        <View style={hStyles.centerIndicator} />
-        <ScrollView
-          ref={maxScrollRef}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          snapToInterval={ITEM_WIDTH}
-          decelerationRate="fast"
-          onMomentumScrollEnd={handleMaxScroll}
-          contentContainerStyle={{ paddingHorizontal: containerWidth / 2 - ITEM_WIDTH / 2 }}
-        >
-          {AGE_VALUES.map((age, i) => {
-            const isSelected = age === value.max;
-            return (
-              <TouchableOpacity 
-                key={i} 
-                style={hStyles.item}
-                onPress={() => {
-                  if (age > value.min) {
-                    onChange({ ...value, max: age });
-                    const offset = i * ITEM_WIDTH - (containerWidth / 2) + (ITEM_WIDTH / 2);
-                    maxScrollRef.current?.scrollTo({ x: Math.max(0, offset), animated: true });
-                  }
-                }}
-              >
-                <Text style={[hStyles.itemText, isSelected && hStyles.itemTextActive]}>{age}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
+      <View style={sliderStyles.labelsRow}>
+        <Text style={sliderStyles.minLabel}>{MIN_AGE}</Text>
+        <Text style={sliderStyles.maxLabel}>{MAX_AGE}</Text>
       </View>
     </View>
   );
 }
 
-// Horizontal Picker Styles
-const hStyles = StyleSheet.create({
+// Slider Styles
+const sliderStyles = StyleSheet.create({
   container: {
     backgroundColor: COLORS.bgCard,
     borderRadius: BORDER_RADIUS.l,
     padding: SPACING.m,
     marginTop: SPACING.s,
   },
-  valueLabel: {
+  label: {
     fontSize: 16,
     fontWeight: '600',
     color: COLORS.gold,
     textAlign: 'center',
-    marginBottom: SPACING.m,
+    marginBottom: SPACING.l,
   },
-  rangeLabel: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-    marginBottom: SPACING.xs,
-    fontWeight: '600',
-  },
-  scrollContainer: {
-    height: 60,
+  trackWrapper: {
+    height: 40,
+    justifyContent: 'center',
     position: 'relative',
   },
-  centerIndicator: {
-    position: 'absolute',
-    top: 8,
-    left: '50%',
-    marginLeft: -35,
-    width: 70,
-    height: 44,
-    backgroundColor: COLORS.primary,
-    borderRadius: BORDER_RADIUS.m,
-    opacity: 0.2,
-    zIndex: 0,
+  track: {
+    height: 6,
+    backgroundColor: COLORS.border,
+    borderRadius: 3,
+    overflow: 'hidden',
   },
-  item: {
-    width: ITEM_WIDTH,
-    height: 60,
+  trackFill: {
+    height: '100%',
+    backgroundColor: COLORS.primary,
+    borderRadius: 3,
+  },
+  trackFillRange: {
+    position: 'absolute',
+    height: '100%',
+    backgroundColor: COLORS.primary,
+  },
+  thumbOuter: {
+    position: 'absolute',
+    top: '50%',
+    marginTop: -16,
+    marginLeft: -16,
+    width: 32,
+    height: 32,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  itemText: {
-    fontSize: 20,
+  thumb: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: COLORS.white,
+    borderWidth: 3,
+    borderColor: COLORS.primary,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  thumbActive: {
+    transform: [{ scale: 1.15 }],
+    borderColor: COLORS.primaryDark,
+  },
+  labelsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: SPACING.s,
+  },
+  minLabel: {
+    fontSize: 12,
     color: COLORS.textMuted,
-    fontWeight: '500',
   },
-  itemTextActive: {
-    color: COLORS.text,
-    fontWeight: '700',
-    fontSize: 24,
-  },
-  unitText: {
-    fontSize: 10,
+  maxLabel: {
+    fontSize: 12,
     color: COLORS.textMuted,
-    marginTop: -2,
-  },
-  unitTextActive: {
-    color: COLORS.text,
   },
 });
 
-// Height Picker Component (Old style with feet/inches selection)
-function HeightPicker({ value, onChange }: { value: HeightFilter; onChange: (v: HeightFilter) => void }) {
+// ============================================
+// iOS WHEEL PICKER - Height (like DOB picker)
+// ============================================
+function HeightWheelPicker({ value, onChange }: { value: HeightFilter; onChange: (v: HeightFilter) => void }) {
   const [isMetric, setIsMetric] = useState(value.unit === 'metric');
-  const FEET = [3, 4, 5, 6, 7];
-  const INCHES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
-  const CM_MIN = 120;
-  const CM_MAX = 220;
+  
+  // Refs for scroll views
+  const minFeetRef = useRef<ScrollView>(null);
+  const minInchRef = useRef<ScrollView>(null);
+  const maxFeetRef = useRef<ScrollView>(null);
+  const maxInchRef = useRef<ScrollView>(null);
+  const minCmRef = useRef<ScrollView>(null);
+  const maxCmRef = useRef<ScrollView>(null);
 
-  const toggleUnit = () => {
-    const newIsMetric = !isMetric;
-    setIsMetric(newIsMetric);
-    onChange({ ...value, unit: newIsMetric ? 'metric' : 'imperial' });
+  // Calculate indices
+  const minFeetIdx = FEET.indexOf(value.minFeet) >= 0 ? FEET.indexOf(value.minFeet) : 1;
+  const minInchIdx = value.minInches || 0;
+  const maxFeetIdx = FEET.indexOf(value.maxFeet) >= 0 ? FEET.indexOf(value.maxFeet) : 3;
+  const maxInchIdx = value.maxInches || 0;
+  const minCmIdx = CM_VALUES.indexOf(value.minCm) >= 0 ? CM_VALUES.indexOf(value.minCm) : 30;
+  const maxCmIdx = CM_VALUES.indexOf(value.maxCm) >= 0 ? CM_VALUES.indexOf(value.maxCm) : 70;
+
+  // Scroll to initial positions
+  useEffect(() => {
+    setTimeout(() => {
+      if (isMetric) {
+        minCmRef.current?.scrollTo({ y: minCmIdx * ITEM_HEIGHT, animated: false });
+        maxCmRef.current?.scrollTo({ y: maxCmIdx * ITEM_HEIGHT, animated: false });
+      } else {
+        minFeetRef.current?.scrollTo({ y: minFeetIdx * ITEM_HEIGHT, animated: false });
+        minInchRef.current?.scrollTo({ y: minInchIdx * ITEM_HEIGHT, animated: false });
+        maxFeetRef.current?.scrollTo({ y: maxFeetIdx * ITEM_HEIGHT, animated: false });
+        maxInchRef.current?.scrollTo({ y: maxInchIdx * ITEM_HEIGHT, animated: false });
+      }
+    }, 100);
+  }, [isMetric]);
+
+  const handleMinFeetScroll = (e: any) => {
+    const y = e.nativeEvent.contentOffset.y;
+    const idx = Math.round(y / ITEM_HEIGHT);
+    const clampedIdx = Math.max(0, Math.min(FEET.length - 1, idx));
+    if (FEET[clampedIdx] !== value.minFeet) {
+      onChange({ ...value, minFeet: FEET[clampedIdx] });
+    }
   };
 
-  const updateHeight = (field: string, val: number) => {
-    onChange({ ...value, [field]: val });
+  const handleMinInchScroll = (e: any) => {
+    const y = e.nativeEvent.contentOffset.y;
+    const idx = Math.round(y / ITEM_HEIGHT);
+    const clampedIdx = Math.max(0, Math.min(INCHES.length - 1, idx));
+    if (INCHES[clampedIdx] !== value.minInches) {
+      onChange({ ...value, minInches: INCHES[clampedIdx] });
+    }
+  };
+
+  const handleMaxFeetScroll = (e: any) => {
+    const y = e.nativeEvent.contentOffset.y;
+    const idx = Math.round(y / ITEM_HEIGHT);
+    const clampedIdx = Math.max(0, Math.min(FEET.length - 1, idx));
+    if (FEET[clampedIdx] !== value.maxFeet) {
+      onChange({ ...value, maxFeet: FEET[clampedIdx] });
+    }
+  };
+
+  const handleMaxInchScroll = (e: any) => {
+    const y = e.nativeEvent.contentOffset.y;
+    const idx = Math.round(y / ITEM_HEIGHT);
+    const clampedIdx = Math.max(0, Math.min(INCHES.length - 1, idx));
+    if (INCHES[clampedIdx] !== value.maxInches) {
+      onChange({ ...value, maxInches: INCHES[clampedIdx] });
+    }
+  };
+
+  const handleMinCmScroll = (e: any) => {
+    const y = e.nativeEvent.contentOffset.y;
+    const idx = Math.round(y / ITEM_HEIGHT);
+    const clampedIdx = Math.max(0, Math.min(CM_VALUES.length - 1, idx));
+    if (CM_VALUES[clampedIdx] !== value.minCm) {
+      onChange({ ...value, minCm: CM_VALUES[clampedIdx] });
+    }
+  };
+
+  const handleMaxCmScroll = (e: any) => {
+    const y = e.nativeEvent.contentOffset.y;
+    const idx = Math.round(y / ITEM_HEIGHT);
+    const clampedIdx = Math.max(0, Math.min(CM_VALUES.length - 1, idx));
+    if (CM_VALUES[clampedIdx] !== value.maxCm) {
+      onChange({ ...value, maxCm: CM_VALUES[clampedIdx] });
+    }
   };
 
   const minDisplay = isMetric ? `${value.minCm} cm` : `${value.minFeet}'${value.minInches}"`;
   const maxDisplay = isMetric ? `${value.maxCm} cm` : `${value.maxFeet}'${value.maxInches}"`;
 
   return (
-    <View style={heightStyles.container}>
+    <View style={wheelStyles.container}>
       {/* Unit Toggle */}
-      <View style={heightStyles.toggleRow}>
+      <View style={wheelStyles.toggleRow}>
         <TouchableOpacity
-          style={[heightStyles.toggleBtn, !isMetric && heightStyles.toggleBtnActive]}
+          style={[wheelStyles.toggleBtn, !isMetric && wheelStyles.toggleBtnActive]}
           onPress={() => { setIsMetric(false); onChange({ ...value, unit: 'imperial' }); }}
         >
-          <Text style={[heightStyles.toggleText, !isMetric && heightStyles.toggleTextActive]}>ft/in</Text>
+          <Text style={[wheelStyles.toggleText, !isMetric && wheelStyles.toggleTextActive]}>ft/in</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[heightStyles.toggleBtn, isMetric && heightStyles.toggleBtnActive]}
+          style={[wheelStyles.toggleBtn, isMetric && wheelStyles.toggleBtnActive]}
           onPress={() => { setIsMetric(true); onChange({ ...value, unit: 'metric' }); }}
         >
-          <Text style={[heightStyles.toggleText, isMetric && heightStyles.toggleTextActive]}>cm</Text>
+          <Text style={[wheelStyles.toggleText, isMetric && wheelStyles.toggleTextActive]}>cm</Text>
         </TouchableOpacity>
       </View>
 
-      <Text style={heightStyles.valueLabel}>{minDisplay} - {maxDisplay}</Text>
+      <Text style={wheelStyles.valueLabel}>{minDisplay} - {maxDisplay}</Text>
 
       {!isMetric ? (
-        <View style={heightStyles.pickerRow}>
+        <View style={wheelStyles.heightContainer}>
           {/* Min Height */}
-          <View style={heightStyles.pickerCol}>
-            <Text style={heightStyles.colLabel}>Min Height</Text>
-            <View style={heightStyles.selectRow}>
-              <View style={heightStyles.selectBox}>
-                <Text style={heightStyles.selectLabel}>ft</Text>
-                <ScrollView style={heightStyles.selectScroll} showsVerticalScrollIndicator={false}>
-                  {FEET.map(f => (
-                    <TouchableOpacity
-                      key={f}
-                      style={[heightStyles.selectItem, value.minFeet === f && heightStyles.selectItemActive]}
-                      onPress={() => updateHeight('minFeet', f)}
-                    >
-                      <Text style={[heightStyles.selectText, value.minFeet === f && heightStyles.selectTextActive]}>{f}'</Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
+          <View style={wheelStyles.heightSection}>
+            <Text style={wheelStyles.sectionLabel}>Min Height</Text>
+            <View style={wheelStyles.wheelRow}>
+              {/* Feet */}
+              <View style={wheelStyles.wheelColumn}>
+                <Text style={wheelStyles.wheelLabel}>ft</Text>
+                <View style={wheelStyles.wheelWrapper}>
+                  <View style={wheelStyles.wheelHighlight} />
+                  <ScrollView
+                    ref={minFeetRef}
+                    style={wheelStyles.wheelScroll}
+                    showsVerticalScrollIndicator={false}
+                    snapToInterval={ITEM_HEIGHT}
+                    decelerationRate="fast"
+                    onMomentumScrollEnd={handleMinFeetScroll}
+                    contentContainerStyle={{ paddingVertical: ITEM_HEIGHT }}
+                    nestedScrollEnabled
+                  >
+                    {FEET.map((f, i) => (
+                      <View key={i} style={wheelStyles.wheelItem}>
+                        <Text style={[wheelStyles.wheelItemText, minFeetIdx === i && wheelStyles.wheelItemTextActive]}>
+                          {f}'
+                        </Text>
+                      </View>
+                    ))}
+                  </ScrollView>
+                </View>
               </View>
-              <View style={heightStyles.selectBox}>
-                <Text style={heightStyles.selectLabel}>in</Text>
-                <ScrollView style={heightStyles.selectScroll} showsVerticalScrollIndicator={false}>
-                  {INCHES.map(i => (
-                    <TouchableOpacity
-                      key={i}
-                      style={[heightStyles.selectItem, value.minInches === i && heightStyles.selectItemActive]}
-                      onPress={() => updateHeight('minInches', i)}
-                    >
-                      <Text style={[heightStyles.selectText, value.minInches === i && heightStyles.selectTextActive]}>{i}"</Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
+              {/* Inches */}
+              <View style={wheelStyles.wheelColumn}>
+                <Text style={wheelStyles.wheelLabel}>in</Text>
+                <View style={wheelStyles.wheelWrapper}>
+                  <View style={wheelStyles.wheelHighlight} />
+                  <ScrollView
+                    ref={minInchRef}
+                    style={wheelStyles.wheelScroll}
+                    showsVerticalScrollIndicator={false}
+                    snapToInterval={ITEM_HEIGHT}
+                    decelerationRate="fast"
+                    onMomentumScrollEnd={handleMinInchScroll}
+                    contentContainerStyle={{ paddingVertical: ITEM_HEIGHT }}
+                    nestedScrollEnabled
+                  >
+                    {INCHES.map((inch, i) => (
+                      <View key={i} style={wheelStyles.wheelItem}>
+                        <Text style={[wheelStyles.wheelItemText, minInchIdx === i && wheelStyles.wheelItemTextActive]}>
+                          {inch}"
+                        </Text>
+                      </View>
+                    ))}
+                  </ScrollView>
+                </View>
               </View>
             </View>
           </View>
 
           {/* Max Height */}
-          <View style={heightStyles.pickerCol}>
-            <Text style={heightStyles.colLabel}>Max Height</Text>
-            <View style={heightStyles.selectRow}>
-              <View style={heightStyles.selectBox}>
-                <Text style={heightStyles.selectLabel}>ft</Text>
-                <ScrollView style={heightStyles.selectScroll} showsVerticalScrollIndicator={false}>
-                  {FEET.map(f => (
-                    <TouchableOpacity
-                      key={f}
-                      style={[heightStyles.selectItem, value.maxFeet === f && heightStyles.selectItemActive]}
-                      onPress={() => updateHeight('maxFeet', f)}
-                    >
-                      <Text style={[heightStyles.selectText, value.maxFeet === f && heightStyles.selectTextActive]}>{f}'</Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
+          <View style={wheelStyles.heightSection}>
+            <Text style={wheelStyles.sectionLabel}>Max Height</Text>
+            <View style={wheelStyles.wheelRow}>
+              {/* Feet */}
+              <View style={wheelStyles.wheelColumn}>
+                <Text style={wheelStyles.wheelLabel}>ft</Text>
+                <View style={wheelStyles.wheelWrapper}>
+                  <View style={wheelStyles.wheelHighlight} />
+                  <ScrollView
+                    ref={maxFeetRef}
+                    style={wheelStyles.wheelScroll}
+                    showsVerticalScrollIndicator={false}
+                    snapToInterval={ITEM_HEIGHT}
+                    decelerationRate="fast"
+                    onMomentumScrollEnd={handleMaxFeetScroll}
+                    contentContainerStyle={{ paddingVertical: ITEM_HEIGHT }}
+                    nestedScrollEnabled
+                  >
+                    {FEET.map((f, i) => (
+                      <View key={i} style={wheelStyles.wheelItem}>
+                        <Text style={[wheelStyles.wheelItemText, maxFeetIdx === i && wheelStyles.wheelItemTextActive]}>
+                          {f}'
+                        </Text>
+                      </View>
+                    ))}
+                  </ScrollView>
+                </View>
               </View>
-              <View style={heightStyles.selectBox}>
-                <Text style={heightStyles.selectLabel}>in</Text>
-                <ScrollView style={heightStyles.selectScroll} showsVerticalScrollIndicator={false}>
-                  {INCHES.map(i => (
-                    <TouchableOpacity
-                      key={i}
-                      style={[heightStyles.selectItem, value.maxInches === i && heightStyles.selectItemActive]}
-                      onPress={() => updateHeight('maxInches', i)}
-                    >
-                      <Text style={[heightStyles.selectText, value.maxInches === i && heightStyles.selectTextActive]}>{i}"</Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
+              {/* Inches */}
+              <View style={wheelStyles.wheelColumn}>
+                <Text style={wheelStyles.wheelLabel}>in</Text>
+                <View style={wheelStyles.wheelWrapper}>
+                  <View style={wheelStyles.wheelHighlight} />
+                  <ScrollView
+                    ref={maxInchRef}
+                    style={wheelStyles.wheelScroll}
+                    showsVerticalScrollIndicator={false}
+                    snapToInterval={ITEM_HEIGHT}
+                    decelerationRate="fast"
+                    onMomentumScrollEnd={handleMaxInchScroll}
+                    contentContainerStyle={{ paddingVertical: ITEM_HEIGHT }}
+                    nestedScrollEnabled
+                  >
+                    {INCHES.map((inch, i) => (
+                      <View key={i} style={wheelStyles.wheelItem}>
+                        <Text style={[wheelStyles.wheelItemText, maxInchIdx === i && wheelStyles.wheelItemTextActive]}>
+                          {inch}"
+                        </Text>
+                      </View>
+                    ))}
+                  </ScrollView>
+                </View>
               </View>
             </View>
           </View>
         </View>
       ) : (
-        <View style={heightStyles.cmRow}>
-          <View style={heightStyles.cmCol}>
-            <Text style={heightStyles.colLabel}>Min (cm)</Text>
-            <ScrollView style={heightStyles.cmScroll} showsVerticalScrollIndicator={false}>
-              {Array.from({ length: CM_MAX - CM_MIN + 1 }, (_, i) => CM_MIN + i).map(cm => (
-                <TouchableOpacity
-                  key={cm}
-                  style={[heightStyles.selectItem, value.minCm === cm && heightStyles.selectItemActive]}
-                  onPress={() => updateHeight('minCm', cm)}
-                >
-                  <Text style={[heightStyles.selectText, value.minCm === cm && heightStyles.selectTextActive]}>{cm}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+        <View style={wheelStyles.cmContainer}>
+          {/* Min CM */}
+          <View style={wheelStyles.cmSection}>
+            <Text style={wheelStyles.sectionLabel}>Min Height</Text>
+            <View style={wheelStyles.wheelWrapper}>
+              <View style={wheelStyles.wheelHighlight} />
+              <ScrollView
+                ref={minCmRef}
+                style={wheelStyles.wheelScroll}
+                showsVerticalScrollIndicator={false}
+                snapToInterval={ITEM_HEIGHT}
+                decelerationRate="fast"
+                onMomentumScrollEnd={handleMinCmScroll}
+                contentContainerStyle={{ paddingVertical: ITEM_HEIGHT }}
+                nestedScrollEnabled
+              >
+                {CM_VALUES.map((cm, i) => (
+                  <View key={i} style={wheelStyles.wheelItem}>
+                    <Text style={[wheelStyles.wheelItemText, minCmIdx === i && wheelStyles.wheelItemTextActive]}>
+                      {cm} cm
+                    </Text>
+                  </View>
+                ))}
+              </ScrollView>
+            </View>
           </View>
-          <View style={heightStyles.cmCol}>
-            <Text style={heightStyles.colLabel}>Max (cm)</Text>
-            <ScrollView style={heightStyles.cmScroll} showsVerticalScrollIndicator={false}>
-              {Array.from({ length: CM_MAX - CM_MIN + 1 }, (_, i) => CM_MIN + i).map(cm => (
-                <TouchableOpacity
-                  key={cm}
-                  style={[heightStyles.selectItem, value.maxCm === cm && heightStyles.selectItemActive]}
-                  onPress={() => updateHeight('maxCm', cm)}
-                >
-                  <Text style={[heightStyles.selectText, value.maxCm === cm && heightStyles.selectTextActive]}>{cm}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+
+          {/* Max CM */}
+          <View style={wheelStyles.cmSection}>
+            <Text style={wheelStyles.sectionLabel}>Max Height</Text>
+            <View style={wheelStyles.wheelWrapper}>
+              <View style={wheelStyles.wheelHighlight} />
+              <ScrollView
+                ref={maxCmRef}
+                style={wheelStyles.wheelScroll}
+                showsVerticalScrollIndicator={false}
+                snapToInterval={ITEM_HEIGHT}
+                decelerationRate="fast"
+                onMomentumScrollEnd={handleMaxCmScroll}
+                contentContainerStyle={{ paddingVertical: ITEM_HEIGHT }}
+                nestedScrollEnabled
+              >
+                {CM_VALUES.map((cm, i) => (
+                  <View key={i} style={wheelStyles.wheelItem}>
+                    <Text style={[wheelStyles.wheelItemText, maxCmIdx === i && wheelStyles.wheelItemTextActive]}>
+                      {cm} cm
+                    </Text>
+                  </View>
+                ))}
+              </ScrollView>
+            </View>
           </View>
         </View>
       )}
@@ -445,7 +584,8 @@ function HeightPicker({ value, onChange }: { value: HeightFilter; onChange: (v: 
   );
 }
 
-const heightStyles = StyleSheet.create({
+// Wheel Picker Styles (same as DOB picker)
+const wheelStyles = StyleSheet.create({
   container: {
     backgroundColor: COLORS.bgCard,
     borderRadius: BORDER_RADIUS.l,
@@ -460,7 +600,7 @@ const heightStyles = StyleSheet.create({
   },
   toggleBtn: {
     paddingVertical: 8,
-    paddingHorizontal: 20,
+    paddingHorizontal: 24,
     borderRadius: BORDER_RADIUS.full,
     backgroundColor: COLORS.bgInput,
   },
@@ -482,67 +622,79 @@ const heightStyles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: SPACING.m,
   },
-  pickerRow: {
+  heightContainer: {
     flexDirection: 'row',
     justifyContent: 'space-around',
   },
-  pickerCol: {
+  heightSection: {
     alignItems: 'center',
   },
-  colLabel: {
+  sectionLabel: {
     fontSize: 12,
     color: COLORS.textSecondary,
     marginBottom: SPACING.s,
     fontWeight: '600',
   },
-  selectRow: {
+  wheelRow: {
     flexDirection: 'row',
-    gap: SPACING.s,
+    gap: SPACING.xs,
   },
-  selectBox: {
+  wheelColumn: {
     alignItems: 'center',
   },
-  selectLabel: {
-    fontSize: 10,
+  wheelLabel: {
+    fontSize: 11,
     color: COLORS.textMuted,
-    marginBottom: 4,
+    marginBottom: SPACING.xs,
+    fontWeight: '600',
+    letterSpacing: 0.5,
   },
-  selectScroll: {
-    height: 120,
-    width: 50,
+  wheelWrapper: {
+    height: ITEM_HEIGHT * VISIBLE_ITEMS,
+    width: 60,
+    position: 'relative',
+    overflow: 'hidden',
   },
-  selectItem: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
+  wheelHighlight: {
+    position: 'absolute',
+    top: ITEM_HEIGHT,
+    left: 2,
+    right: 2,
+    height: ITEM_HEIGHT,
+    backgroundColor: COLORS.primary,
     borderRadius: BORDER_RADIUS.s,
+    opacity: 0.15,
+  },
+  wheelScroll: {
+    height: ITEM_HEIGHT * VISIBLE_ITEMS,
+  },
+  wheelItem: {
+    height: ITEM_HEIGHT,
+    justifyContent: 'center',
     alignItems: 'center',
   },
-  selectItemActive: {
-    backgroundColor: 'rgba(229,9,20,0.2)',
-  },
-  selectText: {
-    fontSize: 16,
+  wheelItemText: {
+    fontSize: 18,
     color: COLORS.textMuted,
+    fontWeight: '500',
   },
-  selectTextActive: {
-    color: COLORS.primary,
+  wheelItemTextActive: {
+    color: COLORS.text,
     fontWeight: '700',
+    fontSize: 20,
   },
-  cmRow: {
+  cmContainer: {
     flexDirection: 'row',
     justifyContent: 'space-around',
   },
-  cmCol: {
+  cmSection: {
     alignItems: 'center',
-    flex: 1,
-  },
-  cmScroll: {
-    height: 150,
-    width: 80,
   },
 });
 
-// Info Tooltip Component
+// ============================================
+// INFO TOOLTIP
+// ============================================
 function InfoTooltip({ visible, onClose, title, description }: { 
   visible: boolean; onClose: () => void; title: string; description: string 
 }) {
@@ -575,7 +727,9 @@ const tooltipStyles = StyleSheet.create({
   closeBtnText: { fontSize: 14, fontWeight: '600', color: COLORS.white, textAlign: 'center' },
 });
 
-// Filter Section Component (Collapsible cards)
+// ============================================
+// FILTER SECTION CARD (Collapsible)
+// ============================================
 function FilterSectionCard({ config, section, onUpdate }: {
   config: FilterConfig; section: FilterSection; onUpdate: (s: FilterSection) => void;
 }) {
@@ -659,7 +813,9 @@ const fStyles = StyleSheet.create({
   chipTextActive: { color: COLORS.primary, fontWeight: '600' },
 });
 
-// Main Filters Screen
+// ============================================
+// MAIN FILTERS SCREEN
+// ============================================
 export default function FiltersScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
@@ -683,14 +839,12 @@ export default function FiltersScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
       <View style={styles.headerBar}>
-        <View style={styles.headerLeft}>
-          <Text style={styles.headerTitle}>Preferences & Filters</Text>
-        </View>
+        <Text style={styles.headerTitle}>Preferences & Filters</Text>
         <Text style={styles.optionalLabel}>(Optional)</Text>
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* Let's Start Button - Top */}
+        {/* Start Button - Top */}
         <TouchableOpacity style={styles.startBtnTop} onPress={handleStart} activeOpacity={0.8}>
           <Ionicons name="film-outline" size={20} color={COLORS.white} />
           <Text style={styles.startBtnTopText}>{buttonText}</Text>
@@ -701,7 +855,7 @@ export default function FiltersScreen() {
           Set your preferences to find the perfect movie companions. These are all optional and can be changed later.
         </Text>
 
-        {/* Distance */}
+        {/* Distance Radius - Horizontal Slider */}
         <View style={pStyles.section}>
           <Text style={pStyles.title}>Distance Radius</Text>
           <View style={pStyles.checkboxRow}>
@@ -730,13 +884,13 @@ export default function FiltersScreen() {
               </TouchableOpacity>
             </TouchableOpacity>
           </View>
-          <HorizontalDistancePicker
+          <DistanceSlider
             value={filters.distance.radius}
             onChange={(v) => setFilters(prev => ({ ...prev, distance: { ...prev.distance, radius: v } }))}
           />
         </View>
 
-        {/* Age Range */}
+        {/* Age Range - Horizontal Slider */}
         <View style={pStyles.section}>
           <Text style={pStyles.title}>Age Range</Text>
           <View style={pStyles.checkboxRow}>
@@ -765,13 +919,13 @@ export default function FiltersScreen() {
               </TouchableOpacity>
             </TouchableOpacity>
           </View>
-          <HorizontalAgeRangePicker
+          <AgeRangeSlider
             value={filters.age}
             onChange={(v) => setFilters(prev => ({ ...prev, age: v }))}
           />
         </View>
 
-        {/* Height */}
+        {/* Height - iOS Wheel Picker */}
         <View style={pStyles.section}>
           <Text style={pStyles.title}>Height Preference</Text>
           <View style={pStyles.checkboxRow}>
@@ -800,7 +954,7 @@ export default function FiltersScreen() {
               </TouchableOpacity>
             </TouchableOpacity>
           </View>
-          <HeightPicker
+          <HeightWheelPicker
             value={filters.height}
             onChange={(v) => setFilters(prev => ({ ...prev, height: v }))}
           />
@@ -823,102 +977,53 @@ export default function FiltersScreen() {
         </TouchableOpacity>
       </ScrollView>
 
-      {/* Info Tooltips */}
+      {/* Tooltips */}
       <InfoTooltip
         visible={showExclusiveInfo}
         onClose={() => setShowExclusiveInfo(false)}
         title="Exclusive Filter"
-        description="When enabled, you will only see profiles that exactly match the selected preferences. This creates a strict filter."
+        description="When enabled, you will only see profiles that exactly match the selected preferences."
       />
       <InfoTooltip
         visible={showExpandInfo}
         onClose={() => setShowExpandInfo(false)}
         title="Expand If Run Out"
-        description="When enabled, if we run out of matches with your current filters, we'll automatically expand to show more profiles that closely match your preferences."
+        description="When enabled, if we run out of matches, we'll expand to show profiles that closely match your preferences."
       />
     </SafeAreaView>
   );
 }
 
-// Primary Section Styles
 const pStyles = StyleSheet.create({
-  section: {
-    marginBottom: SPACING.l,
-  },
-  title: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.text,
-    marginBottom: SPACING.s,
-  },
-  checkboxRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: SPACING.m,
-    marginBottom: SPACING.xs,
-  },
-  checkItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.xs,
-  },
-  checkBox: {
-    width: 20,
-    height: 20,
-    borderRadius: 4,
-    borderWidth: 1.5,
-    borderColor: COLORS.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  checkBoxChecked: {
-    backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
-  },
-  checkLabel: {
-    fontSize: 13,
-    color: COLORS.textSecondary,
-  },
+  section: { marginBottom: SPACING.l },
+  title: { fontSize: 16, fontWeight: '600', color: COLORS.text, marginBottom: SPACING.s },
+  checkboxRow: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.m, marginBottom: SPACING.xs },
+  checkItem: { flexDirection: 'row', alignItems: 'center', gap: SPACING.xs },
+  checkBox: { width: 20, height: 20, borderRadius: 4, borderWidth: 1.5, borderColor: COLORS.border, alignItems: 'center', justifyContent: 'center' },
+  checkBoxChecked: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+  checkLabel: { fontSize: 13, color: COLORS.textSecondary },
 });
 
-// Main Styles
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
   headerBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: SPACING.l,
-    paddingVertical: SPACING.m,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: SPACING.l, paddingVertical: SPACING.m,
+    borderBottomWidth: 1, borderBottomColor: COLORS.border,
   },
-  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: SPACING.s },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: COLORS.text },
   optionalLabel: { fontSize: 12, color: COLORS.textMuted, fontStyle: 'italic' },
   scroll: { flex: 1 },
   scrollContent: { padding: SPACING.l, paddingBottom: SPACING.xxl },
   startBtnTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: SPACING.s,
-    backgroundColor: COLORS.primary,
-    paddingVertical: 14,
-    borderRadius: BORDER_RADIUS.full,
-    marginBottom: SPACING.l,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SPACING.s,
+    backgroundColor: COLORS.primary, paddingVertical: 14, borderRadius: BORDER_RADIUS.full, marginBottom: SPACING.l,
   },
   startBtnTopText: { fontSize: 16, fontWeight: '600', color: COLORS.white },
   intro: { fontSize: 15, color: COLORS.textSecondary, marginBottom: SPACING.l, lineHeight: 22 },
   startBtn: {
-    backgroundColor: COLORS.primary,
-    paddingVertical: 18,
-    borderRadius: BORDER_RADIUS.full,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: SPACING.s,
-    marginTop: SPACING.m,
+    backgroundColor: COLORS.primary, paddingVertical: 18, borderRadius: BORDER_RADIUS.full,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SPACING.s, marginTop: SPACING.m,
   },
   startBtnText: { fontSize: 18, fontWeight: 'bold', color: COLORS.white, letterSpacing: 1 },
 });
