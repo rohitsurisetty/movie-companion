@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, Dimensions, Image, TouchableOpacity,
-  ActivityIndicator, Modal, Pressable, ScrollView,
+  ActivityIndicator, Modal, Pressable, ScrollView, PanResponder,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -30,7 +30,7 @@ const REQUIRED_SWIPES = 20;
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
-// Movie Details Modal
+// Movie Details Modal - Scrollable & Swipe Down to Dismiss
 function MovieDetailsModal({
   visible, onClose, movieId, colors,
 }: {
@@ -41,10 +41,13 @@ function MovieDetailsModal({
 }) {
   const [details, setDetails] = useState<MovieDetail | null>(null);
   const [loading, setLoading] = useState(false);
+  const [translateY, setTranslateY] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
 
   useEffect(() => {
     if (visible && movieId > 0) {
       fetchDetails();
+      setTranslateY(0);
     }
   }, [visible, movieId]);
 
@@ -63,11 +66,63 @@ function MovieDetailsModal({
     }
   };
 
+  // PanResponder for swipe down to dismiss
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        // Only respond to vertical swipes starting from the top
+        return Math.abs(gestureState.dy) > 5 && Math.abs(gestureState.dx) < 20;
+      },
+      onPanResponderGrant: () => {
+        setIsDragging(true);
+      },
+      onPanResponderMove: (_, gestureState) => {
+        // Only allow downward movement
+        if (gestureState.dy > 0) {
+          setTranslateY(gestureState.dy);
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        setIsDragging(false);
+        // Close if dragged down enough
+        if (gestureState.dy > 100 || gestureState.vy > 0.5) {
+          onClose();
+          setTranslateY(0);
+        } else {
+          setTranslateY(0);
+        }
+      },
+      onPanResponderTerminate: () => {
+        setIsDragging(false);
+        setTranslateY(0);
+      },
+    })
+  ).current;
+
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={detailStyles.overlay} onPress={onClose}>
-        <Pressable style={[detailStyles.container, { backgroundColor: colors.bgCard }]} onPress={(e) => e.stopPropagation()}>
-          <View style={detailStyles.handle} />
+        <Pressable 
+          style={[
+            detailStyles.container, 
+            { 
+              backgroundColor: colors.bgCard,
+              transform: [{ translateY }],
+              opacity: isDragging ? 0.95 : 1,
+            }
+          ]} 
+          onPress={(e) => e.stopPropagation()}
+        >
+          {/* Swipe Handle */}
+          <View {...panResponder.panHandlers}>
+            <View style={detailStyles.handleArea}>
+              <View style={detailStyles.handle} />
+              <Text style={[detailStyles.swipeHint, { color: colors.textMuted }]}>
+                Swipe down to close
+              </Text>
+            </View>
+          </View>
           
           {loading ? (
             <View style={detailStyles.loadingContainer}>
@@ -75,7 +130,12 @@ function MovieDetailsModal({
               <Text style={[detailStyles.loadingText, { color: colors.textSecondary }]}>Loading details...</Text>
             </View>
           ) : details ? (
-            <ScrollView style={detailStyles.scroll} showsVerticalScrollIndicator={false}>
+            <ScrollView 
+              style={detailStyles.scroll} 
+              showsVerticalScrollIndicator={true}
+              contentContainerStyle={detailStyles.scrollContent}
+              bounces={true}
+            >
               {/* Header with poster and title */}
               <View style={detailStyles.header}>
                 {details.poster_path && (
@@ -86,7 +146,7 @@ function MovieDetailsModal({
                   />
                 )}
                 <View style={detailStyles.headerInfo}>
-                  <Text style={[detailStyles.title, { color: colors.text }]} numberOfLines={2}>{details.title}</Text>
+                  <Text style={[detailStyles.title, { color: colors.text }]} numberOfLines={3}>{details.title}</Text>
                   {details.release_date && (
                     <Text style={[detailStyles.year, { color: colors.textSecondary }]}>
                       {details.release_date.split('-')[0]}
@@ -106,6 +166,11 @@ function MovieDetailsModal({
                       <Text style={[detailStyles.rating, { color: colors.gold }]}>
                         {details.vote_average.toFixed(1)}/10
                       </Text>
+                      {details.vote_count && (
+                        <Text style={[detailStyles.voteCount, { color: colors.textMuted }]}>
+                          ({details.vote_count.toLocaleString()} votes)
+                        </Text>
+                      )}
                     </View>
                   )}
                 </View>
@@ -149,7 +214,7 @@ function MovieDetailsModal({
                 <View style={detailStyles.section}>
                   <Text style={[detailStyles.sectionTitle, { color: colors.textSecondary }]}>Cast</Text>
                   <View style={detailStyles.castList}>
-                    {details.cast.slice(0, 8).map((member, i) => (
+                    {details.cast.slice(0, 10).map((member, i) => (
                       <View key={i} style={detailStyles.castItem}>
                         <View style={[detailStyles.castAvatar, { backgroundColor: colors.bgInput }]}>
                           <Ionicons name="person" size={18} color={colors.textMuted} />
@@ -169,6 +234,9 @@ function MovieDetailsModal({
                   </View>
                 </View>
               )}
+              
+              {/* Bottom padding for scroll */}
+              <View style={{ height: 40 }} />
             </ScrollView>
           ) : (
             <View style={detailStyles.errorContainer}>
@@ -184,6 +252,7 @@ function MovieDetailsModal({
             onPress={onClose}
             testID="close-details-btn"
           >
+            <Ionicons name="chevron-down" size={20} color="#FFF" />
             <Text style={detailStyles.closeBtnText}>Close</Text>
           </TouchableOpacity>
         </Pressable>
@@ -197,21 +266,28 @@ const detailStyles = StyleSheet.create({
   container: { 
     borderTopLeftRadius: 24, borderTopRightRadius: 24, 
     padding: SPACING.l, paddingBottom: SPACING.xxl,
-    maxHeight: '85%',
+    maxHeight: '90%',
   },
-  handle: { width: 40, height: 4, backgroundColor: '#555', borderRadius: 2, alignSelf: 'center', marginBottom: SPACING.m },
+  handleArea: { 
+    alignItems: 'center', 
+    paddingBottom: SPACING.m,
+  },
+  handle: { width: 48, height: 5, backgroundColor: '#555', borderRadius: 3, marginBottom: SPACING.xs },
+  swipeHint: { fontSize: 11, fontStyle: 'italic' },
   loadingContainer: { alignItems: 'center', justifyContent: 'center', paddingVertical: SPACING.xxl },
   loadingText: { marginTop: SPACING.m, fontSize: 14 },
-  scroll: { maxHeight: SCREEN_HEIGHT * 0.6 },
+  scroll: { maxHeight: SCREEN_HEIGHT * 0.65 },
+  scrollContent: { paddingBottom: SPACING.m },
   header: { flexDirection: 'row', marginBottom: SPACING.l },
-  poster: { width: 100, height: 150, borderRadius: BORDER_RADIUS.m },
+  poster: { width: 110, height: 165, borderRadius: BORDER_RADIUS.m },
   headerInfo: { flex: 1, marginLeft: SPACING.m, justifyContent: 'center' },
   title: { fontSize: 20, fontWeight: 'bold', marginBottom: SPACING.xs },
   year: { fontSize: 14, marginBottom: SPACING.s },
   runtimeRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: SPACING.xs },
   runtime: { fontSize: 13 },
-  ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 4, flexWrap: 'wrap' },
   rating: { fontSize: 16, fontWeight: '600' },
+  voteCount: { fontSize: 12, marginLeft: 4 },
   section: { marginBottom: SPACING.l },
   sectionTitle: { fontSize: 13, fontWeight: '600', marginBottom: SPACING.s, textTransform: 'uppercase', letterSpacing: 1 },
   genresRow: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.s },
@@ -227,7 +303,15 @@ const detailStyles = StyleSheet.create({
   castCharacter: { fontSize: 12 },
   errorContainer: { alignItems: 'center', justifyContent: 'center', paddingVertical: SPACING.xxl },
   errorText: { marginTop: SPACING.m, fontSize: 14 },
-  closeBtn: { paddingVertical: 14, borderRadius: BORDER_RADIUS.full, alignItems: 'center', marginTop: SPACING.m },
+  closeBtn: { 
+    paddingVertical: 14, 
+    borderRadius: BORDER_RADIUS.full, 
+    alignItems: 'center', 
+    marginTop: SPACING.m,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: SPACING.xs,
+  },
   closeBtnText: { fontSize: 16, fontWeight: '600', color: '#FFF' },
 });
 
@@ -1053,7 +1137,7 @@ export default function SwipeScreen() {
         )}
       </View>
 
-      {/* Action buttons */}
+      {/* Action buttons - Only X and Heart */}
       {movies.length > 0 && (
         <View style={styles.actionsContainer}>
           <TouchableOpacity
@@ -1063,16 +1147,6 @@ export default function SwipeScreen() {
             activeOpacity={0.8}
           >
             <Ionicons name="close" size={32} color="#FF6B6B" />
-          </TouchableOpacity>
-
-          {/* Info Button in Actions */}
-          <TouchableOpacity
-            style={[styles.infoActionBtn, { borderColor: colors.gold, backgroundColor: `${colors.gold}15` }]}
-            onPress={() => currentMovie && handleShowDetails(currentMovie.id)}
-            testID="info-action-btn"
-            activeOpacity={0.8}
-          >
-            <Ionicons name="information-circle-outline" size={26} color={colors.gold} />
           </TouchableOpacity>
 
           <TouchableOpacity
