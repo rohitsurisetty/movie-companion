@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import Slider from '@react-native-community/slider';
+import MultiSlider from '@ptomasroos/react-native-multi-slider';
 import { COLORS, SPACING, BORDER_RADIUS } from '../src/theme';
 import { FiltersData, initialFiltersData, FilterSection, HeightFilter, AgeFilter } from '../src/types';
 import { saveFilters } from '../src/store';
@@ -85,57 +86,47 @@ function DistanceSliderComponent({ value, onChange }: { value: number; onChange:
 }
 
 // ============================================
-// SMOOTH AGE RANGE SLIDER (Two separate sliders)
+// SMOOTH AGE RANGE SLIDER - Dual Thumb Range Slider
 // ============================================
 function AgeRangeSliderComponent({ value, onChange }: { value: AgeFilter; onChange: (v: AgeFilter) => void }) {
   const MIN_AGE = 18;
   const MAX_AGE = 60;
 
-  const handleMinChange = (val: number) => {
-    const newMin = Math.round(val);
-    if (newMin < value.max) {
-      onChange({ ...value, min: newMin });
-    }
+  const handleValuesChange = (values: number[]) => {
+    onChange({ ...value, min: values[0], max: values[1] });
   };
 
-  const handleMaxChange = (val: number) => {
-    const newMax = Math.round(val);
-    if (newMax > value.min) {
-      onChange({ ...value, max: newMax });
-    }
-  };
+  // Custom marker component for the thumbs
+  const CustomMarker = () => (
+    <View style={rangeSliderStyles.marker}>
+      <View style={rangeSliderStyles.markerInner} />
+    </View>
+  );
 
   return (
     <View style={sliderStyles.container}>
       <Text style={sliderStyles.label}>{value.min} - {value.max} years</Text>
       
-      {/* Min Age Slider */}
-      <Text style={sliderStyles.subLabel}>Minimum Age: {value.min}</Text>
-      <Slider
-        style={sliderStyles.slider}
-        minimumValue={MIN_AGE}
-        maximumValue={MAX_AGE}
-        value={value.min}
-        onValueChange={handleMinChange}
-        minimumTrackTintColor={COLORS.primary}
-        maximumTrackTintColor={COLORS.border}
-        thumbTintColor={COLORS.primary}
-        step={1}
-      />
-      
-      {/* Max Age Slider */}
-      <Text style={[sliderStyles.subLabel, { marginTop: SPACING.m }]}>Maximum Age: {value.max}</Text>
-      <Slider
-        style={sliderStyles.slider}
-        minimumValue={MIN_AGE}
-        maximumValue={MAX_AGE}
-        value={value.max}
-        onValueChange={handleMaxChange}
-        minimumTrackTintColor={COLORS.primary}
-        maximumTrackTintColor={COLORS.border}
-        thumbTintColor={COLORS.primary}
-        step={1}
-      />
+      <View style={rangeSliderStyles.sliderWrapper}>
+        <MultiSlider
+          values={[value.min, value.max]}
+          min={MIN_AGE}
+          max={MAX_AGE}
+          step={1}
+          sliderLength={280}
+          onValuesChange={handleValuesChange}
+          selectedStyle={rangeSliderStyles.selectedTrack}
+          unselectedStyle={rangeSliderStyles.unselectedTrack}
+          trackStyle={rangeSliderStyles.track}
+          markerStyle={rangeSliderStyles.markerStyle}
+          pressedMarkerStyle={rangeSliderStyles.pressedMarkerStyle}
+          containerStyle={rangeSliderStyles.containerStyle}
+          customMarker={CustomMarker}
+          snapped
+          allowOverlap={false}
+          minMarkerOverlapDistance={10}
+        />
+      </View>
       
       <View style={sliderStyles.labelsRow}>
         <Text style={sliderStyles.minLabel}>{MIN_AGE}</Text>
@@ -144,6 +135,64 @@ function AgeRangeSliderComponent({ value, onChange }: { value: AgeFilter; onChan
     </View>
   );
 }
+
+// Range slider specific styles
+const rangeSliderStyles = StyleSheet.create({
+  sliderWrapper: {
+    alignItems: 'center',
+    paddingVertical: SPACING.m,
+  },
+  track: {
+    height: 6,
+    borderRadius: 3,
+  },
+  selectedTrack: {
+    backgroundColor: COLORS.primary,
+  },
+  unselectedTrack: {
+    backgroundColor: COLORS.border,
+  },
+  marker: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: COLORS.white,
+    borderWidth: 3,
+    borderColor: COLORS.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  markerInner: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: COLORS.primary,
+  },
+  markerStyle: {
+    backgroundColor: COLORS.white,
+    borderColor: COLORS.primary,
+    borderWidth: 3,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+  },
+  pressedMarkerStyle: {
+    backgroundColor: COLORS.white,
+    borderColor: COLORS.primaryDark,
+    borderWidth: 3,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+  },
+  containerStyle: {
+    height: 40,
+  },
+});
 
 const sliderStyles = StyleSheet.create({
   container: {
