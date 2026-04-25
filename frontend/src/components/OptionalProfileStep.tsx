@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView,
   Modal, Platform, KeyboardAvoidingView,
@@ -33,7 +33,10 @@ const WORK_PROFILE_OPTS = ['IT/Software', 'Business Owner', 'Lawyer', 'Teacher',
 // Height options
 const FEET_OPTIONS = [4, 5, 6, 7];
 const INCHES_OPTIONS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
-const CM_OPTIONS = Array.from({ length: 251 }, (_, i) => 50 + i); // 50 to 300 cm
+const CM_OPTIONS = Array.from({ length: 101 }, (_, i) => 120 + i); // 120-220 cm
+
+const ITEM_HEIGHT = 40;
+const VISIBLE_ITEMS = 3;
 
 type DropdownConfig = { field: string; label: string; options: string[] };
 
@@ -47,13 +50,16 @@ export default function OptionalProfileStep({ data, onUpdate, onNext }: Props) {
   const [activeDropdown, setActiveDropdown] = useState<DropdownConfig | null>(null);
   const [heightUnit, setHeightUnit] = useState<'imperial' | 'metric'>('imperial');
   
-  // Height state
   const [selectedFeet, setSelectedFeet] = useState(5);
-  const [selectedInches, setSelectedInches] = useState(4);
-  const [selectedCm, setSelectedCm] = useState(160);
+  const [selectedInches, setSelectedInches] = useState(6);
+  const [selectedCm, setSelectedCm] = useState(168);
 
-  // Parse existing height if any
-  React.useEffect(() => {
+  const feetScrollRef = useRef<ScrollView>(null);
+  const inchesScrollRef = useRef<ScrollView>(null);
+  const cmScrollRef = useRef<ScrollView>(null);
+
+  // Parse existing height
+  useEffect(() => {
     if (data.height) {
       if (data.height.includes("'")) {
         const parts = data.height.match(/(\d+)'(\d+)/);
@@ -70,6 +76,19 @@ export default function OptionalProfileStep({ data, onUpdate, onNext }: Props) {
         }
       }
     }
+  }, []);
+
+  // Scroll to initial position
+  useEffect(() => {
+    setTimeout(() => {
+      const feetIndex = FEET_OPTIONS.indexOf(selectedFeet);
+      const inchIndex = selectedInches;
+      const cmIndex = selectedCm - 120;
+      
+      if (feetIndex >= 0) feetScrollRef.current?.scrollTo({ y: feetIndex * ITEM_HEIGHT, animated: false });
+      inchesScrollRef.current?.scrollTo({ y: inchIndex * ITEM_HEIGHT, animated: false });
+      if (cmIndex >= 0) cmScrollRef.current?.scrollTo({ y: cmIndex * ITEM_HEIGHT, animated: false });
+    }, 100);
   }, []);
 
   const dropdowns: DropdownConfig[] = [
@@ -95,19 +114,34 @@ export default function OptionalProfileStep({ data, onUpdate, onNext }: Props) {
     }
   };
 
-  const handleFeetChange = (feet: number) => {
-    setSelectedFeet(feet);
-    updateHeight(feet, selectedInches, selectedCm, 'imperial');
+  const handleFeetScroll = (event: any) => {
+    const y = event.nativeEvent.contentOffset.y;
+    const index = Math.round(y / ITEM_HEIGHT);
+    const feet = FEET_OPTIONS[Math.max(0, Math.min(FEET_OPTIONS.length - 1, index))];
+    if (feet !== selectedFeet) {
+      setSelectedFeet(feet);
+      updateHeight(feet, selectedInches, selectedCm, 'imperial');
+    }
   };
 
-  const handleInchesChange = (inches: number) => {
-    setSelectedInches(inches);
-    updateHeight(selectedFeet, inches, selectedCm, 'imperial');
+  const handleInchesScroll = (event: any) => {
+    const y = event.nativeEvent.contentOffset.y;
+    const index = Math.round(y / ITEM_HEIGHT);
+    const inches = Math.max(0, Math.min(11, index));
+    if (inches !== selectedInches) {
+      setSelectedInches(inches);
+      updateHeight(selectedFeet, inches, selectedCm, 'imperial');
+    }
   };
 
-  const handleCmChange = (cm: number) => {
-    setSelectedCm(cm);
-    updateHeight(selectedFeet, selectedInches, cm, 'metric');
+  const handleCmScroll = (event: any) => {
+    const y = event.nativeEvent.contentOffset.y;
+    const index = Math.round(y / ITEM_HEIGHT);
+    const cm = Math.max(120, Math.min(220, 120 + index));
+    if (cm !== selectedCm) {
+      setSelectedCm(cm);
+      updateHeight(selectedFeet, selectedInches, cm, 'metric');
+    }
   };
 
   const toggleHeightUnit = () => {
@@ -128,7 +162,6 @@ export default function OptionalProfileStep({ data, onUpdate, onNext }: Props) {
     }
   };
 
-  // Multi-select food preferences
   const foodPreferences = (data as any).foodPreferences || [];
   const toggleFoodPref = (pref: string) => {
     const current = foodPreferences as string[];
@@ -171,7 +204,7 @@ export default function OptionalProfileStep({ data, onUpdate, onNext }: Props) {
           ))}
         </View>
 
-        {/* Height with embedded scrollable picker */}
+        {/* Height - Minimalistic Wheel Picker */}
         <Text style={styles.label}>Height</Text>
         <View style={styles.heightUnitToggle}>
           <TouchableOpacity
@@ -188,65 +221,92 @@ export default function OptionalProfileStep({ data, onUpdate, onNext }: Props) {
           </TouchableOpacity>
         </View>
 
-        {/* Embedded height scrollers */}
-        <View style={styles.heightContainer}>
+        {/* Minimalistic Wheel Picker for Height */}
+        <View style={styles.wheelContainer}>
           {heightUnit === 'imperial' ? (
-            <View style={styles.heightScrollRow}>
-              {/* Feet */}
-              <View style={styles.heightColumn}>
-                <Text style={styles.heightLabel}>Feet</Text>
-                <ScrollView style={styles.heightScroll} showsVerticalScrollIndicator={false} nestedScrollEnabled>
-                  {FEET_OPTIONS.map(f => (
-                    <TouchableOpacity
-                      key={f}
-                      style={[styles.heightItem, selectedFeet === f && styles.heightItemSelected]}
-                      onPress={() => handleFeetChange(f)}
-                    >
-                      <Text style={[styles.heightItemText, selectedFeet === f && styles.heightItemTextSelected]}>
-                        {f}'
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
+            <View style={styles.wheelRow}>
+              {/* Feet Wheel */}
+              <View style={styles.wheelColumn}>
+                <Text style={styles.wheelLabel}>Feet</Text>
+                <View style={styles.wheelWrapper}>
+                  <View style={styles.wheelHighlight} />
+                  <ScrollView
+                    ref={feetScrollRef}
+                    style={styles.wheelScroll}
+                    showsVerticalScrollIndicator={false}
+                    snapToInterval={ITEM_HEIGHT}
+                    decelerationRate="fast"
+                    onMomentumScrollEnd={handleFeetScroll}
+                    contentContainerStyle={{ paddingVertical: ITEM_HEIGHT }}
+                    nestedScrollEnabled
+                  >
+                    {FEET_OPTIONS.map(f => (
+                      <View key={f} style={styles.wheelItem}>
+                        <Text style={[styles.wheelItemText, selectedFeet === f && styles.wheelItemTextActive]}>
+                          {f}'
+                        </Text>
+                      </View>
+                    ))}
+                  </ScrollView>
+                </View>
               </View>
-              {/* Inches */}
-              <View style={styles.heightColumn}>
-                <Text style={styles.heightLabel}>Inches</Text>
-                <ScrollView style={styles.heightScroll} showsVerticalScrollIndicator={false} nestedScrollEnabled>
-                  {INCHES_OPTIONS.map(i => (
-                    <TouchableOpacity
-                      key={i}
-                      style={[styles.heightItem, selectedInches === i && styles.heightItemSelected]}
-                      onPress={() => handleInchesChange(i)}
-                    >
-                      <Text style={[styles.heightItemText, selectedInches === i && styles.heightItemTextSelected]}>
-                        {i}"
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
+
+              {/* Inches Wheel */}
+              <View style={styles.wheelColumn}>
+                <Text style={styles.wheelLabel}>Inches</Text>
+                <View style={styles.wheelWrapper}>
+                  <View style={styles.wheelHighlight} />
+                  <ScrollView
+                    ref={inchesScrollRef}
+                    style={styles.wheelScroll}
+                    showsVerticalScrollIndicator={false}
+                    snapToInterval={ITEM_HEIGHT}
+                    decelerationRate="fast"
+                    onMomentumScrollEnd={handleInchesScroll}
+                    contentContainerStyle={{ paddingVertical: ITEM_HEIGHT }}
+                    nestedScrollEnabled
+                  >
+                    {INCHES_OPTIONS.map(i => (
+                      <View key={i} style={styles.wheelItem}>
+                        <Text style={[styles.wheelItemText, selectedInches === i && styles.wheelItemTextActive]}>
+                          {i}"
+                        </Text>
+                      </View>
+                    ))}
+                  </ScrollView>
+                </View>
               </View>
             </View>
           ) : (
-            <View style={styles.heightScrollRow}>
-              <View style={[styles.heightColumn, { flex: 1 }]}>
-                <Text style={styles.heightLabel}>Centimeters</Text>
-                <ScrollView style={styles.heightScroll} showsVerticalScrollIndicator={false} nestedScrollEnabled>
-                  {CM_OPTIONS.map(c => (
-                    <TouchableOpacity
-                      key={c}
-                      style={[styles.heightItem, selectedCm === c && styles.heightItemSelected]}
-                      onPress={() => handleCmChange(c)}
-                    >
-                      <Text style={[styles.heightItemText, selectedCm === c && styles.heightItemTextSelected]}>
-                        {c} cm
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
+            <View style={styles.wheelRow}>
+              <View style={[styles.wheelColumn, { flex: 1 }]}>
+                <Text style={styles.wheelLabel}>Centimeters</Text>
+                <View style={styles.wheelWrapper}>
+                  <View style={styles.wheelHighlight} />
+                  <ScrollView
+                    ref={cmScrollRef}
+                    style={styles.wheelScroll}
+                    showsVerticalScrollIndicator={false}
+                    snapToInterval={ITEM_HEIGHT}
+                    decelerationRate="fast"
+                    onMomentumScrollEnd={handleCmScroll}
+                    contentContainerStyle={{ paddingVertical: ITEM_HEIGHT }}
+                    nestedScrollEnabled
+                  >
+                    {CM_OPTIONS.map(c => (
+                      <View key={c} style={styles.wheelItem}>
+                        <Text style={[styles.wheelItemText, selectedCm === c && styles.wheelItemTextActive]}>
+                          {c} cm
+                        </Text>
+                      </View>
+                    ))}
+                  </ScrollView>
+                </View>
               </View>
             </View>
           )}
+          
+          {/* Selected Height Display */}
           <View style={styles.heightDisplay}>
             <Text style={styles.heightDisplayText}>
               {heightUnit === 'imperial' ? `${selectedFeet}'${selectedInches}"` : `${selectedCm} cm`}
@@ -370,7 +430,7 @@ const styles = StyleSheet.create({
   avatarItem: { borderRadius: BORDER_RADIUS.full, borderWidth: 3, borderColor: 'transparent', padding: 3 },
   avatarActive: { borderColor: COLORS.gold },
   avatarCircle: { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center' },
-  // Height embedded picker styles
+  // Height unit toggle
   heightUnitToggle: { flexDirection: 'row', gap: SPACING.s, marginBottom: SPACING.m },
   unitBtn: {
     paddingHorizontal: 20, paddingVertical: 10, borderRadius: BORDER_RADIUS.full,
@@ -379,22 +439,26 @@ const styles = StyleSheet.create({
   unitBtnActive: { borderColor: COLORS.primary, backgroundColor: COLORS.primary },
   unitBtnText: { fontSize: 14, color: COLORS.textSecondary, fontWeight: '500' },
   unitBtnTextActive: { color: COLORS.white, fontWeight: '600' },
-  heightContainer: {
-    backgroundColor: COLORS.bgCard, borderRadius: BORDER_RADIUS.l, padding: SPACING.m,
-    borderWidth: 1, borderColor: COLORS.border,
+  // Minimalistic Wheel Picker
+  wheelContainer: {
+    backgroundColor: COLORS.bgCard, borderRadius: BORDER_RADIUS.l, overflow: 'hidden',
   },
-  heightScrollRow: { flexDirection: 'row', gap: SPACING.m },
-  heightColumn: { flex: 1 },
-  heightLabel: { fontSize: 11, color: COLORS.textMuted, textAlign: 'center', marginBottom: SPACING.xs },
-  heightScroll: { height: 140 },
-  heightItem: { paddingVertical: 10, alignItems: 'center', borderRadius: BORDER_RADIUS.s, marginVertical: 2 },
-  heightItemSelected: { backgroundColor: COLORS.primary },
-  heightItemText: { fontSize: 16, color: COLORS.textSecondary },
-  heightItemTextSelected: { color: COLORS.white, fontWeight: '600' },
+  wheelRow: { flexDirection: 'row' },
+  wheelColumn: { flex: 1, alignItems: 'center' },
+  wheelLabel: { fontSize: 11, color: COLORS.textMuted, marginTop: SPACING.s, marginBottom: SPACING.xs, fontWeight: '600', letterSpacing: 0.5 },
+  wheelWrapper: { height: ITEM_HEIGHT * VISIBLE_ITEMS, position: 'relative', width: '100%' },
+  wheelHighlight: {
+    position: 'absolute', top: ITEM_HEIGHT, left: 4, right: 4, height: ITEM_HEIGHT,
+    backgroundColor: COLORS.primary, borderRadius: BORDER_RADIUS.s, opacity: 0.15,
+  },
+  wheelScroll: { height: ITEM_HEIGHT * VISIBLE_ITEMS },
+  wheelItem: { height: ITEM_HEIGHT, justifyContent: 'center', alignItems: 'center' },
+  wheelItemText: { fontSize: 18, color: COLORS.textMuted, fontWeight: '500' },
+  wheelItemTextActive: { color: COLORS.text, fontWeight: '700', fontSize: 20 },
   heightDisplay: {
-    marginTop: SPACING.m, paddingTop: SPACING.m, borderTopWidth: 1, borderTopColor: COLORS.border, alignItems: 'center',
+    paddingVertical: SPACING.m, borderTopWidth: 1, borderTopColor: COLORS.border, alignItems: 'center',
   },
-  heightDisplayText: { fontSize: 24, fontWeight: 'bold', color: COLORS.gold },
+  heightDisplayText: { fontSize: 22, fontWeight: 'bold', color: COLORS.gold },
   chipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.s },
   chip: {
     paddingHorizontal: 16, paddingVertical: 10, borderRadius: BORDER_RADIUS.full,
