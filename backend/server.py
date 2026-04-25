@@ -681,26 +681,39 @@ async def get_recommendations(req: RecommendationRequest):
     swipes = await db.user_swipes.find(
         {"user_id": req.user_id},
         {"movie_id": 1}
-    ).to_list(length=1000)
+    ).to_list(length=5000)  # Increased limit to ensure we get all swipes
     
     swiped_ids = set(s["movie_id"] for s in swipes)
     
+    # Get user's top 5 movie IDs to exclude from feed
+    profile = await db.user_profiles.find_one({"user_id": req.user_id})
+    top_movie_ids = set()
+    if profile:
+        top_movies = profile.get("topMovies", [])
+        for movie in top_movies:
+            if movie.get("id"):
+                top_movie_ids.add(movie.get("id"))
+    
     # Get personalized feed with USER-SPECIFIC randomization
+    # Passes: swiped_ids (never show again), top_movie_ids (user's favorites to exclude)
     recommendations = await get_personalized_feed(
         taste_vector,
         swiped_ids,
         req.page,
         req.limit,
-        user_id=req.user_id  # Pass user_id for personalized ordering
+        user_id=req.user_id,
+        top_movie_ids=top_movie_ids  # Pass top 5 movies to exclude
     )
     
-    logger.info(f"Generated {len(recommendations)} recommendations for user {req.user_id}")
+    logger.info(f"Generated {len(recommendations)} recommendations for user {req.user_id} "
+                f"(excluded {len(swiped_ids)} swiped + {len(top_movie_ids)} top movies)")
     
     return {
         "results": recommendations,
         "page": req.page,
         "total_swipes": taste_vector.total_swipes,
         "taste_dimensions": len(taste_vector.vector),
+        "excluded_movies": len(swiped_ids) + len(top_movie_ids),
     }
 
 

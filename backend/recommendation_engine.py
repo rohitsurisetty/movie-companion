@@ -1462,12 +1462,18 @@ async def get_personalized_feed(
     swiped_ids: Set[int],
     page: int = 1,
     limit: int = 20,
-    user_id: str = ""
+    user_id: str = "",
+    top_movie_ids: Set[int] = None
 ) -> List[Dict[str, Any]]:
     """
     Get a TRULY PERSONALIZED movie feed for each user.
     
     CRITICAL: Each user MUST get different movies in different order!
+    
+    RULES:
+    1. Only show RELEASED movies (release_date <= today)
+    2. Never show user's Top 5 selected movies
+    3. Never show already swiped movies
     
     Personalization factors:
     1. User's taste vector (genres, actors, directors they like)
@@ -1478,14 +1484,24 @@ async def get_personalized_feed(
     
     Process:
     1. Get candidate movies (filtered by language)
-    2. Score each movie using cosine similarity with user's taste
-    3. Add user-specific random factor to scores
-    4. Sort by personalized score
-    5. Return top N
+    2. Filter out unreleased movies, swiped movies, and top 5 movies
+    3. Score each movie using cosine similarity with user's taste
+    4. Add user-specific random factor to scores
+    5. Sort by personalized score
+    6. Return top N
     """
     import random
     import hashlib
-    from datetime import datetime
+    from datetime import datetime, date
+    
+    if top_movie_ids is None:
+        top_movie_ids = set()
+    
+    # Combine all IDs to exclude
+    all_exclude_ids = swiped_ids | top_movie_ids
+    
+    # Today's date for filtering unreleased movies
+    today = date.today().isoformat()
     
     # Create a user-specific seed for randomization
     # This ensures the SAME user gets consistent results within a session
@@ -1494,13 +1510,28 @@ async def get_personalized_feed(
     user_seed = int(hashlib.md5(user_seed_str.encode()).hexdigest()[:8], 16)
     user_random = random.Random(user_seed)
     
-    # Get candidates
-    candidates = await get_candidate_movies(user_taste, page, swiped_ids)
+    # Get candidates (already excludes swiped_ids)
+    candidates = await get_candidate_movies(user_taste, page, all_exclude_ids)
     
     # Score each movie with PERSONALIZED scoring
     scored_movies = []
     for movie in candidates:
-        score, passes_language = score_movie_for_user(movie, user_taste, swiped_ids)
+        movie_id = movie.get("id")
+        
+        # RULE 1: Skip unreleased movies
+        release_date = movie.get("release_date", "")
+        if release_date and release_date > today:
+            continue  # Skip future releases
+        
+        # RULE 2: Skip user's top 5 movies
+        if movie_id in top_movie_ids:
+            continue
+        
+        # RULE 3: Skip already swiped movies
+        if movie_id in swiped_ids:
+            continue
+        
+        score, passes_language = score_movie_for_user(movie, user_taste, all_exclude_ids)
         
         # Only include movies that pass the language filter (if filter is set)
         if score >= 0:
