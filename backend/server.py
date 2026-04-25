@@ -7,8 +7,19 @@ import logging
 import httpx
 from pathlib import Path
 from pydantic import BaseModel
+from typing import List, Optional, Dict, Any
 import uuid
 from datetime import datetime, timezone, timedelta
+
+# Import recommendation engine
+from recommendation_engine import (
+    TasteVector, 
+    initialize_taste_vector_from_profile,
+    update_taste_vector_from_swipe,
+    get_personalized_feed,
+    enrich_movie_with_details,
+    GENRE_ID_TO_NAME
+)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -33,6 +44,44 @@ class SessionRequest(BaseModel):
 class MockLoginRequest(BaseModel):
     email: str
     name: str
+
+
+# =============================================
+# Recommendation Engine Models
+# =============================================
+
+class MovieSelection(BaseModel):
+    id: int
+    title: str
+    poster_path: str = ""
+    release_date: str = ""
+    vote_average: float = 0
+    rating: float = 0  # User's personal rating
+    genres: List[str] = []
+
+
+class UserProfileRequest(BaseModel):
+    user_id: str
+    name: str = ""
+    genres: List[str] = []
+    filmLanguages: List[str] = []
+    topMovies: List[MovieSelection] = []
+    movieFrequency: str = ""
+    ottTheatre: str = ""
+
+
+class SwipeRequest(BaseModel):
+    user_id: str
+    movie_id: int
+    direction: str  # 'right' or 'left'
+    rating: Optional[int] = None  # 1-5 stars (for right swipes)
+    reason: Optional[str] = None  # Reason for like/dislike
+
+
+class RecommendationRequest(BaseModel):
+    user_id: str
+    page: int = 1
+    limit: int = 20
 
 
 @api_router.get("/")
@@ -303,6 +352,234 @@ async def get_movie_details(movie_id: int):
         "vote_average": movie.get("vote_average", 0),
         "runtime": movie.get("runtime", 0),
         "genres": genres, "cast": cast, "directors": directors,
+        "vote_count": movie.get("vote_count", 0),
+    }
+
+
+# =============================================
+# Recommendation Engine Endpoints
+# =============================================
+
+@api_router.post("/user/profile")
+async def save_user_profile(req: UserProfileRequest):
+    """
+    Save user profile and initialize taste vector.
+    Called after user completes onboarding.
+    """
+    # Convert topMovies to dict format
+    top_movies_data = [m.dict() for m in req.topMovies]
+    
+    # Build profile data
+    profile_data = {
+        "user_id": req.user_id,
+        "name": req.name,
+        "genres": req.genres,
+        "filmLanguages": req.filmLanguages,
+        "topMovies": top_movies_data,
+        "movieFrequency": req.movieFrequency,
+        "ottTheatre": req.ottTheatre,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    
+    # Save to MongoDB (upsert)
+    await db.user_profiles.update_one(
+        {"user_id": req.user_id},
+        {"$set": profile_data},
+        upsert=True
+    )
+    
+    # Initialize taste vector from profile
+    taste_vector = initialize_taste_vector_from_profile(profile_data)
+    
+    # Save taste vector
+    await db.user_taste_vectors.update_one(
+        {"user_id": req.user_id},
+        {"$set": {
+            "user_id": req.user_id,
+            "vector": taste_vector.to_dict(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }},
+        upsert=True
+    )
+    
+    logger.info(f"Saved profile and initialized taste vector for user {req.user_id}")
+    
+    return {
+        "success": True,
+        "message": "Profile saved and taste vector initialized",
+        "taste_dimensions": len(taste_vector.vector)
+    }
+
+
+@api_router.post("/user/swipe")
+async def record_swipe(req: SwipeRequest):
+    """
+    Record a swipe action and update user's taste vector.
+    This is the core learning mechanism.
+    """
+    # Get movie details from TMDB for extracting features
+    async with httpx.AsyncClient(timeout=10.0) as http_client:
+        movie_details = await enrich_movie_with_details(req.movie_id, http_client)
+    
+    if not movie_details:
+        raise HTTPException(status_code=404, detail="Could not fetch movie details")
+    
+    # Record the swipe
+    swipe_record = {
+        "user_id": req.user_id,
+        "movie_id": req.movie_id,
+        "movie_title": movie_details.get("title", ""),
+        "direction": req.direction,
+        "rating": req.rating,
+        "reason": req.reason,
+        "movie_genres": movie_details.get("genres", []),
+        "movie_actors": movie_details.get("cast", []),
+        "movie_directors": movie_details.get("directors", []),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    
+    await db.user_swipes.insert_one(swipe_record)
+    
+    # Get current taste vector
+    taste_doc = await db.user_taste_vectors.find_one({"user_id": req.user_id})
+    
+    if taste_doc:
+        taste_vector = TasteVector.from_dict(taste_doc.get("vector", {}))
+    else:
+        # Initialize empty taste vector if not exists
+        taste_vector = TasteVector()
+    
+    # Update taste vector based on swipe
+    taste_vector = update_taste_vector_from_swipe(
+        taste_vector,
+        movie_details,
+        req.direction,
+        req.rating,
+        req.reason
+    )
+    
+    # Save updated taste vector
+    await db.user_taste_vectors.update_one(
+        {"user_id": req.user_id},
+        {"$set": {
+            "user_id": req.user_id,
+            "vector": taste_vector.to_dict(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }},
+        upsert=True
+    )
+    
+    logger.info(f"Recorded {req.direction} swipe for user {req.user_id} on movie {req.movie_id}")
+    
+    return {
+        "success": True,
+        "message": f"Swipe recorded and taste vector updated",
+        "total_swipes": taste_vector.total_swipes,
+        "like_count": taste_vector.like_count,
+        "dislike_count": taste_vector.dislike_count,
+    }
+
+
+@api_router.post("/recommendations")
+async def get_recommendations(req: RecommendationRequest):
+    """
+    Get personalized movie recommendations using cosine similarity.
+    This is the main recommendation endpoint.
+    """
+    # Get user's taste vector
+    taste_doc = await db.user_taste_vectors.find_one({"user_id": req.user_id})
+    
+    if taste_doc:
+        taste_vector = TasteVector.from_dict(taste_doc.get("vector", {}))
+    else:
+        # If no taste vector, try to initialize from profile
+        profile = await db.user_profiles.find_one({"user_id": req.user_id})
+        if profile:
+            taste_vector = initialize_taste_vector_from_profile(profile)
+        else:
+            # Cold start: use empty vector (will get popular movies)
+            taste_vector = TasteVector()
+    
+    # Get all swiped movie IDs to exclude
+    swipes = await db.user_swipes.find(
+        {"user_id": req.user_id},
+        {"movie_id": 1}
+    ).to_list(length=1000)
+    
+    swiped_ids = set(s["movie_id"] for s in swipes)
+    
+    # Get personalized feed
+    recommendations = await get_personalized_feed(
+        taste_vector,
+        swiped_ids,
+        req.page,
+        req.limit
+    )
+    
+    logger.info(f"Generated {len(recommendations)} recommendations for user {req.user_id}")
+    
+    return {
+        "results": recommendations,
+        "page": req.page,
+        "total_swipes": taste_vector.total_swipes,
+        "taste_dimensions": len(taste_vector.vector),
+    }
+
+
+@api_router.get("/user/{user_id}/taste-profile")
+async def get_taste_profile(user_id: str):
+    """
+    Get user's taste profile for debugging/display.
+    Shows top preferences in each dimension.
+    """
+    taste_doc = await db.user_taste_vectors.find_one({"user_id": user_id})
+    
+    if not taste_doc:
+        return {"message": "No taste profile found", "top_genres": [], "top_actors": [], "top_directors": []}
+    
+    vector_data = taste_doc.get("vector", {})
+    vector = vector_data.get("vector", {})
+    
+    # Extract top preferences by category
+    genres = [(k.replace("genre_", "").replace("_", " ").title(), v) 
+              for k, v in vector.items() if k.startswith("genre_") and v > 0]
+    actors = [(k.replace("actor_", "").replace("_", " ").title(), v) 
+              for k, v in vector.items() if k.startswith("actor_") and v > 0]
+    directors = [(k.replace("director_", "").replace("_", " ").title(), v) 
+                 for k, v in vector.items() if k.startswith("director_") and v > 0]
+    eras = [(k.replace("era_", ""), v) 
+            for k, v in vector.items() if k.startswith("era_") and v > 0]
+    
+    # Sort by weight
+    genres.sort(key=lambda x: x[1], reverse=True)
+    actors.sort(key=lambda x: x[1], reverse=True)
+    directors.sort(key=lambda x: x[1], reverse=True)
+    eras.sort(key=lambda x: x[1], reverse=True)
+    
+    return {
+        "user_id": user_id,
+        "total_swipes": vector_data.get("total_swipes", 0),
+        "like_count": vector_data.get("like_count", 0),
+        "dislike_count": vector_data.get("dislike_count", 0),
+        "top_genres": [{"name": g[0], "weight": round(g[1], 2)} for g in genres[:10]],
+        "top_actors": [{"name": a[0], "weight": round(a[1], 2)} for a in actors[:10]],
+        "top_directors": [{"name": d[0], "weight": round(d[1], 2)} for d in directors[:5]],
+        "preferred_eras": [{"era": e[0], "weight": round(e[1], 2)} for e in eras[:5]],
+    }
+
+
+@api_router.get("/user/{user_id}/swipe-history")
+async def get_swipe_history(user_id: str, limit: int = 50):
+    """Get user's recent swipe history"""
+    swipes = await db.user_swipes.find(
+        {"user_id": user_id},
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(length=limit)
+    
+    return {
+        "user_id": user_id,
+        "swipes": swipes,
+        "count": len(swipes)
     }
 
 

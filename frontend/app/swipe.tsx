@@ -991,7 +991,7 @@ export default function SwipeScreen() {
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [selectedMovieId, setSelectedMovieId] = useState(0);
   const [pendingMovie, setPendingMovie] = useState<FeedMovie | null>(null);
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useState(0);  // Start at 0, will be set to 1 when userId is ready
   const [mode, setMode] = useState<AppMode>('date');
   const fetchingRef = useRef(false);
 
@@ -1036,34 +1036,124 @@ export default function SwipeScreen() {
     setShowDetailsModal(true);
   };
 
-  // Fetch movie feed
-  const fetchMovies = useCallback(async (pageNum: number) => {
-    if (fetchingRef.current) return;
-    fetchingRef.current = true;
+  // Generate a user ID for the recommendation engine
+  const [userId, setUserId] = useState<string>('');
+  
+  useEffect(() => {
+    const initUserId = async () => {
+      try {
+        const profile = await getProfile();
+        // Use email or generate a unique ID based on timestamp
+        const id = profile?.email || `user_${Date.now()}`;
+        setUserId(id);
+        
+        // Sync profile to backend recommendation engine (only if profile has meaningful data)
+        if (profile && profile.genres && profile.genres.length > 0) {
+          await syncProfileToBackend(id, profile);
+        } else {
+          console.log('No profile data found, using cold start recommendations');
+        }
+        
+        // Start fetching movies now that userId is ready
+        setPage(1);
+      } catch (e) {
+        console.error('Error initializing user ID:', e);
+        // Set a fallback ID immediately so movies can load
+        setUserId(`user_${Date.now()}`);
+        setPage(1);
+      }
+    };
+    initUserId();
+  }, []);
 
+  // Sync profile to backend recommendation engine
+  const syncProfileToBackend = async (id: string, profile: ProfileData) => {
+    try {
+      await fetch(`${BACKEND_URL}/api/user/profile`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: id,
+          name: profile.name || '',
+          genres: profile.genres || [],
+          filmLanguages: profile.filmLanguages || [],
+          topMovies: profile.topMovies || [],
+          movieFrequency: profile.movieFrequency || '',
+          ottTheatre: profile.ottTheatre || '',
+        }),
+      });
+      console.log('Profile synced to recommendation engine');
+    } catch (e) {
+      console.error('Error syncing profile to backend:', e);
+    }
+  };
+
+  // Fetch movie feed using recommendation API
+  const fetchMovies = useCallback(async (pageNum: number) => {
+    if (fetchingRef.current || !userId) return;
+    fetchingRef.current = true;
+    setLoading(true);
+
+    try {
+      // Use the new recommendation API with cosine similarity
+      const res = await fetch(`${BACKEND_URL}/api/recommendations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: userId,
+          page: pageNum,
+          limit: 20,
+        }),
+      });
+
+      if (!res.ok) {
+        console.warn('Recommendation API failed, using fallback');
+        await fetchMoviesFallback(pageNum);
+        return;
+      }
+
+      const data = await res.json();
+      
+      const newMovies: FeedMovie[] = data.results
+        .filter((m: any) => !swipeState.swipedMovieIds.includes(m.id))
+        .map((m: any) => ({
+          id: m.id,
+          title: m.title,
+          poster_path: m.poster_path,
+          backdrop_path: m.backdrop_path,
+          release_date: m.release_date,
+          overview: m.overview,
+          vote_average: m.vote_average,
+          genre_ids: m.genre_ids,
+        }));
+
+      setMovies((prev) => {
+        const existingIds = new Set(prev.map((m) => m.id));
+        const filtered = newMovies.filter((m: FeedMovie) => !existingIds.has(m.id));
+        return [...prev, ...filtered];
+      });
+      
+      console.log(`Fetched ${newMovies.length} personalized recommendations (page ${pageNum})`);
+    } catch (err) {
+      console.error('Error fetching recommendations:', err);
+      await fetchMoviesFallback(pageNum);
+    } finally {
+      setLoading(false);
+      fetchingRef.current = false;
+    }
+  }, [userId, swipeState.swipedMovieIds]);
+
+  // Fallback to old feed API
+  const fetchMoviesFallback = async (pageNum: number) => {
     try {
       const [filters, profile] = await Promise.all([getFilters(), getProfile()]);
       const excludeIds = swipeState.swipedMovieIds.join(',');
       const genres = filters?.genres?.selected?.join(',') || profile?.genres?.join(',') || '';
       const languages = filters?.languages?.selected?.join(',') || '';
 
-      const likedGenres: number[] = [];
-      swipeState.swipes
-        .filter((s) => s.direction === 'right' && s.rating >= 4)
-        .forEach((s) => {
-          s.genreIds.forEach((g) => {
-            if (!likedGenres.includes(g)) likedGenres.push(g);
-          });
-        });
-
-      const recentLiked = swipeState.swipes
-        .filter((s) => s.direction === 'right' && s.rating >= 4)
-        .slice(-1)[0];
-      const seedMovieId = recentLiked?.movieId || 0;
-
       const params = new URLSearchParams({
         genres, languages, page: String(pageNum), exclude: excludeIds,
-        seed_movie_id: String(seedMovieId), liked_genres: likedGenres.slice(0, 5).join(','),
+        seed_movie_id: '0', liked_genres: '',
       });
 
       const res = await fetch(`${BACKEND_URL}/api/tmdb/feed?${params.toString()}`);
@@ -1080,18 +1170,20 @@ export default function SwipeScreen() {
         return [...prev, ...filtered];
       });
     } catch (err) {
-      console.error('Error fetching movies:', err);
-    } finally {
-      setLoading(false);
-      fetchingRef.current = false;
+      console.error('Error in fallback fetch:', err);
     }
-  }, [swipeState.swipedMovieIds, swipeState.swipes]);
+  };
 
-  useEffect(() => { fetchMovies(page); }, [page]);
+  useEffect(() => { 
+    // Only fetch when userId is available and page is > 0
+    if (userId && page > 0) {
+      fetchMovies(page); 
+    }
+  }, [page, userId]);
 
   useEffect(() => {
-    if (movies.length < 5 && !loading) setPage((p) => p + 1);
-  }, [movies.length, loading]);
+    if (movies.length < 5 && !loading && userId && page > 0) setPage((p) => p + 1);
+  }, [movies.length, loading, userId, page]);
 
   const handleSwipe = useCallback((direction: 'left' | 'right', movie: FeedMovie) => {
     setPendingMovie(movie);
@@ -1123,7 +1215,27 @@ export default function SwipeScreen() {
 
     setSwipeState(newState);
     await saveSwipeState(newState);
-  }, [swipeState]);
+
+    // Send swipe to backend recommendation engine (only if it counts for profiling)
+    if (countsForProfile && userId) {
+      try {
+        await fetch(`${BACKEND_URL}/api/user/swipe`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: userId,
+            movie_id: movie.id,
+            direction: direction,
+            rating: direction === 'right' ? rating : null,
+            reason: reasons.length > 0 ? reasons.join(', ') : null,
+          }),
+        });
+        console.log(`Recorded ${direction} swipe to backend for movie ${movie.id}`);
+      } catch (e) {
+        console.error('Error recording swipe to backend:', e);
+      }
+    }
+  }, [swipeState, userId]);
 
   const handleRatingSubmit = useCallback((rating: number, reasons: string[]) => {
     if (pendingMovie) {
