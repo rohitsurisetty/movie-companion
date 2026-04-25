@@ -693,8 +693,12 @@ const tooltipStyles = StyleSheet.create({
 // ============================================
 // FILTER SECTION CARD (Collapsible) - Uses 'selected' field
 // ============================================
-function FilterSectionCard({ config, section, onUpdate }: {
-  config: FilterConfig; section: FilterSection; onUpdate: (s: FilterSection) => void;
+function FilterSectionCard({ config, section, onUpdate, onShowExclusiveInfo, onShowExpandInfo }: {
+  config: FilterConfig; 
+  section: FilterSection; 
+  onUpdate: (s: FilterSection) => void;
+  onShowExclusiveInfo: () => void;
+  onShowExpandInfo: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -736,6 +740,9 @@ function FilterSectionCard({ config, section, onUpdate }: {
                 {section.exclusive && <Ionicons name="checkmark" size={12} color={COLORS.white} />}
               </View>
               <Text style={fStyles.checkLabel}>Exclusive</Text>
+              <TouchableOpacity onPress={onShowExclusiveInfo} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Ionicons name="information-circle-outline" size={16} color={COLORS.gold} />
+              </TouchableOpacity>
             </TouchableOpacity>
             <TouchableOpacity
               style={fStyles.checkItem}
@@ -745,6 +752,9 @@ function FilterSectionCard({ config, section, onUpdate }: {
                 {section.expandIfRunOut && <Ionicons name="checkmark" size={12} color={COLORS.white} />}
               </View>
               <Text style={fStyles.checkLabel}>Expand if run out</Text>
+              <TouchableOpacity onPress={onShowExpandInfo} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Ionicons name="information-circle-outline" size={16} color={COLORS.gold} />
+              </TouchableOpacity>
             </TouchableOpacity>
           </View>
           
@@ -808,6 +818,7 @@ export default function FiltersScreen() {
   const [filters, setFilters] = useState<FiltersData>(initialFiltersData);
   const [showExclusiveInfo, setShowExclusiveInfo] = useState(false);
   const [showExpandInfo, setShowExpandInfo] = useState(false);
+  const [showFloatingBtn, setShowFloatingBtn] = useState(false);
 
   const updateFilter = (key: keyof FiltersData, section: FilterSection) => {
     setFilters(prev => ({ ...prev, [key]: section }));
@@ -818,17 +829,40 @@ export default function FiltersScreen() {
     router.replace('/swipe');
   };
 
+  const handleScroll = (event: any) => {
+    const scrollY = event.nativeEvent.contentOffset.y;
+    // Show floating button when scrolled past the top button (about 100px)
+    setShowFloatingBtn(scrollY > 100);
+  };
+
   const buttonText = fromProfile ? 'Resume the show' : "Let's Start";
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Header */}
+      {/* Header with floating action when scrolled */}
       <View style={styles.headerBar}>
         <Text style={styles.headerTitle}>Preferences & Filters</Text>
-        <Text style={styles.optionalLabel}>(Optional)</Text>
+        {showFloatingBtn ? (
+          <TouchableOpacity 
+            style={styles.floatingHeaderBtn} 
+            onPress={handleStart}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.floatingHeaderBtnText}>{fromProfile ? 'Resume' : 'Start'}</Text>
+            <Ionicons name="arrow-forward" size={18} color={COLORS.white} />
+          </TouchableOpacity>
+        ) : (
+          <Text style={styles.optionalLabel}>(Optional)</Text>
+        )}
       </View>
 
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.scroll} 
+        contentContainerStyle={styles.scrollContent} 
+        showsVerticalScrollIndicator={false}
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
+      >
         {/* Start Button - Top */}
         <TouchableOpacity style={styles.startBtnTop} onPress={handleStart} activeOpacity={0.8}>
           <Ionicons name="film-outline" size={20} color={COLORS.white} />
@@ -952,6 +986,8 @@ export default function FiltersScreen() {
             config={config}
             section={filters[config.key] as FilterSection}
             onUpdate={(s) => updateFilter(config.key, s)}
+            onShowExclusiveInfo={() => setShowExclusiveInfo(true)}
+            onShowExpandInfo={() => setShowExpandInfo(true)}
           />
         ))}
 
@@ -998,6 +1034,20 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: COLORS.text },
   optionalLabel: { fontSize: 12, color: COLORS.textMuted, fontStyle: 'italic' },
+  floatingHeaderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs,
+    backgroundColor: COLORS.primary,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: BORDER_RADIUS.full,
+  },
+  floatingHeaderBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.white,
+  },
   scroll: { flex: 1 },
   scrollContent: { padding: SPACING.l, paddingBottom: SPACING.xxl },
   startBtnTop: {
