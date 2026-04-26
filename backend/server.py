@@ -11,6 +11,7 @@ from typing import List, Optional, Dict, Any
 import uuid
 from datetime import datetime, timezone, timedelta
 import random
+import socketio
 
 # Import recommendation engine
 from recommendation_engine import (
@@ -34,6 +35,138 @@ db = client[os.environ['DB_NAME']]
 
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
+
+# =============================================
+# Socket.IO Server Setup for Real-Time Updates
+# =============================================
+sio = socketio.AsyncServer(
+    async_mode='asgi',
+    cors_allowed_origins='*',
+    logger=True,
+    engineio_logger=False
+)
+
+# Store connected admin clients
+connected_admins: Dict[str, str] = {}  # sid -> admin_email
+
+
+@sio.event
+async def connect(sid, environ, auth):
+    """Handle new WebSocket connection"""
+    logger.info(f"Admin client connected: {sid}")
+    # For now, allow all connections (in production, verify auth token)
+    token = auth.get('token') if auth else None
+    if token and token in admin_tokens:
+        connected_admins[sid] = admin_tokens[token].get('email', 'unknown')
+        await sio.emit('connection_status', {'status': 'connected'}, room=sid)
+        # Send initial metrics
+        await broadcast_metrics()
+    else:
+        # Allow connection but note it's unauthenticated
+        connected_admins[sid] = 'guest'
+        await sio.emit('connection_status', {'status': 'connected'}, room=sid)
+
+
+@sio.event
+async def disconnect(sid):
+    """Handle WebSocket disconnection"""
+    logger.info(f"Admin client disconnected: {sid}")
+    if sid in connected_admins:
+        del connected_admins[sid]
+
+
+async def broadcast_metrics():
+    """Broadcast updated metrics to all connected admins"""
+    if not connected_admins:
+        return
+    
+    try:
+        now = datetime.now(timezone.utc)
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        week_ago = now - timedelta(days=7)
+        month_ago = now - timedelta(days=30)
+        
+        total_users = await db.users.count_documents({})
+        new_signups_today = await db.users.count_documents({
+            "created_at": {"$gte": today_start.isoformat()}
+        })
+        
+        profiles = await db.user_profiles.find({}, {"gender": 1}).to_list(length=10000)
+        male = sum(1 for p in profiles if p.get("gender", "").lower() in ["male", "man", "m"])
+        female = sum(1 for p in profiles if p.get("gender", "").lower() in ["female", "woman", "f"])
+        other = len(profiles) - male - female
+        total_with_gender = male + female + other or 1
+        
+        total_swipes = await db.user_swipes.count_documents({})
+        swipes_today = await db.user_swipes.count_documents({
+            "created_at": {"$gte": today_start.isoformat()}
+        })
+        
+        try:
+            total_matches = await db.user_matches.count_documents({})
+        except:
+            total_matches = 0
+        
+        active_today = await db.user_swipes.distinct("user_id", {
+            "created_at": {"$gte": today_start.isoformat()}
+        })
+        
+        wau_users = await db.user_swipes.distinct("user_id", {
+            "created_at": {"$gte": week_ago.isoformat()}
+        })
+        mau_users = await db.user_swipes.distinct("user_id", {
+            "created_at": {"$gte": month_ago.isoformat()}
+        })
+        
+        metrics = {
+            "totalUsers": total_users,
+            "activeToday": len(active_today),
+            "dau": len(active_today),
+            "wau": len(wau_users),
+            "mau": len(mau_users),
+            "newSignupsToday": new_signups_today,
+            "totalMatches": total_matches,
+            "totalSwipesToday": swipes_today,
+            "avgSessionDuration": 12,
+            "subscriptionRate": 0,
+            "retentionRate": 68,
+            "genderDistribution": {
+                "male": round(male / total_with_gender * 100),
+                "female": round(female / total_with_gender * 100),
+                "other": round(other / total_with_gender * 100),
+            }
+        }
+        
+        await sio.emit('metrics_update', metrics)
+    except Exception as e:
+        logger.error(f"Error broadcasting metrics: {e}")
+
+
+async def broadcast_new_user(user_data: dict):
+    """Broadcast new user event to all connected admins"""
+    if connected_admins:
+        await sio.emit('new_user', user_data)
+        await broadcast_metrics()
+
+
+async def broadcast_user_updated(user_data: dict):
+    """Broadcast user update event to all connected admins"""
+    if connected_admins:
+        await sio.emit('user_updated', user_data)
+
+
+async def broadcast_new_swipe(swipe_data: dict):
+    """Broadcast new swipe event to all connected admins"""
+    if connected_admins:
+        await sio.emit('new_swipe', swipe_data)
+        await broadcast_metrics()
+
+
+async def broadcast_new_match(match_data: dict):
+    """Broadcast new match event to all connected admins"""
+    if connected_admins:
+        await sio.emit('new_match', match_data)
+        await broadcast_metrics()
 
 # API Keys (hardcoded as per requirements)
 GOOGLE_MAPS_API_KEY = "AIzaSyB-JXNABvg2sas93j8AycV82Ykn0IF2Erc"
@@ -395,6 +528,12 @@ async def verify_otp(req: VerifyOTPRequest):
         )
         
         logger.info(f"New user created: {user_id} via {req.type}: {identifier}")
+        
+        # Broadcast new user to admin dashboard
+        try:
+            await broadcast_new_user(user_data)
+        except Exception as e:
+            logger.error(f"Failed to broadcast new user: {e}")
         
     else:
         # Existing user login
@@ -921,6 +1060,26 @@ async def record_swipe(req: SwipeRequest):
         upsert=True
     )
     
+    # Broadcast swipe to admin dashboard (real-time update)
+    try:
+        # Get user name for display
+        user = await db.users.find_one({"user_id": req.user_id}, {"name": 1})
+        profile = await db.user_profiles.find_one({"user_id": req.user_id}, {"name": 1})
+        user_name = profile.get("name") if profile else (user.get("name") if user else req.user_id)
+        
+        await broadcast_new_swipe({
+            "user_id": req.user_id,
+            "user_name": user_name,
+            "movie_id": req.movie_id,
+            "movie_title": movie_details.get("title", ""),
+            "direction": req.direction,
+            "rating": req.rating,
+            "reason": req.reason,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception as e:
+        logger.error(f"Failed to broadcast swipe: {e}")
+    
     return {
         "success": True,
         "message": f"Swipe recorded and taste vector updated",
@@ -1418,8 +1577,92 @@ async def update_user_status(user_id: str, status: str):
     return {"success": True}
 
 
+class BanUserRequest(BaseModel):
+    reason: Optional[str] = None
+
+
+@api_router.post("/admin/users/{user_id}/ban")
+async def ban_user(user_id: str, req: BanUserRequest = None):
+    """Ban a user"""
+    user = await db.users.find_one({"user_id": user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    await db.users.update_one(
+        {"user_id": user_id},
+        {"$set": {
+            "status": "banned",
+            "banned_at": datetime.now(timezone.utc).isoformat(),
+            "ban_reason": req.reason if req else None,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }}
+    )
+    
+    # Broadcast user update to admin dashboard
+    updated_user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    await broadcast_user_updated(updated_user)
+    
+    logger.info(f"User {user_id} has been banned. Reason: {req.reason if req else 'No reason provided'}")
+    return {"success": True, "message": f"User {user_id} has been banned"}
+
+
+@api_router.post("/admin/users/{user_id}/unban")
+async def unban_user(user_id: str):
+    """Unban a user"""
+    user = await db.users.find_one({"user_id": user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    await db.users.update_one(
+        {"user_id": user_id},
+        {"$set": {
+            "status": "active",
+            "unbanned_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        },
+        "$unset": {
+            "banned_at": "",
+            "ban_reason": ""
+        }}
+    )
+    
+    # Broadcast user update to admin dashboard
+    updated_user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    await broadcast_user_updated(updated_user)
+    
+    logger.info(f"User {user_id} has been unbanned")
+    return {"success": True, "message": f"User {user_id} has been unbanned"}
+
+
+@api_router.get("/admin/users/{user_id}")
+async def get_user_details(user_id: str):
+    """Get detailed user information"""
+    user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    profile = await db.user_profiles.find_one({"user_id": user_id}, {"_id": 0})
+    swipe_count = await db.user_swipes.count_documents({"user_id": user_id})
+    
+    # Get recent swipes
+    recent_swipes = await db.user_swipes.find(
+        {"user_id": user_id}, {"_id": 0}
+    ).sort("created_at", -1).limit(20).to_list(length=20)
+    
+    return {
+        **user,
+        "profile": profile,
+        "total_swipes": swipe_count,
+        "recent_swipes": recent_swipes
+    }
+
+
 # Include router after all routes are defined
 app.include_router(api_router)
+
+
+# Mount Socket.IO server
+socket_app = socketio.ASGIApp(sio, app)
 
 
 app.add_middleware(

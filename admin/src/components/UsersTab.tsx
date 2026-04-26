@@ -18,18 +18,24 @@ import {
   Ban,
   CheckCircle,
   Eye,
+  Shield,
+  ShieldOff,
+  Loader2,
 } from 'lucide-react'
 import { useDashboardStore, UserType } from '../store/dashboardStore'
 import { format } from 'date-fns'
 
 export const UsersTab: React.FC = () => {
-  const { users, setUsers, setLoading } = useDashboardStore()
+  const { users, setUsers, setLoading, updateUser } = useDashboardStore()
   const [search, setSearch] = useState('')
   const [sortField, setSortField] = useState<keyof UserType>('created_at')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [selectedUser, setSelectedUser] = useState<UserType | null>(null)
   const [page, setPage] = useState(1)
   const [statusFilter, setStatusFilter] = useState<string>('all')
+  const [actionLoading, setActionLoading] = useState<string | null>(null)
+  const [showBanModal, setShowBanModal] = useState<UserType | null>(null)
+  const [banReason, setBanReason] = useState('')
   const perPage = 20
 
   useEffect(() => {
@@ -48,6 +54,50 @@ export const UsersTab: React.FC = () => {
       console.error('Failed to fetch users:', err)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleBanUser = async (userId: string, reason?: string) => {
+    setActionLoading(userId)
+    try {
+      const res = await fetch(`/api/admin/users/${userId}/ban`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason }),
+      })
+      if (res.ok) {
+        // Update local state
+        const user = users.find((u) => u.user_id === userId)
+        if (user) {
+          updateUser({ ...user, status: 'banned' })
+        }
+        setShowBanModal(null)
+        setBanReason('')
+      }
+    } catch (err) {
+      console.error('Failed to ban user:', err)
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  const handleUnbanUser = async (userId: string) => {
+    setActionLoading(userId)
+    try {
+      const res = await fetch(`/api/admin/users/${userId}/unban`, {
+        method: 'POST',
+      })
+      if (res.ok) {
+        // Update local state
+        const user = users.find((u) => u.user_id === userId)
+        if (user) {
+          updateUser({ ...user, status: 'active' })
+        }
+      }
+    } catch (err) {
+      console.error('Failed to unban user:', err)
+    } finally {
+      setActionLoading(null)
     }
   }
 
@@ -263,15 +313,51 @@ export const UsersTab: React.FC = () => {
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setSelectedUser(user)
-                      }}
-                      className="p-2 hover:bg-[var(--bg-card)] rounded-lg transition-colors"
-                    >
-                      <Eye size={16} className="text-[var(--text-secondary)]" />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setSelectedUser(user)
+                        }}
+                        className="p-2 hover:bg-[var(--bg-card)] rounded-lg transition-colors"
+                        title="View details"
+                      >
+                        <Eye size={16} className="text-[var(--text-secondary)]" />
+                      </button>
+                      {user.status !== 'banned' ? (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setShowBanModal(user)
+                          }}
+                          disabled={actionLoading === user.user_id}
+                          className="p-2 hover:bg-[var(--error)]/10 rounded-lg transition-colors"
+                          title="Ban user"
+                        >
+                          {actionLoading === user.user_id ? (
+                            <Loader2 size={16} className="text-[var(--error)] animate-spin" />
+                          ) : (
+                            <ShieldOff size={16} className="text-[var(--error)]" />
+                          )}
+                        </button>
+                      ) : (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleUnbanUser(user.user_id)
+                          }}
+                          disabled={actionLoading === user.user_id}
+                          className="p-2 hover:bg-[var(--success)]/10 rounded-lg transition-colors"
+                          title="Unban user"
+                        >
+                          {actionLoading === user.user_id ? (
+                            <Loader2 size={16} className="text-[var(--success)] animate-spin" />
+                          ) : (
+                            <Shield size={16} className="text-[var(--success)]" />
+                          )}
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -310,6 +396,61 @@ export const UsersTab: React.FC = () => {
       {/* User Detail Drawer */}
       {selectedUser && (
         <UserDetailDrawer user={selectedUser} onClose={() => setSelectedUser(null)} />
+      )}
+
+      {/* Ban User Modal */}
+      {showBanModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setShowBanModal(null)} />
+          <div className="relative bg-[var(--bg-secondary)] rounded-xl p-6 w-full max-w-md border border-[var(--border-color)]">
+            <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+              <ShieldOff className="text-[var(--error)]" size={20} />
+              Ban User
+            </h3>
+            <p className="text-[var(--text-secondary)] mb-4">
+              Are you sure you want to ban <span className="font-medium text-white">{showBanModal.name || showBanModal.email}</span>?
+              This will prevent them from accessing the app.
+            </p>
+            <div className="mb-4">
+              <label className="block text-sm font-medium mb-2">Reason (optional)</label>
+              <textarea
+                value={banReason}
+                onChange={(e) => setBanReason(e.target.value)}
+                placeholder="Enter reason for banning..."
+                className="w-full px-3 py-2 bg-[var(--bg-card)] border border-[var(--border-color)] rounded-lg focus:outline-none focus:border-[var(--accent)] text-sm resize-none"
+                rows={3}
+              />
+            </div>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  setShowBanModal(null)
+                  setBanReason('')
+                }}
+                className="px-4 py-2 bg-[var(--bg-card)] rounded-lg hover:bg-[var(--bg-hover)] transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleBanUser(showBanModal.user_id, banReason)}
+                disabled={actionLoading === showBanModal.user_id}
+                className="px-4 py-2 bg-[var(--error)] hover:bg-[var(--error)]/80 text-white rounded-lg transition-colors flex items-center gap-2 disabled:opacity-50"
+              >
+                {actionLoading === showBanModal.user_id ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    Banning...
+                  </>
+                ) : (
+                  <>
+                    <ShieldOff size={16} />
+                    Ban User
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
