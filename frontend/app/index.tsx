@@ -324,7 +324,7 @@ export default function AuthScreen() {
             <Text style={styles.title}>Film Companion</Text>
             <View style={styles.divider} />
             <Text style={styles.subtitle}>
-              Find people who have same movie taste as you.
+              Find people who have the same movie taste as you
             </Text>
           </View>
 

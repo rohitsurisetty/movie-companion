@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import uuid
 from datetime import datetime, timezone, timedelta
+import random
 
 # Import recommendation engine
 from recommendation_engine import (
@@ -47,6 +48,30 @@ class SessionRequest(BaseModel):
 class MockLoginRequest(BaseModel):
     email: str
     name: str
+
+
+class SendEmailOTPRequest(BaseModel):
+    email: str
+
+
+class SendPhoneOTPRequest(BaseModel):
+    phone: str
+
+
+class VerifyOTPRequest(BaseModel):
+    type: str  # 'email' or 'phone'
+    identifier: str  # email or phone number
+    otp: str
+    name: Optional[str] = None  # Only required for new users
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+# In-memory OTP store (for demo/mock purposes)
+# In production, use Redis or database with TTL
+otp_store: Dict[str, Dict[str, Any]] = {}
 
 
 # =============================================
@@ -187,6 +212,255 @@ async def mock_login(req: MockLoginRequest):
         "created_at": datetime.now(timezone.utc).isoformat()
     })
     return {"user_id": user_id, "email": req.email, "name": req.name, "session_token": session_token}
+
+
+def generate_otp() -> str:
+    """Generate a 6-digit OTP"""
+    return str(random.randint(100000, 999999))
+
+
+def send_mock_welcome_email(email: str, name: str):
+    """
+    Mock welcome email - prints to console (from noreply@filmcompanion.com)
+    In production, this would use SendGrid/AWS SES/etc.
+    """
+    logger.info(f"""
+    ================================================================================
+    📧 WELCOME EMAIL SENT (MOCK)
+    ================================================================================
+    From: noreply@filmcompanion.com
+    To: {email}
+    Subject: Welcome to Film Companion! 🎬
+    
+    Hi {name}!
+    
+    Welcome to Film Companion - where movie lovers find their film soulmates!
+    
+    Start swiping on movies you love (or skip the ones you don't) and we'll help 
+    you connect with people who share your taste in cinema.
+    
+    Happy watching!
+    
+    - The Film Companion Team
+    ================================================================================
+    """)
+
+
+@api_router.post("/auth/send-email-otp")
+async def send_email_otp(req: SendEmailOTPRequest):
+    """
+    Send OTP to email address (mocked).
+    Returns is_new_user to indicate if name is needed during verification.
+    """
+    email = req.email.lower().strip()
+    
+    # Check if this email is already registered with another account (1:1 mapping)
+    existing = await db.users.find_one({"email": email})
+    is_new_user = existing is None
+    
+    # Generate 6-digit OTP
+    otp = generate_otp()
+    
+    # Store OTP with 5 min expiry
+    otp_store[f"email:{email}"] = {
+        "otp": otp,
+        "expires": datetime.now(timezone.utc) + timedelta(minutes=5),
+        "is_new_user": is_new_user,
+        "existing_user_id": existing.get("user_id") if existing else None,
+        "existing_name": existing.get("name") if existing else None,
+    }
+    
+    # In production, send actual email here
+    logger.info(f"""
+    ================================================================================
+    📧 EMAIL OTP SENT (MOCK)
+    ================================================================================
+    From: noreply@filmcompanion.com
+    To: {email}
+    Subject: Your Film Companion OTP
+    
+    Your verification code is: {otp}
+    
+    This code will expire in 5 minutes.
+    ================================================================================
+    """)
+    
+    return {
+        "success": True,
+        "message": "OTP sent to your email",
+        "is_new_user": is_new_user,
+        "otp": otp,  # ONLY for testing - remove in production
+    }
+
+
+@api_router.post("/auth/send-phone-otp")
+async def send_phone_otp(req: SendPhoneOTPRequest):
+    """
+    Send OTP to phone number (mocked).
+    Returns is_new_user to indicate if name is needed during verification.
+    """
+    phone = req.phone.strip()
+    
+    # Check if this phone is already registered with another account (1:1 mapping)
+    existing = await db.users.find_one({"phone": phone})
+    is_new_user = existing is None
+    
+    # Generate 6-digit OTP
+    otp = generate_otp()
+    
+    # Store OTP with 5 min expiry
+    otp_store[f"phone:{phone}"] = {
+        "otp": otp,
+        "expires": datetime.now(timezone.utc) + timedelta(minutes=5),
+        "is_new_user": is_new_user,
+        "existing_user_id": existing.get("user_id") if existing else None,
+        "existing_name": existing.get("name") if existing else None,
+    }
+    
+    # In production, send actual SMS here via Twilio/etc
+    logger.info(f"""
+    ================================================================================
+    📱 SMS OTP SENT (MOCK)
+    ================================================================================
+    To: {phone}
+    Message: Your Film Companion OTP is: {otp}. Valid for 5 minutes.
+    ================================================================================
+    """)
+    
+    return {
+        "success": True,
+        "message": "OTP sent to your phone",
+        "is_new_user": is_new_user,
+        "otp": otp,  # ONLY for testing - remove in production
+    }
+
+
+@api_router.post("/auth/verify-otp")
+async def verify_otp(req: VerifyOTPRequest):
+    """
+    Verify OTP and login/signup user.
+    For new users: creates account with provided name.
+    For existing users: logs in and returns existing data.
+    Enforces strict 1:1 mapping of email/phone to user_id.
+    """
+    identifier = req.identifier.lower().strip() if req.type == "email" else req.identifier.strip()
+    otp_key = f"{req.type}:{identifier}"
+    
+    # Check if OTP exists
+    stored = otp_store.get(otp_key)
+    if not stored:
+        raise HTTPException(status_code=400, detail="OTP expired or not found. Please request a new one.")
+    
+    # Check expiry
+    if datetime.now(timezone.utc) > stored["expires"]:
+        del otp_store[otp_key]
+        raise HTTPException(status_code=400, detail="OTP expired. Please request a new one.")
+    
+    # Verify OTP
+    if stored["otp"] != req.otp:
+        raise HTTPException(status_code=400, detail="Invalid OTP. Please check and try again.")
+    
+    # OTP is valid - clean up
+    del otp_store[otp_key]
+    
+    is_new_user = stored["is_new_user"]
+    
+    if is_new_user:
+        # Create new user
+        if not req.name:
+            raise HTTPException(status_code=400, detail="Name is required for new users")
+        
+        user_id = f"user_{uuid.uuid4().hex[:12]}"
+        session_token = f"session_{uuid.uuid4().hex}"
+        
+        user_data = {
+            "user_id": user_id,
+            "name": req.name.strip(),
+            "picture": "",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        
+        # Store email or phone based on login type (strict 1:1 mapping)
+        if req.type == "email":
+            user_data["email"] = identifier
+        else:
+            user_data["phone"] = identifier
+        
+        await db.users.insert_one(user_data)
+        
+        # Send welcome email
+        send_mock_welcome_email(
+            identifier if req.type == "email" else f"{identifier}@phone.filmcompanion.com",
+            req.name.strip()
+        )
+        
+        logger.info(f"New user created: {user_id} via {req.type}: {identifier}")
+        
+    else:
+        # Existing user login
+        user_id = stored["existing_user_id"]
+        session_token = f"session_{uuid.uuid4().hex}"
+        
+        logger.info(f"Existing user login: {user_id} via {req.type}: {identifier}")
+    
+    # Create session
+    await db.user_sessions.insert_one({
+        "user_id": user_id,
+        "session_token": session_token,
+        "expires_at": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    
+    # Get user data
+    user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    
+    return {
+        "user_id": user_id,
+        "email": user.get("email", ""),
+        "phone": user.get("phone", ""),
+        "name": user.get("name", ""),
+        "picture": user.get("picture", ""),
+        "session_token": session_token,
+        "is_new_user": is_new_user,
+    }
+
+
+@api_router.post("/auth/forgot-password")
+async def forgot_password(req: ForgotPasswordRequest):
+    """
+    Send password reset link (mocked).
+    For OTP-based auth, this essentially sends a new OTP for re-verification.
+    """
+    email = req.email.lower().strip()
+    
+    # Check if user exists
+    existing = await db.users.find_one({"email": email})
+    
+    # Always return success to prevent email enumeration
+    logger.info(f"""
+    ================================================================================
+    📧 PASSWORD RESET EMAIL SENT (MOCK)
+    ================================================================================
+    From: noreply@filmcompanion.com
+    To: {email}
+    Subject: Reset your Film Companion Password
+    
+    Hi there!
+    
+    {"We received a request to reset your password." if existing else "If you have an account with us, you'll receive further instructions."}
+    
+    {"Click here to reset your password: https://filmcompanion.com/reset?token=mock_token_123" if existing else ""}
+    
+    If you didn't request this, please ignore this email.
+    
+    - The Film Companion Team
+    ================================================================================
+    """)
+    
+    return {
+        "success": True,
+        "message": "If an account with that email exists, we've sent a reset link.",
+    }
 
 
 @api_router.get("/auth/me")

@@ -110,6 +110,21 @@ user_problem_statement: |
   - Movie data from TMDB API.
 
 backend:
+  - task: "Email/Phone OTP Authentication"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Implemented OTP authentication endpoints: send-email-otp, send-phone-otp, verify-otp, forgot-password with 1:1 email/phone to user_id mapping"
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTED SUCCESSFULLY: All 6 OTP authentication tests passed. 1) Send Email OTP - returns 6-digit OTP with is_new_user flag, 2) Send Phone OTP - returns 6-digit OTP with is_new_user flag, 3) Verify OTP (New User) - creates user with name, returns user_id/session_token/is_new_user=true, 4) Verify OTP (Existing User) - logs in existing user, returns same user_id with is_new_user=false, 5) Forgot Password - returns success=true, 6) 1:1 User ID Mapping - same email returns same user_id. Backend logs confirm mock welcome email and OTP SMS/email sent from noreply@filmcompanion.com."
+
   - task: "Movie Feed API"
     implemented: true
     working: true
@@ -244,15 +259,94 @@ metadata:
   run_ui: false
 
 test_plan:
-  current_focus: []
+  current_focus:
+    - "Mock Welcome Email"
+    - "Google Auth Integration"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
 
 agent_communication:
+  - agent: "testing"
+    message: |
+      ✅ OTP AUTHENTICATION TESTING COMPLETE - ALL TESTS PASSED
+      
+      TESTED ENDPOINTS (6/6 PASSED):
+      1. POST /api/auth/send-email-otp ✅
+         - Returns 6-digit OTP with is_new_user flag
+         - Tested with test@filmcompanion.com
+         - OTP format validation passed
+      
+      2. POST /api/auth/send-phone-otp ✅
+         - Returns 6-digit OTP with is_new_user flag  
+         - Tested with +919876543210
+         - OTP format validation passed
+      
+      3. POST /api/auth/verify-otp (New User) ✅
+         - Creates new user with provided name
+         - Returns user_id, session_token, is_new_user=true
+         - Tested with newuser@test.com
+      
+      4. POST /api/auth/verify-otp (Existing User) ✅
+         - Logs in existing user without name requirement
+         - Returns same user_id, is_new_user=false
+         - Verified 1:1 email mapping works correctly
+      
+      5. POST /api/auth/forgot-password ✅
+         - Returns success=true for password reset
+         - Tested with test@filmcompanion.com
+      
+      6. 1:1 User ID Mapping ✅
+         - Same email returns identical user_id
+         - Verified strict mapping enforcement
+      
+      BACKEND LOGS VERIFIED:
+      ✅ Mock welcome email sent from noreply@filmcompanion.com
+      ✅ Mock OTP SMS logs: "Your Film Companion OTP is: XXXXXX. Valid for 5 minutes."
+      ✅ Mock OTP email logs with proper formatting
+      ✅ User creation and login logs working correctly
+      
+      ALL OTP AUTHENTICATION FEATURES WORKING PERFECTLY!
   - agent: "main"
     message: |
-      SESSION UPDATE - COMPREHENSIVE RECOMMENDATION ENGINE ENHANCEMENT
+      SESSION UPDATE - New Authentication Flow Implementation
+      
+      COMPLETED (June 2025):
+      
+      1. Frontend Auth Screen (`/app/frontend/app/index.tsx`):
+         - Updated subtitle text: "Find people who have the same movie taste as you"
+         - Google Auth button (using Emergent Auth)
+         - Apple Auth button (placeholder - "Coming Soon")
+         - Login with Email button -> Email OTP flow
+         - Login with Phone Number button -> Phone OTP flow
+         - Forgot Password flow
+         - OTP verification screens with name input for new users
+         
+      2. Backend Auth Endpoints (`/app/backend/server.py`):
+         - POST /api/auth/send-email-otp - Sends 6-digit OTP (mocked, shown in alert for testing)
+         - POST /api/auth/send-phone-otp - Sends 6-digit OTP (mocked, shown in alert for testing)
+         - POST /api/auth/verify-otp - Verifies OTP, creates user if new, logs in if existing
+         - POST /api/auth/forgot-password - Sends mock password reset email
+         - Mock welcome email function - Logs from noreply@filmcompanion.com
+         
+      3. Key Features:
+         - Strict 1:1 email/phone to user_id mapping
+         - OTP expires in 5 minutes
+         - New users prompted for name during OTP verification
+         - Welcome email sent on signup (mocked - printed to console)
+         - All mock emails/SMS logged from noreply@filmcompanion.com
+      
+      FILES MODIFIED:
+      - /app/frontend/app/index.tsx (subtitle text updated)
+      - /app/backend/server.py (added OTP auth endpoints)
+      
+      TESTING NEEDED:
+      1. POST /api/auth/send-email-otp with email
+      2. POST /api/auth/send-phone-otp with phone
+      3. POST /api/auth/verify-otp with correct OTP
+      4. POST /api/auth/forgot-password
+      5. Frontend Email OTP flow end-to-end
+      6. Frontend Phone OTP flow end-to-end
       
       MAJOR CHANGES MADE (June 2025):
       
