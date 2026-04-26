@@ -1135,6 +1135,289 @@ async def reset_user_completely(user_id: str):
     }
 
 
+# =============================================
+# Admin Dashboard Endpoints
+# =============================================
+
+# Admin credentials (for MVP - in production, use proper auth)
+ADMIN_CREDENTIALS = {
+    "admin@filmcompanion.com": {
+        "password": "admin123",
+        "name": "Admin User",
+        "role": "super_admin",
+    }
+}
+
+# Admin tokens store (in-memory for MVP)
+admin_tokens: Dict[str, Dict[str, Any]] = {}
+
+
+class AdminLoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class AdminReportUpdate(BaseModel):
+    status: str
+
+
+@api_router.post("/admin/login")
+async def admin_login(req: AdminLoginRequest):
+    """Admin login endpoint"""
+    admin = ADMIN_CREDENTIALS.get(req.email.lower())
+    if not admin or admin["password"] != req.password:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    token = f"admin_{uuid.uuid4().hex}"
+    admin_tokens[token] = {
+        "email": req.email.lower(),
+        "name": admin["name"],
+        "role": admin["role"],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    
+    # Also store admin in database for role management
+    await db.admins.update_one(
+        {"email": req.email.lower()},
+        {"$set": {
+            "email": req.email.lower(),
+            "name": admin["name"],
+            "role": admin["role"],
+            "last_login": datetime.now(timezone.utc).isoformat(),
+        }},
+        upsert=True
+    )
+    
+    return {
+        "token": token,
+        "admin": {
+            "id": req.email.lower(),
+            "email": req.email.lower(),
+            "name": admin["name"],
+            "role": admin["role"],
+        }
+    }
+
+
+@api_router.get("/admin/metrics")
+async def get_admin_metrics():
+    """Get dashboard metrics"""
+    now = datetime.now(timezone.utc)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    week_ago = now - timedelta(days=7)
+    month_ago = now - timedelta(days=30)
+    
+    # Total users
+    total_users = await db.users.count_documents({})
+    
+    # Users created today
+    new_signups_today = await db.users.count_documents({
+        "created_at": {"$gte": today_start.isoformat()}
+    })
+    
+    # Get all profiles for gender distribution
+    profiles = await db.user_profiles.find({}, {"gender": 1}).to_list(length=10000)
+    male = sum(1 for p in profiles if p.get("gender", "").lower() in ["male", "man", "m"])
+    female = sum(1 for p in profiles if p.get("gender", "").lower() in ["female", "woman", "f"])
+    other = len(profiles) - male - female
+    total_with_gender = male + female + other or 1
+    
+    # Total swipes
+    total_swipes = await db.user_swipes.count_documents({})
+    swipes_today = await db.user_swipes.count_documents({
+        "created_at": {"$gte": today_start.isoformat()}
+    })
+    
+    # Total matches (placeholder - matches collection may not exist yet)
+    try:
+        total_matches = await db.user_matches.count_documents({})
+    except:
+        total_matches = 0
+    
+    # Active users (users with swipes in the last 24 hours)
+    active_today = await db.user_swipes.distinct("user_id", {
+        "created_at": {"$gte": today_start.isoformat()}
+    })
+    
+    # WAU/MAU approximations
+    wau_users = await db.user_swipes.distinct("user_id", {
+        "created_at": {"$gte": week_ago.isoformat()}
+    })
+    mau_users = await db.user_swipes.distinct("user_id", {
+        "created_at": {"$gte": month_ago.isoformat()}
+    })
+    
+    return {
+        "totalUsers": total_users,
+        "activeToday": len(active_today),
+        "dau": len(active_today),
+        "wau": len(wau_users),
+        "mau": len(mau_users),
+        "newSignupsToday": new_signups_today,
+        "totalMatches": total_matches,
+        "totalSwipesToday": swipes_today,
+        "avgSessionDuration": 12,  # Placeholder
+        "subscriptionRate": 0,  # Placeholder
+        "retentionRate": 68,  # Placeholder
+        "genderDistribution": {
+            "male": round(male / total_with_gender * 100),
+            "female": round(female / total_with_gender * 100),
+            "other": round(other / total_with_gender * 100),
+        }
+    }
+
+
+@api_router.get("/admin/users")
+async def get_admin_users(limit: int = 500, skip: int = 0):
+    """Get all users with their profiles"""
+    users = await db.users.find({}, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(length=limit)
+    
+    # Enrich with profile data
+    enriched_users = []
+    for user in users:
+        profile = await db.user_profiles.find_one({"user_id": user["user_id"]}, {"_id": 0})
+        
+        # Get swipe count
+        swipe_count = await db.user_swipes.count_documents({"user_id": user["user_id"]})
+        
+        enriched_users.append({
+            "user_id": user["user_id"],
+            "name": profile.get("name") if profile else user.get("name", ""),
+            "email": user.get("email", ""),
+            "phone": user.get("phone", ""),
+            "gender": profile.get("gender", "") if profile else "",
+            "age": profile.get("age", 0) if profile else 0,
+            "location": profile.get("location", "") if profile else "",
+            "created_at": user.get("created_at", ""),
+            "last_active": user.get("last_active", ""),
+            "status": user.get("status", "active"),
+            "subscription": user.get("subscription", "free"),
+            "genres": profile.get("genres", []) if profile else [],
+            "filmLanguages": profile.get("filmLanguages", []) if profile else [],
+            "topMovies": profile.get("topMovies", []) if profile else [],
+            "total_swipes": swipe_count,
+            "total_matches": 0,  # Placeholder
+        })
+    
+    return {"users": enriched_users, "total": len(enriched_users)}
+
+
+@api_router.get("/admin/swipes")
+async def get_admin_swipes(limit: int = 500, user_id: str = None):
+    """Get all swipes with user info"""
+    query = {}
+    if user_id:
+        query["user_id"] = user_id
+    
+    swipes = await db.user_swipes.find(query, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(length=limit)
+    
+    # Get user names for each swipe
+    user_ids = list(set(s["user_id"] for s in swipes))
+    users = await db.users.find({"user_id": {"$in": user_ids}}, {"user_id": 1, "name": 1}).to_list(length=len(user_ids))
+    user_map = {u["user_id"]: u.get("name", "") for u in users}
+    
+    # Also check profiles for names
+    profiles = await db.user_profiles.find({"user_id": {"$in": user_ids}}, {"user_id": 1, "name": 1}).to_list(length=len(user_ids))
+    for p in profiles:
+        if p.get("name"):
+            user_map[p["user_id"]] = p["name"]
+    
+    enriched_swipes = []
+    for swipe in swipes:
+        enriched_swipes.append({
+            **swipe,
+            "user_name": user_map.get(swipe["user_id"], swipe["user_id"]),
+        })
+    
+    return {"swipes": enriched_swipes, "total": len(enriched_swipes)}
+
+
+@api_router.get("/admin/matches")
+async def get_admin_matches(limit: int = 500):
+    """Get all matches"""
+    try:
+        matches = await db.user_matches.find({}, {"_id": 0}).sort("matched_at", -1).limit(limit).to_list(length=limit)
+    except:
+        matches = []
+    
+    # Get user names
+    user_ids = []
+    for m in matches:
+        user_ids.extend([m.get("user1_id"), m.get("user2_id")])
+    user_ids = list(set(filter(None, user_ids)))
+    
+    if user_ids:
+        profiles = await db.user_profiles.find({"user_id": {"$in": user_ids}}, {"user_id": 1, "name": 1}).to_list(length=len(user_ids))
+        name_map = {p["user_id"]: p.get("name", "") for p in profiles}
+    else:
+        name_map = {}
+    
+    enriched_matches = []
+    for match in matches:
+        enriched_matches.append({
+            **match,
+            "user1_name": name_map.get(match.get("user1_id"), ""),
+            "user2_name": name_map.get(match.get("user2_id"), ""),
+        })
+    
+    return {"matches": enriched_matches, "total": len(enriched_matches)}
+
+
+@api_router.get("/admin/reports")
+async def get_admin_reports(limit: int = 100):
+    """Get user reports for moderation"""
+    try:
+        reports = await db.user_reports.find({}, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(length=limit)
+    except:
+        reports = []
+    
+    # Get user names
+    user_ids = []
+    for r in reports:
+        user_ids.extend([r.get("reporter_id"), r.get("reported_id")])
+    user_ids = list(set(filter(None, user_ids)))
+    
+    if user_ids:
+        profiles = await db.user_profiles.find({"user_id": {"$in": user_ids}}, {"user_id": 1, "name": 1}).to_list(length=len(user_ids))
+        name_map = {p["user_id"]: p.get("name", "") for p in profiles}
+    else:
+        name_map = {}
+    
+    enriched_reports = []
+    for report in reports:
+        enriched_reports.append({
+            **report,
+            "reporter_name": name_map.get(report.get("reporter_id"), "Unknown"),
+            "reported_name": name_map.get(report.get("reported_id"), "Unknown"),
+        })
+    
+    return {"reports": enriched_reports, "total": len(enriched_reports)}
+
+
+@api_router.patch("/admin/reports/{report_id}")
+async def update_report_status(report_id: str, req: AdminReportUpdate):
+    """Update report status"""
+    result = await db.user_reports.update_one(
+        {"id": report_id},
+        {"$set": {"status": req.status, "updated_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Report not found")
+    return {"success": True}
+
+
+@api_router.patch("/admin/users/{user_id}/status")
+async def update_user_status(user_id: str, status: str):
+    """Update user status (active, inactive, banned)"""
+    result = await db.users.update_one(
+        {"user_id": user_id},
+        {"$set": {"status": status, "updated_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"success": True}
+
+
 # Include router after all routes are defined
 app.include_router(api_router)
 
