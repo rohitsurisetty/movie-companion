@@ -1444,11 +1444,11 @@ async def get_admin_metrics():
 
 @api_router.get("/admin/users")
 async def get_admin_users(limit: int = 500, skip: int = 0):
-    """Get all users with their profiles - merges data from users and user_profiles tables"""
+    """Get all users with their complete profiles - merges data from users and user_profiles tables"""
     
     # Get all users from both tables
     auth_users = await db.users.find({}, {"_id": 0}).sort("created_at", -1).to_list(length=1000)
-    profile_users = await db.user_profiles.find({}, {"_id": 0}).sort("created_at", -1).to_list(length=1000)
+    profile_users = await db.user_profiles.find({}, {"_id": 0}).sort("updated_at", -1).to_list(length=1000)
     
     # Create a map of all users by user_id
     all_users = {}
@@ -1461,20 +1461,44 @@ async def get_admin_users(limit: int = 500, skip: int = 0):
             "name": user.get("name", ""),
             "email": user.get("email", ""),
             "phone": user.get("phone", ""),
-            "gender": "",
-            "age": 0,
-            "location": "",
-            "city": "",
             "created_at": user.get("created_at", ""),
             "last_active": user.get("last_active", ""),
             "status": user.get("status", "active"),
             "subscription": user.get("subscription", "free"),
+            "has_profile": False,
+            # Empty profile fields
+            "gender": "",
+            "age": None,
+            "height": "",
+            "location": "",
+            "city": "",
+            "bio": "",
+            "zodiac": "",
+            "religion": "",
+            "education": "",
+            "workProfile": "",
+            "maritalStatus": "",
+            "siblings": "",
+            "familyPlanning": "",
+            "drinking": "",
+            "smoking": "",
+            "exercise": "",
+            "foodPreference": "",
+            "pets": "",
+            "travel": "",
+            "languagesSpoken": [],
+            "relationshipIntent": [],
+            "partnerPreference": "",
+            "movieDateMode": False,
+            "movieBuddyMode": False,
+            "movieFrequency": "",
+            "ottTheatre": "",
             "genres": [],
             "filmLanguages": [],
             "topMovies": [],
+            "topMoviesEnriched": [],
             "total_swipes": 0,
             "total_matches": 0,
-            "has_profile": False,
         }
     
     # Then add/merge profile users (these have detailed profile info)
@@ -1482,46 +1506,64 @@ async def get_admin_users(limit: int = 500, skip: int = 0):
         uid = profile.get("user_id", "")
         swipe_count = await db.user_swipes.count_documents({"user_id": uid})
         
+        profile_data = {
+            "user_id": uid,
+            "name": profile.get("name", ""),
+            "email": profile.get("email", ""),
+            "phone": profile.get("phone", ""),
+            "gender": profile.get("gender", ""),
+            "age": profile.get("age"),
+            "height": profile.get("height", ""),
+            "location": profile.get("location", ""),
+            "city": profile.get("city", ""),
+            "bio": profile.get("bio", ""),
+            "zodiac": profile.get("zodiac", ""),
+            "religion": profile.get("religion", ""),
+            "education": profile.get("education", ""),
+            "workProfile": profile.get("workProfile", ""),
+            "maritalStatus": profile.get("maritalStatus", ""),
+            "siblings": profile.get("siblings", ""),
+            "familyPlanning": profile.get("familyPlanning", ""),
+            "drinking": profile.get("drinking", ""),
+            "smoking": profile.get("smoking", ""),
+            "exercise": profile.get("exercise", ""),
+            "foodPreference": profile.get("foodPreference", ""),
+            "pets": profile.get("pets", ""),
+            "travel": profile.get("travel", ""),
+            "languagesSpoken": profile.get("languagesSpoken", []),
+            "relationshipIntent": profile.get("relationshipIntent", []),
+            "partnerPreference": profile.get("partnerPreference", ""),
+            "movieDateMode": profile.get("movieDateMode", False),
+            "movieBuddyMode": profile.get("movieBuddyMode", False),
+            "movieFrequency": profile.get("movieFrequency", ""),
+            "ottTheatre": profile.get("ottTheatre", ""),
+            "genres": profile.get("genres", []),
+            "filmLanguages": profile.get("filmLanguages", []),
+            "topMovies": profile.get("topMovies", []),
+            "topMoviesEnriched": profile.get("topMoviesEnriched", []),
+            "created_at": profile.get("created_at", profile.get("updated_at", "")),
+            "last_active": profile.get("updated_at", ""),
+            "status": "active",
+            "subscription": "free",
+            "total_swipes": swipe_count,
+            "total_matches": 0,
+            "has_profile": True,
+        }
+        
         if uid in all_users:
-            # Merge with existing auth user
-            all_users[uid].update({
-                "name": profile.get("name") or all_users[uid]["name"],
-                "gender": profile.get("gender", ""),
-                "age": profile.get("age", 0),
-                "location": profile.get("location", ""),
-                "city": profile.get("city", ""),
-                "genres": profile.get("genres", []),
-                "filmLanguages": profile.get("filmLanguages", []),
-                "topMovies": profile.get("topMovies", []),
-                "total_swipes": swipe_count,
-                "has_profile": True,
-            })
+            # Merge with existing auth user - keep auth email/phone if profile doesn't have them
+            existing = all_users[uid]
+            profile_data["email"] = profile_data["email"] or existing.get("email", "")
+            profile_data["phone"] = profile_data["phone"] or existing.get("phone", "")
+            profile_data["created_at"] = existing.get("created_at") or profile_data["created_at"]
+            all_users[uid] = profile_data
         else:
             # New user from profiles (not in auth table)
-            all_users[uid] = {
-                "user_id": uid,
-                "name": profile.get("name", ""),
-                "email": profile.get("email", ""),
-                "phone": profile.get("phone", ""),
-                "gender": profile.get("gender", ""),
-                "age": profile.get("age", 0),
-                "location": profile.get("location", ""),
-                "city": profile.get("city", ""),
-                "created_at": profile.get("created_at", ""),
-                "last_active": profile.get("updated_at", ""),
-                "status": "active",
-                "subscription": "free",
-                "genres": profile.get("genres", []),
-                "filmLanguages": profile.get("filmLanguages", []),
-                "topMovies": profile.get("topMovies", []),
-                "total_swipes": swipe_count,
-                "total_matches": 0,
-                "has_profile": True,
-            }
+            all_users[uid] = profile_data
     
     # Convert to list and sort by created_at (most recent first)
     enriched_users = list(all_users.values())
-    enriched_users.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    enriched_users.sort(key=lambda x: x.get("created_at", "") or "", reverse=True)
     
     # Apply pagination
     paginated = enriched_users[skip:skip + limit]

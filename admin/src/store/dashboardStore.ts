@@ -22,8 +22,30 @@ export interface UserType {
   phone?: string
   gender?: string
   age?: number
+  height?: string
   location?: string
   city?: string
+  bio?: string
+  zodiac?: string
+  religion?: string
+  education?: string
+  workProfile?: string
+  maritalStatus?: string
+  siblings?: string
+  familyPlanning?: string
+  drinking?: string
+  smoking?: string
+  exercise?: string
+  foodPreference?: string
+  pets?: string
+  travel?: string
+  languagesSpoken?: string[]
+  relationshipIntent?: string[]
+  partnerPreference?: string
+  movieDateMode?: boolean
+  movieBuddyMode?: boolean
+  movieFrequency?: string
+  ottTheatre?: string
   created_at: string
   last_active?: string
   status: 'active' | 'inactive' | 'banned'
@@ -31,6 +53,7 @@ export interface UserType {
   genres?: string[]
   filmLanguages?: string[]
   topMovies?: any[]
+  topMoviesEnriched?: any[]
   total_swipes?: number
   total_matches?: number
   has_profile?: boolean
@@ -91,7 +114,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
   setUsers: (users) => set({ users }),
   addUser: (user) => set((state) => ({ users: [user, ...state.users] })),
   updateUser: (user) => set((state) => ({
-    users: state.users.map((u) => (u.user_id === user.user_id ? user : u)),
+    users: state.users.map((u) => (u.user_id === user.user_id ? { ...u, ...user } : u)),
   })),
   setSwipes: (swipes) => set({ swipes }),
   addSwipe: (swipe) => set((state) => ({ swipes: [swipe, ...state.swipes].slice(0, 1000) })),
