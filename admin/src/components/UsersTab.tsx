@@ -1,10 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import {
   Search,
-  Filter,
   Download,
-  ChevronDown,
-  ChevronUp,
   X,
   User,
   Mail,
@@ -12,15 +9,11 @@ import {
   MapPin,
   Calendar,
   Film,
-  Heart,
-  Clock,
-  MoreVertical,
-  Ban,
-  CheckCircle,
-  Eye,
   Shield,
   ShieldOff,
   Loader2,
+  Globe,
+  Heart,
 } from 'lucide-react'
 import { useDashboardStore, UserType } from '../store/dashboardStore'
 import { format } from 'date-fns'
@@ -28,15 +21,13 @@ import { format } from 'date-fns'
 export const UsersTab: React.FC = () => {
   const { users, setUsers, setLoading, updateUser } = useDashboardStore()
   const [search, setSearch] = useState('')
-  const [sortField, setSortField] = useState<keyof UserType>('created_at')
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [selectedUser, setSelectedUser] = useState<UserType | null>(null)
   const [page, setPage] = useState(1)
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [showBanModal, setShowBanModal] = useState<UserType | null>(null)
   const [banReason, setBanReason] = useState('')
-  const perPage = 20
+  const perPage = 15
 
   useEffect(() => {
     fetchUsers()
@@ -66,11 +57,8 @@ export const UsersTab: React.FC = () => {
         body: JSON.stringify({ reason }),
       })
       if (res.ok) {
-        // Update local state
         const user = users.find((u) => u.user_id === userId)
-        if (user) {
-          updateUser({ ...user, status: 'banned' })
-        }
+        if (user) updateUser({ ...user, status: 'banned' })
         setShowBanModal(null)
         setBanReason('')
       }
@@ -84,15 +72,10 @@ export const UsersTab: React.FC = () => {
   const handleUnbanUser = async (userId: string) => {
     setActionLoading(userId)
     try {
-      const res = await fetch(`/api/admin/users/${userId}/unban`, {
-        method: 'POST',
-      })
+      const res = await fetch(`/api/admin/users/${userId}/unban`, { method: 'POST' })
       if (res.ok) {
-        // Update local state
         const user = users.find((u) => u.user_id === userId)
-        if (user) {
-          updateUser({ ...user, status: 'active' })
-        }
+        if (user) updateUser({ ...user, status: 'active' })
       }
     } catch (err) {
       console.error('Failed to unban user:', err)
@@ -101,29 +84,22 @@ export const UsersTab: React.FC = () => {
     }
   }
 
-  const filteredUsers = users
-    .filter((user) => {
-      const matchesSearch =
-        !search ||
-        user.name?.toLowerCase().includes(search.toLowerCase()) ||
-        user.email?.toLowerCase().includes(search.toLowerCase()) ||
-        user.phone?.includes(search) ||
-        user.user_id.toLowerCase().includes(search.toLowerCase())
-      const matchesStatus = statusFilter === 'all' || user.status === statusFilter
-      return matchesSearch && matchesStatus
-    })
-    .sort((a, b) => {
-      const aVal = a[sortField] || ''
-      const bVal = b[sortField] || ''
-      if (sortDir === 'asc') return aVal > bVal ? 1 : -1
-      return aVal < bVal ? 1 : -1
-    })
+  const filteredUsers = users.filter((user) => {
+    const matchesSearch =
+      !search ||
+      user.name?.toLowerCase().includes(search.toLowerCase()) ||
+      user.email?.toLowerCase().includes(search.toLowerCase()) ||
+      user.phone?.includes(search) ||
+      user.user_id.toLowerCase().includes(search.toLowerCase())
+    const matchesStatus = statusFilter === 'all' || user.status === statusFilter
+    return matchesSearch && matchesStatus
+  })
 
   const paginatedUsers = filteredUsers.slice((page - 1) * perPage, page * perPage)
   const totalPages = Math.ceil(filteredUsers.length / perPage)
 
   const exportCSV = () => {
-    const headers = ['User ID', 'Name', 'Email', 'Phone', 'Gender', 'Age', 'Location', 'Status', 'Signup Date']
+    const headers = ['User ID', 'Name', 'Email', 'Phone', 'Gender', 'Age', 'Genres', 'Languages', 'Swipes', 'Status']
     const rows = filteredUsers.map((u) => [
       u.user_id,
       u.name || '',
@@ -131,9 +107,10 @@ export const UsersTab: React.FC = () => {
       u.phone || '',
       u.gender || '',
       u.age || '',
-      u.location || '',
-      u.status,
-      u.created_at,
+      (u.genres || []).join('; '),
+      (u.filmLanguages || []).join('; '),
+      u.total_swipes || 0,
+      u.status || 'active',
     ])
     const csv = [headers, ...rows].map((r) => r.join(',')).join('\n')
     const blob = new Blob([csv], { type: 'text/csv' })
@@ -144,309 +121,219 @@ export const UsersTab: React.FC = () => {
     a.click()
   }
 
-  const toggleSort = (field: keyof UserType) => {
-    if (sortField === field) {
-      setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
-    } else {
-      setSortField(field)
-      setSortDir('desc')
-    }
-  }
-
-  const SortIcon = ({ field }: { field: keyof UserType }) => {
-    if (sortField !== field) return null
-    return sortDir === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />
-  }
-
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 max-w-7xl mx-auto">
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Users</h1>
-          <p className="text-[var(--text-secondary)]">
-            {filteredUsers.length} users found
-          </p>
+          <p className="text-gray-400 text-sm">{filteredUsers.length} users found</p>
         </div>
         <div className="flex items-center gap-3">
-          {/* Search */}
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
             <input
               type="text"
-              placeholder="Search by name, email, phone, ID..."
+              placeholder="Search users..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-64 pl-9 pr-4 py-2 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg focus:outline-none focus:border-[var(--accent)] text-sm"
+              className="w-56 pl-9 pr-4 py-2 bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg focus:outline-none focus:border-[#e50914] text-sm"
             />
           </div>
-          {/* Status Filter */}
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-3 py-2 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg text-sm focus:outline-none focus:border-[var(--accent)]"
+            className="px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg text-sm focus:outline-none"
           >
             <option value="all">All Status</option>
             <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
             <option value="banned">Banned</option>
           </select>
-          {/* Export */}
           <button
             onClick={exportCSV}
-            className="flex items-center gap-2 px-4 py-2 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg hover:bg-[var(--bg-hover)] transition-colors text-sm"
+            className="flex items-center gap-2 px-4 py-2 bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg hover:bg-[#242424] transition-colors text-sm"
           >
             <Download size={16} />
-            Export CSV
+            Export
           </button>
         </div>
       </div>
 
-      {/* Table */}
-      <div className="bg-[var(--bg-secondary)] rounded-xl border border-[var(--border-color)] overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-[var(--bg-card)]">
-              <tr>
-                <th
-                  onClick={() => toggleSort('user_id')}
-                  className="px-4 py-3 text-left text-sm font-medium text-[var(--text-secondary)] cursor-pointer hover:text-white"
-                >
-                  <div className="flex items-center gap-1">
-                    User ID <SortIcon field="user_id" />
-                  </div>
-                </th>
-                <th
-                  onClick={() => toggleSort('name')}
-                  className="px-4 py-3 text-left text-sm font-medium text-[var(--text-secondary)] cursor-pointer hover:text-white"
-                >
-                  <div className="flex items-center gap-1">
-                    Name <SortIcon field="name" />
-                  </div>
-                </th>
-                <th className="px-4 py-3 text-left text-sm font-medium text-[var(--text-secondary)]">
-                  Contact
-                </th>
-                <th className="px-4 py-3 text-left text-sm font-medium text-[var(--text-secondary)]">
-                  Location
-                </th>
-                <th
-                  onClick={() => toggleSort('created_at')}
-                  className="px-4 py-3 text-left text-sm font-medium text-[var(--text-secondary)] cursor-pointer hover:text-white"
-                >
-                  <div className="flex items-center gap-1">
-                    Joined <SortIcon field="created_at" />
-                  </div>
-                </th>
-                <th className="px-4 py-3 text-left text-sm font-medium text-[var(--text-secondary)]">
-                  Status
-                </th>
-                <th className="px-4 py-3 text-left text-sm font-medium text-[var(--text-secondary)]">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[var(--border-color)]">
-              {paginatedUsers.map((user) => (
-                <tr
-                  key={user.user_id}
-                  className="hover:bg-[var(--bg-hover)] transition-colors cursor-pointer"
-                  onClick={() => setSelectedUser(user)}
-                >
-                  <td className="px-4 py-3">
-                    <span className="text-sm font-mono text-[var(--text-muted)]">
-                      {user.user_id.slice(0, 16)}...
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 bg-[var(--accent)]/20 rounded-full flex items-center justify-center">
-                        <User size={16} className="text-[var(--accent)]" />
-                      </div>
-                      <div>
-                        <p className="font-medium">{user.name || 'No name'}</p>
-                        <p className="text-xs text-[var(--text-muted)]">
-                          {user.gender}, {user.age || '?'} yrs
-                        </p>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="space-y-1">
-                      {user.email && (
-                        <p className="text-sm flex items-center gap-1">
-                          <Mail size={12} className="text-[var(--text-muted)]" />
-                          {user.email}
-                        </p>
-                      )}
-                      {user.phone && (
-                        <p className="text-sm flex items-center gap-1">
-                          <Phone size={12} className="text-[var(--text-muted)]" />
-                          {user.phone}
-                        </p>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <p className="text-sm">{user.location || '—'}</p>
-                  </td>
-                  <td className="px-4 py-3">
-                    <p className="text-sm">
-                      {user.created_at
-                        ? format(new Date(user.created_at), 'MMM d, yyyy')
-                        : '—'}
-                    </p>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
-                        user.status === 'active'
-                          ? 'bg-[var(--success)]/10 text-[var(--success)]'
-                          : user.status === 'banned'
-                          ? 'bg-[var(--error)]/10 text-[var(--error)]'
-                          : 'bg-[var(--text-muted)]/10 text-[var(--text-muted)]'
-                      }`}
-                    >
-                      {user.status === 'active' && <CheckCircle size={12} />}
-                      {user.status === 'banned' && <Ban size={12} />}
-                      {user.status || 'active'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setSelectedUser(user)
-                        }}
-                        className="p-2 hover:bg-[var(--bg-card)] rounded-lg transition-colors"
-                        title="View details"
-                      >
-                        <Eye size={16} className="text-[var(--text-secondary)]" />
-                      </button>
-                      {user.status !== 'banned' ? (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setShowBanModal(user)
-                          }}
-                          disabled={actionLoading === user.user_id}
-                          className="p-2 hover:bg-[var(--error)]/10 rounded-lg transition-colors"
-                          title="Ban user"
-                        >
-                          {actionLoading === user.user_id ? (
-                            <Loader2 size={16} className="text-[var(--error)] animate-spin" />
-                          ) : (
-                            <ShieldOff size={16} className="text-[var(--error)]" />
-                          )}
-                        </button>
-                      ) : (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleUnbanUser(user.user_id)
-                          }}
-                          disabled={actionLoading === user.user_id}
-                          className="p-2 hover:bg-[var(--success)]/10 rounded-lg transition-colors"
-                          title="Unban user"
-                        >
-                          {actionLoading === user.user_id ? (
-                            <Loader2 size={16} className="text-[var(--success)] animate-spin" />
-                          ) : (
-                            <Shield size={16} className="text-[var(--success)]" />
-                          )}
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      {/* User Cards Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {paginatedUsers.map((user) => (
+          <div
+            key={user.user_id}
+            onClick={() => setSelectedUser(user)}
+            className="bg-[#1a1a1a] rounded-xl p-5 border border-[#2a2a2a] hover:border-[#333] transition-colors cursor-pointer"
+          >
+            <div className="flex items-start justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 bg-gradient-to-br from-[#e50914] to-[#b30710] rounded-full flex items-center justify-center">
+                  <span className="text-lg font-bold text-white">
+                    {(user.name || 'U')[0].toUpperCase()}
+                  </span>
+                </div>
+                <div>
+                  <h3 className="font-semibold">{user.name || 'Unknown'}</h3>
+                  <p className="text-xs text-gray-500">
+                    {user.gender && user.age ? `${user.gender}, ${user.age}` : user.gender || (user.age ? `${user.age} yrs` : 'No profile')}
+                  </p>
+                </div>
+              </div>
+              <span className={`px-2 py-1 rounded-full text-xs ${
+                user.status === 'banned' 
+                  ? 'bg-red-500/10 text-red-400' 
+                  : 'bg-green-500/10 text-green-400'
+              }`}>
+                {user.status || 'active'}
+              </span>
+            </div>
 
-        {/* Pagination */}
-        <div className="flex items-center justify-between px-4 py-3 border-t border-[var(--border-color)]">
-          <p className="text-sm text-[var(--text-secondary)]">
-            Showing {(page - 1) * perPage + 1} to {Math.min(page * perPage, filteredUsers.length)} of{' '}
-            {filteredUsers.length}
-          </p>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setPage(Math.max(1, page - 1))}
-              disabled={page === 1}
-              className="px-3 py-1.5 bg-[var(--bg-card)] rounded-lg text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[var(--bg-hover)] transition-colors"
-            >
-              Previous
-            </button>
-            <span className="text-sm text-[var(--text-secondary)]">
-              Page {page} of {totalPages || 1}
-            </span>
-            <button
-              onClick={() => setPage(Math.min(totalPages, page + 1))}
-              disabled={page >= totalPages}
-              className="px-3 py-1.5 bg-[var(--bg-card)] rounded-lg text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[var(--bg-hover)] transition-colors"
-            >
-              Next
-            </button>
+            {/* Contact Info */}
+            <div className="space-y-2 mb-4">
+              {user.email && (
+                <div className="flex items-center gap-2 text-sm text-gray-400">
+                  <Mail size={14} />
+                  <span className="truncate">{user.email}</span>
+                </div>
+              )}
+              {user.phone && (
+                <div className="flex items-center gap-2 text-sm text-gray-400">
+                  <Phone size={14} />
+                  <span>{user.phone}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Movie Preferences */}
+            {((user.genres && user.genres.length > 0) || (user.filmLanguages && user.filmLanguages.length > 0)) && (
+              <div className="space-y-2 mb-4">
+                {user.genres && user.genres.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {user.genres.slice(0, 3).map((genre) => (
+                      <span key={genre} className="px-2 py-0.5 bg-[#e50914]/10 text-[#e50914] rounded text-xs">
+                        {genre}
+                      </span>
+                    ))}
+                    {user.genres.length > 3 && (
+                      <span className="px-2 py-0.5 bg-gray-700 text-gray-400 rounded text-xs">
+                        +{user.genres.length - 3}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {user.filmLanguages && user.filmLanguages.length > 0 && (
+                  <div className="flex items-center gap-1 text-xs text-gray-500">
+                    <Globe size={12} />
+                    <span>{user.filmLanguages.slice(0, 3).join(', ')}</span>
+                    {user.filmLanguages.length > 3 && <span>+{user.filmLanguages.length - 3}</span>}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Stats */}
+            <div className="flex items-center justify-between pt-3 border-t border-[#2a2a2a]">
+              <div className="flex items-center gap-1 text-sm">
+                <Film size={14} className="text-blue-400" />
+                <span className="text-gray-400">{user.total_swipes || 0} swipes</span>
+              </div>
+              <div className="flex items-center gap-2">
+                {user.status !== 'banned' ? (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setShowBanModal(user); }}
+                    disabled={actionLoading === user.user_id}
+                    className="p-1.5 hover:bg-red-500/10 rounded transition-colors"
+                    title="Ban user"
+                  >
+                    {actionLoading === user.user_id ? (
+                      <Loader2 size={16} className="text-red-400 animate-spin" />
+                    ) : (
+                      <ShieldOff size={16} className="text-red-400" />
+                    )}
+                  </button>
+                ) : (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleUnbanUser(user.user_id); }}
+                    disabled={actionLoading === user.user_id}
+                    className="p-1.5 hover:bg-green-500/10 rounded transition-colors"
+                    title="Unban user"
+                  >
+                    {actionLoading === user.user_id ? (
+                      <Loader2 size={16} className="text-green-400 animate-spin" />
+                    ) : (
+                      <Shield size={16} className="text-green-400" />
+                    )}
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
-        </div>
+        ))}
       </div>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-center gap-2">
+          <button
+            onClick={() => setPage(Math.max(1, page - 1))}
+            disabled={page === 1}
+            className="px-4 py-2 bg-[#1a1a1a] rounded-lg text-sm disabled:opacity-50 hover:bg-[#242424] transition-colors"
+          >
+            Previous
+          </button>
+          <span className="text-sm text-gray-400">
+            Page {page} of {totalPages}
+          </span>
+          <button
+            onClick={() => setPage(Math.min(totalPages, page + 1))}
+            disabled={page >= totalPages}
+            className="px-4 py-2 bg-[#1a1a1a] rounded-lg text-sm disabled:opacity-50 hover:bg-[#242424] transition-colors"
+          >
+            Next
+          </button>
+        </div>
+      )}
 
       {/* User Detail Drawer */}
       {selectedUser && (
         <UserDetailDrawer user={selectedUser} onClose={() => setSelectedUser(null)} />
       )}
 
-      {/* Ban User Modal */}
+      {/* Ban Modal */}
       {showBanModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setShowBanModal(null)} />
-          <div className="relative bg-[var(--bg-secondary)] rounded-xl p-6 w-full max-w-md border border-[var(--border-color)]">
+          <div className="absolute inset-0 bg-black/60" onClick={() => setShowBanModal(null)} />
+          <div className="relative bg-[#1a1a1a] rounded-xl p-6 w-full max-w-md border border-[#2a2a2a]">
             <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-              <ShieldOff className="text-[var(--error)]" size={20} />
+              <ShieldOff className="text-red-400" size={20} />
               Ban User
             </h3>
-            <p className="text-[var(--text-secondary)] mb-4">
-              Are you sure you want to ban <span className="font-medium text-white">{showBanModal.name || showBanModal.email}</span>?
-              This will prevent them from accessing the app.
+            <p className="text-gray-400 mb-4">
+              Ban <span className="font-medium text-white">{showBanModal.name || showBanModal.email}</span>?
             </p>
-            <div className="mb-4">
-              <label className="block text-sm font-medium mb-2">Reason (optional)</label>
-              <textarea
-                value={banReason}
-                onChange={(e) => setBanReason(e.target.value)}
-                placeholder="Enter reason for banning..."
-                className="w-full px-3 py-2 bg-[var(--bg-card)] border border-[var(--border-color)] rounded-lg focus:outline-none focus:border-[var(--accent)] text-sm resize-none"
-                rows={3}
-              />
-            </div>
+            <textarea
+              value={banReason}
+              onChange={(e) => setBanReason(e.target.value)}
+              placeholder="Reason (optional)"
+              className="w-full px-3 py-2 bg-[#242424] border border-[#2a2a2a] rounded-lg focus:outline-none text-sm resize-none mb-4"
+              rows={3}
+            />
             <div className="flex justify-end gap-3">
               <button
-                onClick={() => {
-                  setShowBanModal(null)
-                  setBanReason('')
-                }}
-                className="px-4 py-2 bg-[var(--bg-card)] rounded-lg hover:bg-[var(--bg-hover)] transition-colors"
+                onClick={() => { setShowBanModal(null); setBanReason(''); }}
+                className="px-4 py-2 bg-[#242424] rounded-lg hover:bg-[#2a2a2a] transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={() => handleBanUser(showBanModal.user_id, banReason)}
                 disabled={actionLoading === showBanModal.user_id}
-                className="px-4 py-2 bg-[var(--error)] hover:bg-[var(--error)]/80 text-white rounded-lg transition-colors flex items-center gap-2 disabled:opacity-50"
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors flex items-center gap-2"
               >
-                {actionLoading === showBanModal.user_id ? (
-                  <>
-                    <Loader2 size={16} className="animate-spin" />
-                    Banning...
-                  </>
-                ) : (
-                  <>
-                    <ShieldOff size={16} />
-                    Ban User
-                  </>
-                )}
+                {actionLoading === showBanModal.user_id ? <Loader2 size={16} className="animate-spin" /> : <ShieldOff size={16} />}
+                Ban
               </button>
             </div>
           </div>
@@ -456,126 +343,109 @@ export const UsersTab: React.FC = () => {
   )
 }
 
-interface UserDetailDrawerProps {
-  user: UserType
-  onClose: () => void
-}
+const UserDetailDrawer: React.FC<{ user: UserType; onClose: () => void }> = ({ user, onClose }) => (
+  <div className="fixed inset-0 z-50 flex justify-end">
+    <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+    <div className="relative w-full max-w-md bg-[#1a1a1a] h-full overflow-y-auto">
+      <div className="sticky top-0 bg-[#1a1a1a] border-b border-[#2a2a2a] p-4 flex items-center justify-between">
+        <h2 className="text-lg font-semibold">User Details</h2>
+        <button onClick={onClose} className="p-2 hover:bg-[#242424] rounded-lg">
+          <X size={20} />
+        </button>
+      </div>
 
-const UserDetailDrawer: React.FC<UserDetailDrawerProps> = ({ user, onClose }) => {
-  return (
-    <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative w-full max-w-lg bg-[var(--bg-secondary)] h-full overflow-y-auto">
-        {/* Header */}
-        <div className="sticky top-0 bg-[var(--bg-secondary)] border-b border-[var(--border-color)] p-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">User Details</h2>
-          <button onClick={onClose} className="p-2 hover:bg-[var(--bg-hover)] rounded-lg">
-            <X size={20} />
-          </button>
+      <div className="p-6 space-y-6">
+        {/* Profile Header */}
+        <div className="flex items-center gap-4">
+          <div className="w-16 h-16 bg-gradient-to-br from-[#e50914] to-[#b30710] rounded-full flex items-center justify-center">
+            <span className="text-2xl font-bold text-white">{(user.name || 'U')[0].toUpperCase()}</span>
+          </div>
+          <div>
+            <h3 className="text-xl font-semibold">{user.name || 'No Name'}</h3>
+            <p className="text-gray-500 text-sm font-mono">{user.user_id}</p>
+          </div>
         </div>
 
-        <div className="p-4 space-y-6">
-          {/* Profile Header */}
-          <div className="flex items-center gap-4">
-            <div className="w-16 h-16 bg-[var(--accent)]/20 rounded-full flex items-center justify-center">
-              <User size={32} className="text-[var(--accent)]" />
+        {/* Basic Info */}
+        <div className="bg-[#242424] rounded-xl p-4 space-y-3">
+          <h4 className="font-medium text-gray-400 text-sm">Basic Info</h4>
+          <div className="grid grid-cols-2 gap-4 text-sm">
+            <div>
+              <p className="text-gray-500 text-xs">Email</p>
+              <p>{user.email || '—'}</p>
             </div>
             <div>
-              <h3 className="text-xl font-semibold">{user.name || 'No Name'}</h3>
-              <p className="text-[var(--text-muted)] text-sm font-mono">{user.user_id}</p>
+              <p className="text-gray-500 text-xs">Phone</p>
+              <p>{user.phone || '—'}</p>
+            </div>
+            <div>
+              <p className="text-gray-500 text-xs">Gender</p>
+              <p>{user.gender || '—'}</p>
+            </div>
+            <div>
+              <p className="text-gray-500 text-xs">Age</p>
+              <p>{user.age ? `${user.age} years` : '—'}</p>
+            </div>
+            <div>
+              <p className="text-gray-500 text-xs">Location</p>
+              <p>{user.location || user.city || '—'}</p>
+            </div>
+            <div>
+              <p className="text-gray-500 text-xs">Joined</p>
+              <p>{user.created_at ? format(new Date(user.created_at), 'MMM d, yyyy') : '—'}</p>
             </div>
           </div>
+        </div>
 
-          {/* Basic Info */}
-          <div className="bg-[var(--bg-card)] rounded-xl p-4 space-y-3">
-            <h4 className="font-medium text-[var(--text-secondary)]">Basic Information</h4>
-            <div className="grid grid-cols-2 gap-4">
-              <InfoItem icon={<Mail size={14} />} label="Email" value={user.email || '—'} />
-              <InfoItem icon={<Phone size={14} />} label="Phone" value={user.phone || '—'} />
-              <InfoItem icon={<User size={14} />} label="Gender" value={user.gender || '—'} />
-              <InfoItem icon={<Calendar size={14} />} label="Age" value={user.age ? `${user.age} years` : '—'} />
-              <InfoItem icon={<MapPin size={14} />} label="Location" value={user.location || '—'} />
-              <InfoItem
-                icon={<Calendar size={14} />}
-                label="Joined"
-                value={user.created_at ? format(new Date(user.created_at), 'MMM d, yyyy') : '—'}
-              />
+        {/* Movie Preferences */}
+        <div className="bg-[#242424] rounded-xl p-4 space-y-3">
+          <h4 className="font-medium text-gray-400 text-sm">Movie Preferences</h4>
+          <div className="space-y-3">
+            <div>
+              <p className="text-gray-500 text-xs mb-1">Favorite Genres</p>
+              <div className="flex flex-wrap gap-1">
+                {user.genres?.length ? user.genres.map((g) => (
+                  <span key={g} className="px-2 py-0.5 bg-[#e50914]/10 text-[#e50914] rounded text-xs">{g}</span>
+                )) : <span className="text-gray-500 text-sm">—</span>}
+              </div>
             </div>
-          </div>
-
-          {/* Movie Preferences */}
-          <div className="bg-[var(--bg-card)] rounded-xl p-4 space-y-3">
-            <h4 className="font-medium text-[var(--text-secondary)]">Movie Preferences</h4>
-            <div className="space-y-3">
-              <div>
-                <p className="text-xs text-[var(--text-muted)] mb-1">Favorite Genres</p>
-                <div className="flex flex-wrap gap-2">
-                  {user.genres?.map((genre) => (
-                    <span
-                      key={genre}
-                      className="px-2 py-1 bg-[var(--accent)]/10 text-[var(--accent)] rounded-full text-xs"
-                    >
-                      {genre}
-                    </span>
-                  )) || <span className="text-[var(--text-muted)]">—</span>}
-                </div>
+            <div>
+              <p className="text-gray-500 text-xs mb-1">Film Languages</p>
+              <div className="flex flex-wrap gap-1">
+                {user.filmLanguages?.length ? user.filmLanguages.map((l) => (
+                  <span key={l} className="px-2 py-0.5 bg-blue-500/10 text-blue-400 rounded text-xs">{l}</span>
+                )) : <span className="text-gray-500 text-sm">—</span>}
               </div>
-              <div>
-                <p className="text-xs text-[var(--text-muted)] mb-1">Film Languages</p>
-                <div className="flex flex-wrap gap-2">
-                  {user.filmLanguages?.map((lang) => (
-                    <span
-                      key={lang}
-                      className="px-2 py-1 bg-[var(--info)]/10 text-[var(--info)] rounded-full text-xs"
-                    >
-                      {lang}
-                    </span>
-                  )) || <span className="text-[var(--text-muted)]">—</span>}
-                </div>
-              </div>
-              <div>
-                <p className="text-xs text-[var(--text-muted)] mb-1">Top 5 Movies</p>
-                <div className="space-y-1">
-                  {user.topMovies?.map((movie, idx) => (
-                    <p key={idx} className="text-sm flex items-center gap-2">
-                      <Film size={12} className="text-[var(--text-muted)]" />
-                      {movie.title}
-                    </p>
-                  )) || <span className="text-[var(--text-muted)]">—</span>}
-                </div>
+            </div>
+            <div>
+              <p className="text-gray-500 text-xs mb-1">Top 5 Movies</p>
+              <div className="space-y-1">
+                {user.topMovies?.length ? user.topMovies.map((m, i) => (
+                  <div key={i} className="flex items-center gap-2 text-sm">
+                    <Film size={12} className="text-gray-500" />
+                    <span>{m.title}</span>
+                  </div>
+                )) : <span className="text-gray-500 text-sm">—</span>}
               </div>
             </div>
           </div>
+        </div>
 
-          {/* Activity Stats */}
-          <div className="bg-[var(--bg-card)] rounded-xl p-4 space-y-3">
-            <h4 className="font-medium text-[var(--text-secondary)]">Activity</h4>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="text-center p-3 bg-[var(--bg-secondary)] rounded-lg">
-                <p className="text-2xl font-bold text-[var(--accent)]">{user.total_swipes || 0}</p>
-                <p className="text-xs text-[var(--text-muted)]">Total Swipes</p>
-              </div>
-              <div className="text-center p-3 bg-[var(--bg-secondary)] rounded-lg">
-                <p className="text-2xl font-bold text-[var(--success)]">{user.total_matches || 0}</p>
-                <p className="text-xs text-[var(--text-muted)]">Matches</p>
-              </div>
+        {/* Activity Stats */}
+        <div className="bg-[#242424] rounded-xl p-4">
+          <h4 className="font-medium text-gray-400 text-sm mb-3">Activity</h4>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="text-center p-4 bg-[#1a1a1a] rounded-lg">
+              <p className="text-2xl font-bold text-[#e50914]">{user.total_swipes || 0}</p>
+              <p className="text-xs text-gray-500">Total Swipes</p>
+            </div>
+            <div className="text-center p-4 bg-[#1a1a1a] rounded-lg">
+              <p className="text-2xl font-bold text-green-400">{user.total_matches || 0}</p>
+              <p className="text-xs text-gray-500">Matches</p>
             </div>
           </div>
         </div>
       </div>
     </div>
-  )
-}
-
-const InfoItem: React.FC<{ icon: React.ReactNode; label: string; value: string }> = ({
-  icon,
-  label,
-  value,
-}) => (
-  <div>
-    <p className="text-xs text-[var(--text-muted)] flex items-center gap-1 mb-1">
-      {icon} {label}
-    </p>
-    <p className="text-sm">{value}</p>
   </div>
 )

@@ -933,6 +933,22 @@ async def save_user_profile(req: UserProfileRequest):
         f"({enrichment_stats['enriched_count']} enriched with {enrichment_stats['total_keywords']} keywords)"
     )
     
+    # Broadcast profile update to admin dashboard
+    try:
+        await broadcast_user_updated({
+            "user_id": req.user_id,
+            "name": req.name,
+            "gender": req.gender,
+            "age": req.age,
+            "location": req.location,
+            "genres": req.genres,
+            "filmLanguages": req.filmLanguages,
+            "topMovies": top_movies_data,
+            "total_swipes": 0,
+        })
+    except Exception as e:
+        logger.error(f"Failed to broadcast profile update: {e}")
+    
     return {
         "success": True,
         "message": "Profile saved with comprehensive taste vector",
@@ -1428,37 +1444,89 @@ async def get_admin_metrics():
 
 @api_router.get("/admin/users")
 async def get_admin_users(limit: int = 500, skip: int = 0):
-    """Get all users with their profiles"""
-    users = await db.users.find({}, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(length=limit)
+    """Get all users with their profiles - merges data from users and user_profiles tables"""
     
-    # Enrich with profile data
-    enriched_users = []
-    for user in users:
-        profile = await db.user_profiles.find_one({"user_id": user["user_id"]}, {"_id": 0})
-        
-        # Get swipe count
-        swipe_count = await db.user_swipes.count_documents({"user_id": user["user_id"]})
-        
-        enriched_users.append({
-            "user_id": user["user_id"],
-            "name": profile.get("name") if profile else user.get("name", ""),
+    # Get all users from both tables
+    auth_users = await db.users.find({}, {"_id": 0}).sort("created_at", -1).to_list(length=1000)
+    profile_users = await db.user_profiles.find({}, {"_id": 0}).sort("created_at", -1).to_list(length=1000)
+    
+    # Create a map of all users by user_id
+    all_users = {}
+    
+    # First add auth users (these have login credentials)
+    for user in auth_users:
+        uid = user.get("user_id", "")
+        all_users[uid] = {
+            "user_id": uid,
+            "name": user.get("name", ""),
             "email": user.get("email", ""),
             "phone": user.get("phone", ""),
-            "gender": profile.get("gender", "") if profile else "",
-            "age": profile.get("age", 0) if profile else 0,
-            "location": profile.get("location", "") if profile else "",
+            "gender": "",
+            "age": 0,
+            "location": "",
+            "city": "",
             "created_at": user.get("created_at", ""),
             "last_active": user.get("last_active", ""),
             "status": user.get("status", "active"),
             "subscription": user.get("subscription", "free"),
-            "genres": profile.get("genres", []) if profile else [],
-            "filmLanguages": profile.get("filmLanguages", []) if profile else [],
-            "topMovies": profile.get("topMovies", []) if profile else [],
-            "total_swipes": swipe_count,
-            "total_matches": 0,  # Placeholder
-        })
+            "genres": [],
+            "filmLanguages": [],
+            "topMovies": [],
+            "total_swipes": 0,
+            "total_matches": 0,
+            "has_profile": False,
+        }
     
-    return {"users": enriched_users, "total": len(enriched_users)}
+    # Then add/merge profile users (these have detailed profile info)
+    for profile in profile_users:
+        uid = profile.get("user_id", "")
+        swipe_count = await db.user_swipes.count_documents({"user_id": uid})
+        
+        if uid in all_users:
+            # Merge with existing auth user
+            all_users[uid].update({
+                "name": profile.get("name") or all_users[uid]["name"],
+                "gender": profile.get("gender", ""),
+                "age": profile.get("age", 0),
+                "location": profile.get("location", ""),
+                "city": profile.get("city", ""),
+                "genres": profile.get("genres", []),
+                "filmLanguages": profile.get("filmLanguages", []),
+                "topMovies": profile.get("topMovies", []),
+                "total_swipes": swipe_count,
+                "has_profile": True,
+            })
+        else:
+            # New user from profiles (not in auth table)
+            all_users[uid] = {
+                "user_id": uid,
+                "name": profile.get("name", ""),
+                "email": profile.get("email", ""),
+                "phone": profile.get("phone", ""),
+                "gender": profile.get("gender", ""),
+                "age": profile.get("age", 0),
+                "location": profile.get("location", ""),
+                "city": profile.get("city", ""),
+                "created_at": profile.get("created_at", ""),
+                "last_active": profile.get("updated_at", ""),
+                "status": "active",
+                "subscription": "free",
+                "genres": profile.get("genres", []),
+                "filmLanguages": profile.get("filmLanguages", []),
+                "topMovies": profile.get("topMovies", []),
+                "total_swipes": swipe_count,
+                "total_matches": 0,
+                "has_profile": True,
+            }
+    
+    # Convert to list and sort by created_at (most recent first)
+    enriched_users = list(all_users.values())
+    enriched_users.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    
+    # Apply pagination
+    paginated = enriched_users[skip:skip + limit]
+    
+    return {"users": paginated, "total": len(enriched_users)}
 
 
 @api_router.get("/admin/swipes")

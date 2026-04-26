@@ -23,6 +23,7 @@ export interface UserType {
   gender?: string
   age?: number
   location?: string
+  city?: string
   created_at: string
   last_active?: string
   status: 'active' | 'inactive' | 'banned'
@@ -32,6 +33,7 @@ export interface UserType {
   topMovies?: any[]
   total_swipes?: number
   total_matches?: number
+  has_profile?: boolean
 }
 
 export interface SwipeType {

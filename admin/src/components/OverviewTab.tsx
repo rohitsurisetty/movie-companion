@@ -4,50 +4,40 @@ import {
   UserPlus,
   Heart,
   Film,
-  Clock,
   TrendingUp,
   Activity,
-  RefreshCw,
 } from 'lucide-react'
 import { useDashboardStore } from '../store/dashboardStore'
 import {
-  LineChart,
-  Line,
+  AreaChart,
+  Area,
   XAxis,
   YAxis,
-  CartesianGrid,
   Tooltip,
   ResponsiveContainer,
   PieChart,
   Pie,
   Cell,
-  AreaChart,
-  Area,
 } from 'recharts'
 
 interface StatCardProps {
   title: string
   value: string | number
   icon: React.ReactNode
-  change?: string
-  positive?: boolean
-  color?: string
+  subtitle?: string
+  color: string
 }
 
-const StatCard: React.FC<StatCardProps> = ({ title, value, icon, change, positive, color = 'accent' }) => (
-  <div className="stat-card bg-[var(--bg-secondary)] rounded-xl p-5 border border-[var(--border-color)]">
-    <div className="flex items-start justify-between">
-      <div>
-        <p className="text-[var(--text-secondary)] text-sm mb-1">{title}</p>
-        <p className="text-2xl font-bold">{value}</p>
-        {change && (
-          <p className={`text-sm mt-1 ${positive ? 'text-[var(--success)]' : 'text-[var(--error)]'}`}>
-            {positive ? '↑' : '↓'} {change}
-          </p>
-        )}
+const StatCard: React.FC<StatCardProps> = ({ title, value, icon, subtitle, color }) => (
+  <div className="bg-[#1a1a1a] rounded-xl p-6 border border-[#2a2a2a] hover:border-[#333] transition-colors">
+    <div className="flex items-center justify-between mb-4">
+      <div className={`p-3 rounded-lg`} style={{ backgroundColor: `${color}15` }}>
+        <div style={{ color }}>{icon}</div>
       </div>
-      <div className={`p-3 rounded-lg bg-[var(--${color})]/10`}>{icon}</div>
     </div>
+    <p className="text-3xl font-bold mb-1">{value}</p>
+    <p className="text-gray-400 text-sm">{title}</p>
+    {subtitle && <p className="text-xs text-gray-500 mt-1">{subtitle}</p>}
   </div>
 )
 
@@ -56,15 +46,14 @@ const COLORS = ['#3b82f6', '#ec4899', '#8b5cf6']
 export const OverviewTab: React.FC = () => {
   const { metrics, recentActivity, isConnected } = useDashboardStore()
 
-  // Mock chart data - in production this would come from the API
   const activityData = [
-    { name: 'Mon', users: 120, swipes: 450, matches: 23 },
-    { name: 'Tue', users: 145, swipes: 520, matches: 28 },
-    { name: 'Wed', users: 132, swipes: 480, matches: 25 },
-    { name: 'Thu', users: 168, swipes: 610, matches: 32 },
-    { name: 'Fri', users: 195, swipes: 720, matches: 41 },
-    { name: 'Sat', users: 210, swipes: 850, matches: 48 },
-    { name: 'Sun', users: 185, swipes: 780, matches: 38 },
+    { name: 'Mon', users: 120, matches: 23 },
+    { name: 'Tue', users: 145, matches: 28 },
+    { name: 'Wed', users: 132, matches: 25 },
+    { name: 'Thu', users: 168, matches: 32 },
+    { name: 'Fri', users: 195, matches: 41 },
+    { name: 'Sat', users: 210, matches: 48 },
+    { name: 'Sun', users: 185, matches: 38 },
   ]
 
   const genderData = metrics?.genderDistribution
@@ -80,108 +69,80 @@ export const OverviewTab: React.FC = () => {
       ]
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8 max-w-7xl mx-auto">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Dashboard Overview</h1>
-          <p className="text-[var(--text-secondary)]">
-            Real-time platform metrics and analytics
-          </p>
+          <h1 className="text-2xl font-bold text-white">Dashboard</h1>
+          <p className="text-gray-400 text-sm mt-1">Platform overview and metrics</p>
         </div>
         <div className="flex items-center gap-2">
-          {isConnected ? (
-            <span className="flex items-center gap-2 px-3 py-1.5 bg-[var(--success)]/10 text-[var(--success)] rounded-full text-sm">
-              <span className="w-2 h-2 bg-[var(--success)] rounded-full animate-pulse" />
-              Live Updates
-            </span>
-          ) : (
-            <span className="flex items-center gap-2 px-3 py-1.5 bg-[var(--error)]/10 text-[var(--error)] rounded-full text-sm">
-              <RefreshCw size={14} className="animate-spin" />
-              Reconnecting...
-            </span>
-          )}
+          <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+          <span className="text-sm text-gray-400">{isConnected ? 'Live' : 'Offline'}</span>
         </div>
       </div>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* Main Stats - Clean 4-column grid */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           title="Total Users"
           value={metrics?.totalUsers?.toLocaleString() || '—'}
-          icon={<Users className="w-5 h-5 text-[var(--accent)]" />}
-          change="12% this month"
-          positive
+          icon={<Users className="w-5 h-5" />}
+          color="#3b82f6"
         />
         <StatCard
           title="Active Today"
           value={metrics?.activeToday?.toLocaleString() || '—'}
-          icon={<Activity className="w-5 h-5 text-[var(--success)]" />}
-          color="success"
+          icon={<Activity className="w-5 h-5" />}
+          color="#22c55e"
         />
         <StatCard
-          title="New Signups Today"
+          title="New Signups"
           value={metrics?.newSignupsToday?.toLocaleString() || '—'}
-          icon={<UserPlus className="w-5 h-5 text-[var(--info)]" />}
-          change="8% vs yesterday"
-          positive
-          color="info"
+          subtitle="Today"
+          icon={<UserPlus className="w-5 h-5" />}
+          color="#f59e0b"
         />
         <StatCard
-          title="Total Matches"
-          value={metrics?.totalMatches?.toLocaleString() || '—'}
-          icon={<Heart className="w-5 h-5 text-[var(--error)]" />}
-          color="error"
-        />
-      </div>
-
-      {/* Second Row Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
-          title="Daily Active Users"
-          value={metrics?.dau?.toLocaleString() || '—'}
-          icon={<TrendingUp className="w-5 h-5 text-[var(--warning)]" />}
-          color="warning"
-        />
-        <StatCard
-          title="Weekly Active Users"
-          value={metrics?.wau?.toLocaleString() || '—'}
-          icon={<TrendingUp className="w-5 h-5 text-[var(--info)]" />}
-          color="info"
-        />
-        <StatCard
-          title="Monthly Active Users"
-          value={metrics?.mau?.toLocaleString() || '—'}
-          icon={<TrendingUp className="w-5 h-5 text-[var(--success)]" />}
-          color="success"
-        />
-        <StatCard
-          title="Swipes Today"
+          title="Total Swipes"
           value={metrics?.totalSwipesToday?.toLocaleString() || '—'}
-          icon={<Film className="w-5 h-5 text-[var(--accent)]" />}
+          subtitle="Today"
+          icon={<Film className="w-5 h-5" />}
+          color="#e50914"
         />
       </div>
 
-      {/* Charts Row */}
+      {/* Secondary Stats Row */}
+      <div className="grid grid-cols-3 gap-4">
+        <div className="bg-[#1a1a1a] rounded-xl p-5 border border-[#2a2a2a]">
+          <p className="text-gray-400 text-sm mb-1">Daily Active</p>
+          <p className="text-2xl font-bold">{metrics?.dau || '—'}</p>
+        </div>
+        <div className="bg-[#1a1a1a] rounded-xl p-5 border border-[#2a2a2a]">
+          <p className="text-gray-400 text-sm mb-1">Weekly Active</p>
+          <p className="text-2xl font-bold">{metrics?.wau || '—'}</p>
+        </div>
+        <div className="bg-[#1a1a1a] rounded-xl p-5 border border-[#2a2a2a]">
+          <p className="text-gray-400 text-sm mb-1">Monthly Active</p>
+          <p className="text-2xl font-bold">{metrics?.mau || '—'}</p>
+        </div>
+      </div>
+
+      {/* Charts - Side by side */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Activity Chart */}
-        <div className="lg:col-span-2 bg-[var(--bg-secondary)] rounded-xl p-5 border border-[var(--border-color)]">
-          <h3 className="text-lg font-semibold mb-4">Weekly Activity</h3>
-          <ResponsiveContainer width="100%" height={300}>
+        <div className="lg:col-span-2 bg-[#1a1a1a] rounded-xl p-6 border border-[#2a2a2a]">
+          <h3 className="text-lg font-semibold mb-6">Weekly Activity</h3>
+          <ResponsiveContainer width="100%" height={220}>
             <AreaChart data={activityData}>
               <defs>
                 <linearGradient id="colorUsers" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
                   <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
                 </linearGradient>
-                <linearGradient id="colorSwipes" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#e50914" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#e50914" stopOpacity={0} />
-                </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#333" />
-              <XAxis dataKey="name" stroke="#666" />
-              <YAxis stroke="#666" />
+              <XAxis dataKey="name" stroke="#666" tickLine={false} axisLine={false} />
+              <YAxis stroke="#666" tickLine={false} axisLine={false} />
               <Tooltip
                 contentStyle={{
                   backgroundColor: '#1a1a1a',
@@ -193,34 +154,27 @@ export const OverviewTab: React.FC = () => {
                 type="monotone"
                 dataKey="users"
                 stroke="#3b82f6"
+                strokeWidth={2}
                 fillOpacity={1}
                 fill="url(#colorUsers)"
                 name="Active Users"
-              />
-              <Area
-                type="monotone"
-                dataKey="matches"
-                stroke="#e50914"
-                fillOpacity={1}
-                fill="url(#colorSwipes)"
-                name="Matches"
               />
             </AreaChart>
           </ResponsiveContainer>
         </div>
 
         {/* Gender Distribution */}
-        <div className="bg-[var(--bg-secondary)] rounded-xl p-5 border border-[var(--border-color)]">
-          <h3 className="text-lg font-semibold mb-4">Gender Distribution</h3>
-          <ResponsiveContainer width="100%" height={200}>
+        <div className="bg-[#1a1a1a] rounded-xl p-6 border border-[#2a2a2a]">
+          <h3 className="text-lg font-semibold mb-4">Gender Split</h3>
+          <ResponsiveContainer width="100%" height={160}>
             <PieChart>
               <Pie
                 data={genderData}
                 cx="50%"
                 cy="50%"
-                innerRadius={50}
-                outerRadius={80}
-                paddingAngle={5}
+                innerRadius={45}
+                outerRadius={65}
+                paddingAngle={3}
                 dataKey="value"
               >
                 {genderData.map((_, index) => (
@@ -236,58 +190,43 @@ export const OverviewTab: React.FC = () => {
               />
             </PieChart>
           </ResponsiveContainer>
-          <div className="flex justify-center gap-4 mt-4">
+          <div className="flex justify-center gap-4 mt-2">
             {genderData.map((item, index) => (
-              <div key={item.name} className="flex items-center gap-2">
-                <div
-                  className="w-3 h-3 rounded-full"
-                  style={{ backgroundColor: COLORS[index] }}
-                />
-                <span className="text-sm text-[var(--text-secondary)]">
-                  {item.name}: {item.value}%
-                </span>
+              <div key={item.name} className="flex items-center gap-1.5 text-xs">
+                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: COLORS[index] }} />
+                <span className="text-gray-400">{item.name}: {item.value}%</span>
               </div>
             ))}
           </div>
         </div>
       </div>
 
-      {/* Recent Activity */}
-      <div className="bg-[var(--bg-secondary)] rounded-xl p-5 border border-[var(--border-color)]">
+      {/* Recent Activity - Compact */}
+      <div className="bg-[#1a1a1a] rounded-xl p-6 border border-[#2a2a2a]">
         <h3 className="text-lg font-semibold mb-4">Recent Activity</h3>
-        <div className="space-y-3 max-h-[300px] overflow-y-auto">
+        <div className="space-y-2 max-h-[200px] overflow-y-auto">
           {recentActivity.length === 0 ? (
-            <p className="text-[var(--text-muted)] text-center py-8">
-              No recent activity. Events will appear here in real-time.
+            <p className="text-gray-500 text-sm text-center py-4">
+              No recent activity. Events appear here in real-time.
             </p>
           ) : (
-            recentActivity.slice(0, 20).map((activity, index) => (
+            recentActivity.slice(0, 10).map((activity, index) => (
               <div
                 key={index}
-                className="flex items-center gap-3 p-3 bg-[var(--bg-card)] rounded-lg"
+                className="flex items-center gap-3 p-2.5 bg-[#242424] rounded-lg text-sm"
               >
-                {activity.type === 'new_user' && (
-                  <UserPlus className="w-5 h-5 text-[var(--success)]" />
-                )}
-                {activity.type === 'new_swipe' && (
-                  <Film className="w-5 h-5 text-[var(--info)]" />
-                )}
-                {activity.type === 'new_match' && (
-                  <Heart className="w-5 h-5 text-[var(--error)]" />
-                )}
-                {activity.type === 'user_updated' && (
-                  <Users className="w-5 h-5 text-[var(--warning)]" />
-                )}
-                <div className="flex-1">
-                  <p className="text-sm">
-                    {activity.type === 'new_user' && `New user: ${activity.data?.name || activity.data?.email || 'Unknown'}`}
-                    {activity.type === 'new_swipe' && `Swipe: ${activity.data?.user_name || activity.data?.user_id} ${activity.data?.direction === 'right' ? 'liked' : 'passed'} ${activity.data?.movie_title}`}
-                    {activity.type === 'new_match' && `Match: ${activity.data?.user1_name} & ${activity.data?.user2_name}`}
-                    {activity.type === 'user_updated' && `Profile updated: ${activity.data?.name || activity.data?.user_id}`}
-                  </p>
-                </div>
-                <span className="text-xs text-[var(--text-muted)]">
-                  {new Date(activity.timestamp).toLocaleTimeString()}
+                {activity.type === 'new_user' && <UserPlus className="w-4 h-4 text-green-500" />}
+                {activity.type === 'new_swipe' && <Film className="w-4 h-4 text-blue-500" />}
+                {activity.type === 'new_match' && <Heart className="w-4 h-4 text-red-500" />}
+                {activity.type === 'user_updated' && <Users className="w-4 h-4 text-yellow-500" />}
+                <span className="flex-1 text-gray-300">
+                  {activity.type === 'new_user' && `New user: ${activity.data?.name || 'Unknown'}`}
+                  {activity.type === 'new_swipe' && `${activity.data?.user_name} ${activity.data?.direction === 'right' ? 'liked' : 'passed'} ${activity.data?.movie_title}`}
+                  {activity.type === 'new_match' && `Match: ${activity.data?.user1_name} & ${activity.data?.user2_name}`}
+                  {activity.type === 'user_updated' && `Profile updated: ${activity.data?.name}`}
+                </span>
+                <span className="text-xs text-gray-500">
+                  {new Date(activity.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </span>
               </div>
             ))
