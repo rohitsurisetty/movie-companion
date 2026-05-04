@@ -87,7 +87,7 @@ function SingleSelectModal({
               </TouchableOpacity>
             ))}
           </RNScrollView>
-          <TouchableOpacity style={modalStyles.cancelBtn} onPress={onClose}>
+          <TouchableOpacity style={modalStyles.singleCancelBtn} onPress={onClose}>
             <Text style={modalStyles.cancelText}>Cancel</Text>
           </TouchableOpacity>
         </View>
@@ -397,6 +397,7 @@ const modalStyles = StyleSheet.create({
   charCount: { fontSize: 11, color: COLORS.textMuted, textAlign: 'right', marginBottom: SPACING.m },
   buttonRow: { flexDirection: 'row', gap: SPACING.m, marginTop: SPACING.m },
   cancelBtn: { flex: 1, paddingVertical: 14, borderRadius: BORDER_RADIUS.full, borderWidth: 1.5, borderColor: COLORS.border, alignItems: 'center' },
+  singleCancelBtn: { paddingVertical: 14, borderRadius: BORDER_RADIUS.full, borderWidth: 1.5, borderColor: COLORS.border, alignItems: 'center', marginTop: SPACING.m },
   cancelText: { fontSize: 16, fontWeight: '600', color: COLORS.textSecondary },
   saveBtn: { flex: 1, paddingVertical: 14, borderRadius: BORDER_RADIUS.full, backgroundColor: COLORS.primary, alignItems: 'center' },
   saveText: { fontSize: 16, fontWeight: 'bold', color: COLORS.white },
