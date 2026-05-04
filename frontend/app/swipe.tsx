@@ -308,11 +308,12 @@ const detailStyles = StyleSheet.create({
 
 // Left Swipe Reason Modal
 function LeftSwipeModal({
-  visible, onClose, onSubmit, movieTitle, colors,
+  visible, onClose, onSubmit, onUndo, movieTitle, colors,
 }: {
   visible: boolean;
   onClose: () => void;
   onSubmit: (reasons: string[], didntWatch: boolean) => void;
+  onUndo: () => void;
   movieTitle: string;
   colors: ReturnType<typeof getThemeColors>;
 }) {
@@ -342,10 +343,26 @@ function LeftSwipeModal({
     setSelectedReasons([]);
   };
 
+  const handleUndo = () => {
+    setSelectedReasons([]);
+    onUndo();
+  };
+
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={modalStyles.overlay} onPress={onClose}>
         <Pressable style={[modalStyles.container, { backgroundColor: colors.bgCard }]} onPress={(e) => e.stopPropagation()}>
+          {/* Undo button at top */}
+          <TouchableOpacity
+            style={modalStyles.undoBtn}
+            onPress={handleUndo}
+            testID="undo-left-swipe-btn"
+            activeOpacity={0.7}
+          >
+            <Ionicons name="arrow-undo" size={18} color={colors.textSecondary} />
+            <Text style={[modalStyles.undoBtnText, { color: colors.textSecondary }]}>Undo Swipe</Text>
+          </TouchableOpacity>
+
           <View style={modalStyles.header}>
             <Ionicons name="close-circle" size={28} color="#FF6B6B" />
             <Text style={[modalStyles.title, { color: colors.text }]}>Not for you?</Text>
@@ -867,6 +884,13 @@ const profileStyles = StyleSheet.create({
 const modalStyles = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center', padding: SPACING.l },
   container: { borderRadius: BORDER_RADIUS.xl, padding: SPACING.l, width: '100%', maxWidth: 360, maxHeight: '85%' },
+  undoBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    alignSelf: 'center', paddingHorizontal: 16, paddingVertical: 8,
+    borderRadius: BORDER_RADIUS.full, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)',
+    marginBottom: SPACING.m,
+  },
+  undoBtnText: { fontSize: 13, fontWeight: '500' },
   header: { flexDirection: 'row', alignItems: 'center', gap: SPACING.s, marginBottom: SPACING.s, justifyContent: 'center' },
   title: { fontSize: 22, fontWeight: 'bold' },
   movieTitle: { fontSize: 16, fontWeight: '600', textAlign: 'center', marginBottom: SPACING.m },
@@ -1531,6 +1555,7 @@ export default function SwipeScreen() {
         visible={showRatingModal}
         onClose={() => { setShowRatingModal(false); setPendingMovie(null); }}
         onSubmit={handleRatingSubmit}
+        onUndo={handleUndo}
         movieTitle={pendingMovie?.title || ''}
         colors={colors}
       />
@@ -1538,6 +1563,7 @@ export default function SwipeScreen() {
         visible={showLeftModal}
         onClose={() => { setShowLeftModal(false); setPendingMovie(null); }}
         onSubmit={handleLeftSubmit}
+        onUndo={handleUndo}
         movieTitle={pendingMovie?.title || ''}
         colors={colors}
       />
@@ -1568,6 +1594,14 @@ export default function SwipeScreen() {
         visible={showProfilePreview}
         onClose={handleCloseProfilePreview}
       />
+      
+      {/* Undo Toast Notification */}
+      {showUndoToast && (
+        <View style={[styles.undoToast, { backgroundColor: colors.bgCard }]}>
+          <Ionicons name="checkmark-circle" size={20} color={colors.primary} />
+          <Text style={[styles.undoToastText, { color: colors.text }]}>Swipe undone!</Text>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -1620,4 +1654,21 @@ const styles = StyleSheet.create({
   emptyText: { fontSize: 16 },
   refreshBtn: { paddingVertical: 12, paddingHorizontal: 24, borderRadius: BORDER_RADIUS.full },
   refreshBtnText: { fontSize: 14, fontWeight: '600', color: '#FFF' },
+  undoToast: {
+    position: 'absolute',
+    bottom: 100,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.s,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: BORDER_RADIUS.full,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  undoToastText: { fontSize: 14, fontWeight: '600' },
 });

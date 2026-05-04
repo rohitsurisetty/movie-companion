@@ -267,6 +267,24 @@ frontend:
         agent: "testing"
         comment: "✅ TESTED SUCCESSFULLY: Profile screen fully functional with all required sections (Basic Information, Dating Preferences, Movie Preferences, Languages, Personal Details, Lifestyle, More About You). Navigation works via direct URL access. Edit functionality verified - Name edit modal opens and functions correctly. All UI elements present: header with 'My Profile' title, back button, logout button, profile header with avatar. Mobile-responsive design confirmed on 390x844 viewport. Minor: Some field clicks may have overlay interference but core functionality works perfectly."
 
+  - task: "Undo Swipe Feature"
+    implemented: true
+    working: true
+    file: "/app/frontend/app/swipe.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Implemented Undo Swipe feature to recover from accidental swipes before final confirmation. Added 'Undo Swipe' button to both RatingModal (right swipe) and LeftSwipeModal (left swipe). Button appears at top of modals with arrow-undo icon. When clicked, closes modal and restores the swiped card to front of deck. Added toast notification 'Swipe undone!' after successful undo."
+      - working: true
+        agent: "main"
+        comment: "✅ MANUAL TESTING: Verified via screenshot tool. 1) RatingModal shows 'Undo Swipe' button at top. 2) LeftSwipeModal shows 'Undo Swipe' button at top. 3) Clicking Undo closes modal and card reappears in deck. Tested with 'Grave of the Fireflies' - same movie shown before and after undo."
+      - working: true
+        agent: "testing"
+        comment: "✅ COMPREHENSIVE PLAYWRIGHT TESTING COMPLETE: All Undo Swipe functionality verified end-to-end on mobile viewport (390x844). RIGHT SWIPE UNDO: 1) Heart button click triggers RatingModal with movie title 'The Good, the Bad and the Ugly', 2) Undo button (data-testid='undo-swipe-btn') visible at top of modal with arrow-undo icon, 3) Clicking Undo closes modal and restores same movie card to deck, 4) Toast notification 'Swipe undone!' appears. LEFT SWIPE UNDO: 1) X button click triggers LeftSwipeModal with 'Not for you?' title, 2) Undo button (data-testid='undo-left-swipe-btn') visible at top of modal, 3) Clicking Undo closes modal and restores same movie card to deck, 4) Toast notification appears. All test scenarios passed. Feature is production-ready."
+
 metadata:
   created_by: "main_agent"
   version: "1.0"
@@ -275,8 +293,7 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Mock Welcome Email"
-    - "Google Auth Integration"
+    - "Undo Swipe Feature"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -710,3 +727,84 @@ agent_communication:
       🎉 FINAL RESULT: EMAIL OTP AUTHENTICATION FLOW IS FULLY FUNCTIONAL AND PRODUCTION-READY!
       
       All requested test scenarios completed successfully. The Film Companion app's Email OTP authentication flow is working perfectly end-to-end with proper mobile responsiveness, backend integration, and user experience.
+
+  - agent: "main"
+    message: |
+      ✅ UNDO SWIPE FEATURE IMPLEMENTATION COMPLETE
+      
+      IMPLEMENTATION DETAILS:
+      
+      1. Added `onUndo` prop to LeftSwipeModal component:
+         - New prop: `onUndo: () => void`
+         - Added `handleUndo` function that resets state and calls `onUndo`
+      
+      2. Added Undo Button to LeftSwipeModal:
+         - Positioned at top of modal (matches RatingModal)
+         - Uses `arrow-undo` Ionicon with `colors.textSecondary` styling
+         - TestID: `undo-left-swipe-btn`
+      
+      3. Added Undo Button styles to modalStyles:
+         - `undoBtn`: Centered row layout with border, padding, rounded corners
+         - `undoBtnText`: 13px font weight 500
+      
+      4. Updated Modal Usage in SwipeScreen:
+         - RatingModal now receives `onUndo={handleUndo}`
+         - LeftSwipeModal now receives `onUndo={handleUndo}`
+      
+      5. Added Toast Notification:
+         - "Swipe undone!" toast appears for 1.5s after successful undo
+         - Styled with card background, checkmark icon, shadow
+         - Positioned at bottom of screen (above action buttons)
+      
+      FILES MODIFIED:
+      - /app/frontend/app/swipe.tsx (LeftSwipeModal, modalStyles, SwipeScreen JSX)
+      
+      TESTED VIA SCREENSHOT TOOL:
+      ✅ RatingModal shows "Undo Swipe" button
+      ✅ LeftSwipeModal shows "Undo Swipe" button  
+      ✅ Clicking Undo closes modal and restores card to deck
+      ✅ Same movie reappears after undo (verified with "Grave of the Fireflies")
+      
+      READY FOR FRONTEND TESTING AGENT VERIFICATION
+  - agent: "testing"
+    message: |
+      ✅ UNDO SWIPE FEATURE TESTING COMPLETE - ALL TESTS PASSED
+      
+      COMPREHENSIVE PLAYWRIGHT TESTING RESULTS (Mobile Viewport 390x844):
+      
+      ✅ RIGHT SWIPE UNDO (RatingModal):
+      1. Heart button (data-testid="swipe-right-btn") click triggers RatingModal ✅
+      2. Modal displays:
+         - "Undo Swipe" button at top with arrow-undo icon (data-testid="undo-swipe-btn") ✅
+         - "You liked it!" title with heart icon ✅
+         - Movie title in gold: "The Good, the Bad and the Ugly" ✅
+         - 5-star rating system (default 3 stars) ✅
+         - Reason chips: Great story/plot, Amazing acting, Stunning visuals, etc. ✅
+         - "Confirm Rating" button ✅
+      3. Clicking "Undo Swipe" button:
+         - Closes RatingModal ✅
+         - Restores same movie card to front of deck ✅
+         - Shows toast notification "Swipe undone!" ✅
+      
+      ✅ LEFT SWIPE UNDO (LeftSwipeModal):
+      1. X button (data-testid="swipe-left-btn") click triggers LeftSwipeModal ✅
+      2. Modal displays:
+         - "Undo Swipe" button at top with arrow-undo icon (data-testid="undo-left-swipe-btn") ✅
+         - "Not for you?" title with X icon ✅
+         - Movie title in gold: "The Good, the Bad and the Ugly" ✅
+         - Reason chips: Haven't watched it, Not my type, Didn't like acting, etc. ✅
+         - "Skip Movie" button ✅
+      3. Clicking "Undo Swipe" button:
+         - Closes LeftSwipeModal ✅
+         - Restores same movie card to front of deck ✅
+         - Shows toast notification "Swipe undone!" ✅
+      
+      🎉 FEATURE STATUS: PRODUCTION-READY
+      - All test scenarios passed successfully
+      - Mobile responsiveness perfect (390x844 viewport)
+      - Both undo buttons working correctly
+      - Movie card restoration working flawlessly
+      - Toast notifications appearing as expected
+      - No errors or issues found
+      
+      The Undo Swipe feature is fully functional and ready for production use!
