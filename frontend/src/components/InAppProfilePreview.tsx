@@ -42,6 +42,30 @@ const VISIBILITY_FIELDS = [
   { key: 'workProfile', label: 'Work Profile', icon: 'briefcase-outline' },
 ];
 
+// Helper function to get displayable value for a field
+const getFieldValue = (profileData: ProfileData, key: string): string | null => {
+  const value = (profileData as any)[key];
+  
+  if (!value) return null;
+  
+  // Handle special cases
+  if (key === 'location') {
+    return getPartialLocation(value);
+  }
+  
+  if (key === 'topMovies' && Array.isArray(value)) {
+    if (value.length === 0) return null;
+    return value.map((m: any) => m.title).join(', ');
+  }
+  
+  if (Array.isArray(value)) {
+    if (value.length === 0) return null;
+    return value.join(', ');
+  }
+  
+  return String(value);
+};
+
 type Props = {
   visible: boolean;
   onClose: () => void;
@@ -51,11 +75,13 @@ export default function InAppProfilePreview({ visible, onClose }: Props) {
   const [profileData, setProfileData] = useState<ProfileData>(initialProfileData);
   const [showVisibilityEditor, setShowVisibilityEditor] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [expandedFields, setExpandedFields] = useState<Record<string, boolean>>({});
 
   // Load profile data when modal opens
   useEffect(() => {
     if (visible) {
       loadProfile();
+      setExpandedFields({}); // Reset expanded state when modal opens
     }
   }, [visible]);
 
@@ -66,6 +92,14 @@ export default function InAppProfilePreview({ visible, onClose }: Props) {
       setProfileData(data);
     }
     setLoading(false);
+  };
+
+  // Toggle expanded state for a field
+  const toggleExpanded = (key: string) => {
+    setExpandedFields(prev => ({
+      ...prev,
+      [key]: !prev[key],
+    }));
   };
 
   // Handle visibility toggle change
@@ -413,31 +447,76 @@ export default function InAppProfilePreview({ visible, onClose }: Props) {
               showsVerticalScrollIndicator={true}
             >
               <View style={styles.togglesCard}>
-                {VISIBILITY_FIELDS.map((field) => (
-                  <View key={field.key} style={styles.toggleRow}>
-                    <View style={styles.toggleInfo}>
-                      <Ionicons name={field.icon as any} size={20} color={COLORS.textSecondary} />
-                      <Text style={styles.toggleLabel}>{field.label}</Text>
+                {VISIBILITY_FIELDS.map((field) => {
+                  const fieldValue = getFieldValue(profileData, field.key);
+                  const isExpanded = expandedFields[field.key];
+                  const hasValue = fieldValue !== null;
+                  
+                  return (
+                    <View key={field.key} style={styles.toggleRowContainer}>
+                      {/* Main toggle row */}
+                      <View style={styles.toggleRow}>
+                        <View style={styles.toggleInfo}>
+                          <Ionicons name={field.icon as any} size={20} color={COLORS.textSecondary} />
+                          <View style={styles.labelContainer}>
+                            <Text style={styles.toggleLabel}>{field.label}</Text>
+                            {!hasValue && (
+                              <Text style={styles.notSetBadge}>Not set</Text>
+                            )}
+                          </View>
+                        </View>
+                        
+                        <View style={styles.toggleActions}>
+                          {/* Expand button - always show so user can see what's there */}
+                          <TouchableOpacity
+                            style={[styles.expandBtn, !hasValue && styles.expandBtnDisabled]}
+                            onPress={() => toggleExpanded(field.key)}
+                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                          >
+                            <Ionicons 
+                              name={isExpanded ? "chevron-up" : "chevron-down"} 
+                              size={18} 
+                              color={hasValue ? COLORS.textMuted : COLORS.textMuted + '50'} 
+                            />
+                          </TouchableOpacity>
+                          
+                          {/* Toggle switch */}
+                          <TouchableOpacity
+                            style={[
+                              styles.toggleSwitch,
+                              profileData.visibilityToggles[field.key] !== false && styles.toggleSwitchActive,
+                            ]}
+                            onPress={() => handleToggleVisibility(field.key, profileData.visibilityToggles[field.key] === false)}
+                          >
+                            <View style={[
+                              styles.toggleKnob,
+                              profileData.visibilityToggles[field.key] !== false && styles.toggleKnobActive,
+                            ]} />
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                      
+                      {/* Expanded content showing field value */}
+                      {isExpanded && (
+                        <View style={styles.expandedContent}>
+                          {hasValue ? (
+                            <>
+                              <Text style={styles.expandedLabel}>YOUR {field.label.toUpperCase()}:</Text>
+                              <Text style={styles.expandedValue}>{fieldValue}</Text>
+                            </>
+                          ) : (
+                            <Text style={styles.notSetText}>Not set yet - Add this in your profile to show it to others</Text>
+                          )}
+                        </View>
+                      )}
                     </View>
-                    <TouchableOpacity
-                      style={[
-                        styles.toggleSwitch,
-                        profileData.visibilityToggles[field.key] !== false && styles.toggleSwitchActive,
-                      ]}
-                      onPress={() => handleToggleVisibility(field.key, profileData.visibilityToggles[field.key] === false)}
-                    >
-                      <View style={[
-                        styles.toggleKnob,
-                        profileData.visibilityToggles[field.key] !== false && styles.toggleKnobActive,
-                      ]} />
-                    </TouchableOpacity>
-                  </View>
-                ))}
+                  );
+                })}
               </View>
 
               {/* Info text */}
               <Text style={styles.infoNote}>
-                Changes are saved automatically and will reflect across the app.
+                Tap the arrow to see what you've entered. Toggle determines if others can see it.
               </Text>
 
               {/* Bottom spacer */}
@@ -683,13 +762,15 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.l,
     padding: SPACING.m,
   },
+  toggleRowContainer: {
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
   toggleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: SPACING.m,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
   },
   toggleInfo: {
     flexDirection: 'row',
@@ -697,9 +778,33 @@ const styles = StyleSheet.create({
     gap: SPACING.m,
     flex: 1,
   },
+  labelContainer: {
+    flex: 1,
+  },
   toggleLabel: {
     fontSize: 15,
     color: COLORS.text,
+  },
+  notSetBadge: {
+    fontSize: 11,
+    color: COLORS.textMuted,
+    marginTop: 2,
+  },
+  toggleActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.m,
+  },
+  expandBtn: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: BORDER_RADIUS.s,
+    backgroundColor: COLORS.bgInput,
+  },
+  expandBtnDisabled: {
+    opacity: 0.5,
   },
   toggleSwitch: {
     width: 50,
@@ -720,6 +825,31 @@ const styles = StyleSheet.create({
   },
   toggleKnobActive: {
     alignSelf: 'flex-end',
+  },
+  expandedContent: {
+    paddingHorizontal: SPACING.m,
+    paddingBottom: SPACING.m,
+    paddingLeft: 48, // Align with label text (icon + gap)
+    backgroundColor: 'rgba(229,9,20,0.05)',
+    borderRadius: BORDER_RADIUS.s,
+    marginBottom: SPACING.s,
+  },
+  expandedLabel: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  expandedValue: {
+    fontSize: 14,
+    color: COLORS.text,
+    lineHeight: 20,
+  },
+  notSetText: {
+    fontSize: 13,
+    color: COLORS.textMuted,
+    fontStyle: 'italic',
   },
   infoNote: {
     fontSize: 13,
