@@ -405,11 +405,12 @@ function LeftSwipeModal({
 
 // Right Swipe Rating Modal with Reasons
 function RatingModal({
-  visible, onClose, onSubmit, movieTitle, colors,
+  visible, onClose, onSubmit, onUndo, movieTitle, colors,
 }: {
   visible: boolean;
   onClose: () => void;
   onSubmit: (rating: number, reasons: string[]) => void;
+  onUndo: () => void;
   movieTitle: string;
   colors: ReturnType<typeof getThemeColors>;
 }) {
@@ -428,10 +429,27 @@ function RatingModal({
     setSelectedReasons([]);
   };
 
+  const handleUndo = () => {
+    setRating(3);
+    setSelectedReasons([]);
+    onUndo();
+  };
+
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={modalStyles.overlay} onPress={onClose}>
         <Pressable style={[modalStyles.container, { backgroundColor: colors.bgCard }]} onPress={(e) => e.stopPropagation()}>
+          {/* Undo button at top */}
+          <TouchableOpacity
+            style={modalStyles.undoBtn}
+            onPress={handleUndo}
+            testID="undo-swipe-btn"
+            activeOpacity={0.7}
+          >
+            <Ionicons name="arrow-undo" size={18} color={colors.textSecondary} />
+            <Text style={[modalStyles.undoBtnText, { color: colors.textSecondary }]}>Undo Swipe</Text>
+          </TouchableOpacity>
+
           <View style={modalStyles.header}>
             <Ionicons name="heart" size={28} color={colors.primary} />
             <Text style={[modalStyles.title, { color: colors.text }]}>You liked it!</Text>
@@ -997,6 +1015,11 @@ export default function SwipeScreen() {
 
   const colors = getThemeColors(mode);
   const remainingSwipes = Math.max(0, REQUIRED_SWIPES - swipeState.totalSwipes);
+  // Track last swiped movie for undo functionality
+  const [lastSwipedMovie, setLastSwipedMovie] = useState<FeedMovie | null>(null);
+  const [showUndoToast, setShowUndoToast] = useState(false);
+  const undoTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   const isProfileComplete = swipeState.totalSwipes >= REQUIRED_SWIPES;
 
   // Load saved state
@@ -1285,7 +1308,16 @@ export default function SwipeScreen() {
   }, [movies.length, loading, userId, page]);
 
   const handleSwipe = useCallback((direction: 'left' | 'right', movie: FeedMovie) => {
+    // Clear any existing undo timeout
+    if (undoTimeoutRef.current) {
+      clearTimeout(undoTimeoutRef.current);
+      undoTimeoutRef.current = null;
+    }
+    
+    // Store the movie for undo capability
+    setLastSwipedMovie(movie);
     setPendingMovie(movie);
+    
     if (direction === 'right') {
       setShowRatingModal(true);
     } else {
@@ -1293,6 +1325,26 @@ export default function SwipeScreen() {
     }
     setMovies((prev) => prev.filter((m) => m.id !== movie.id));
   }, []);
+
+  // Handle undo - restore the last swiped movie
+  const handleUndo = useCallback(() => {
+    if (pendingMovie) {
+      // Put the movie back at the front of the deck
+      setMovies((prev) => [pendingMovie, ...prev]);
+      
+      // Clear the pending movie
+      setPendingMovie(null);
+      setLastSwipedMovie(null);
+      
+      // Close any open modals
+      setShowRatingModal(false);
+      setShowLeftModal(false);
+      
+      // Show brief toast confirmation
+      setShowUndoToast(true);
+      setTimeout(() => setShowUndoToast(false), 1500);
+    }
+  }, [pendingMovie]);
 
   const recordSwipe = useCallback(async (
     movie: FeedMovie, direction: 'left' | 'right', rating: number, reasons: string[], didntWatch: boolean = false
