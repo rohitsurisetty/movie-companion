@@ -53,6 +53,11 @@ const getFieldValue = (profileData: ProfileData, key: string): string | null => 
     return getPartialLocation(value);
   }
   
+  // Handle OTT/Theatre - show "OTT, Theatre" instead of "Both"
+  if (key === 'ottTheatre' && value === 'Both') {
+    return 'OTT, Theatre';
+  }
+  
   if (key === 'topMovies' && Array.isArray(value)) {
     if (value.length === 0) return null;
     return value.map((m: any) => m.title).join(', ');
@@ -286,9 +291,21 @@ export default function InAppProfilePreview({ visible, onClose }: Props) {
                       </View>
                     )}
                     {isVisible('ottTheatre') && profileData.ottTheatre && (
-                      <View style={styles.infoRow}>
-                        <Ionicons name="tv-outline" size={16} color={COLORS.textMuted} />
-                        <Text style={styles.infoText}>{profileData.ottTheatre}</Text>
+                      <View style={styles.tagsRow}>
+                        {profileData.ottTheatre === 'Both' ? (
+                          <>
+                            <View style={styles.tag}>
+                              <Text style={styles.tagText}>OTT</Text>
+                            </View>
+                            <View style={styles.tag}>
+                              <Text style={styles.tagText}>Theatre</Text>
+                            </View>
+                          </>
+                        ) : (
+                          <View style={styles.tag}>
+                            <Text style={styles.tagText}>{profileData.ottTheatre}</Text>
+                          </View>
+                        )}
                       </View>
                     )}
                   </View>
