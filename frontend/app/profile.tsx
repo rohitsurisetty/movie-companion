@@ -424,16 +424,37 @@ const modalStyles = StyleSheet.create({
 
 // Profile Field Row Component
 function ProfileField({
-  icon, label, value, onPress, isArray = false, isEmpty = false,
+  icon, label, value, onPress, isArray = false, isEmpty = false, disabled = false,
 }: {
   icon: string;
   label: string;
   value: string | string[];
-  onPress: () => void;
+  onPress?: () => void;
   isArray?: boolean;
   isEmpty?: boolean;
+  disabled?: boolean;
 }) {
   const displayValue = isArray && Array.isArray(value) ? value.join(', ') : value;
+  
+  // If disabled, render as non-interactive View
+  if (disabled) {
+    return (
+      <View style={[fieldStyles.container, { opacity: 0.7 }]}>
+        <View style={fieldStyles.iconContainer}>
+          <Ionicons name={icon as any} size={20} color={COLORS.textMuted} />
+        </View>
+        <View style={fieldStyles.content}>
+          <Text style={fieldStyles.label}>{label}</Text>
+          {isEmpty || !displayValue ? (
+            <Text style={fieldStyles.placeholder}>Not set</Text>
+          ) : (
+            <Text style={fieldStyles.value}>{displayValue}</Text>
+          )}
+        </View>
+        <Ionicons name="lock-closed" size={16} color={COLORS.textMuted} />
+      </View>
+    );
+  }
   
   return (
     <TouchableOpacity style={fieldStyles.container} onPress={onPress} activeOpacity={0.7}>
@@ -665,8 +686,8 @@ export default function ProfileScreen() {
         {/* Basic Info Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Basic Information</Text>
-          <ProfileField icon="person-outline" label="Name" value={profile.name} onPress={() => setEditModal('name')} isEmpty={!profile.name} />
-          <ProfileField icon="male-female-outline" label="Gender" value={profile.gender} onPress={() => setEditModal('gender')} isEmpty={!profile.gender} />
+          <ProfileField icon="person-outline" label="Name" value={profile.name} isEmpty={!profile.name} disabled />
+          <ProfileField icon="male-female-outline" label="Gender" value={profile.gender} isEmpty={!profile.gender} disabled />
           <ProfileField icon="location-outline" label="Location" value={getPartialLocation(profile.location)} onPress={() => setEditModal('location')} isEmpty={!profile.location} />
           <ProfileField icon="document-text-outline" label="Bio" value={profile.bio} onPress={() => setEditModal('bio')} isEmpty={!profile.bio} />
         </View>
