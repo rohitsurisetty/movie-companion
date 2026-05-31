@@ -1282,6 +1282,89 @@ async def record_swipe(req: SwipeRequest):
     }
 
 
+class LibraryAddRequest(BaseModel):
+    user_id: str
+    movie_id: int
+    movie_title: str
+    poster_path: Optional[str] = None
+    release_date: Optional[str] = None
+    is_like: bool
+    rating: int = 0
+    reasons: List[str] = []
+    didnt_watch: bool = False
+
+
+@api_router.post("/user/library/add")
+async def add_to_library(req: LibraryAddRequest):
+    """Add a movie to the user's personal library with rating"""
+    # Save to MongoDB
+    library_entry = {
+        "user_id": req.user_id,
+        "movie_id": req.movie_id,
+        "movie_title": req.movie_title,
+        "poster_path": req.poster_path,
+        "release_date": req.release_date,
+        "is_like": req.is_like,
+        "rating": req.rating,
+        "reasons": req.reasons,
+        "didnt_watch": req.didnt_watch,
+        "source": "library",  # Mark as manually added from library
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    
+    # Upsert to allow re-rating
+    await db.user_library.update_one(
+        {"user_id": req.user_id, "movie_id": req.movie_id},
+        {"$set": library_entry},
+        upsert=True
+    )
+    
+    # Also record as a swipe to influence recommendations
+    await db.user_swipes.update_one(
+        {"user_id": req.user_id, "movie_id": req.movie_id},
+        {"$set": {
+            "user_id": req.user_id,
+            "movie_id": req.movie_id,
+            "direction": "right" if req.is_like else "left",
+            "reason": ",".join(req.reasons) if req.reasons else None,
+            "rating": req.rating if req.is_like else None,
+            "didnt_watch": req.didnt_watch,
+            "source": "library",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }},
+        upsert=True
+    )
+    
+    logger.info(f"Added movie {req.movie_title} to library for user {req.user_id}")
+    
+    return {"success": True, "message": "Movie added to library"}
+
+
+@api_router.get("/user/library")
+async def get_user_library(user_id: str):
+    """Get user's personal movie library"""
+    library = await db.user_library.find(
+        {"user_id": user_id}
+    ).sort("updated_at", -1).to_list(length=500)
+    
+    # Convert to response format
+    movies = []
+    for entry in library:
+        movies.append({
+            "id": entry["movie_id"],
+            "title": entry["movie_title"],
+            "poster_path": entry.get("poster_path"),
+            "release_date": entry.get("release_date"),
+            "isLike": entry["is_like"],
+            "rating": entry.get("rating", 0),
+            "reasons": entry.get("reasons", []),
+            "ratedAt": entry.get("updated_at"),
+        })
+    
+    return {"movies": movies, "total": len(movies)}
+
+
 @api_router.post("/recommendations")
 async def get_recommendations(req: RecommendationRequest):
     """

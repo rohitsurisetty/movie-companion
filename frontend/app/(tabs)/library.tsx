@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity, Image,
-  FlatList, Modal, ActivityIndicator, Dimensions, KeyboardAvoidingView, Platform
+  ScrollView, Modal, ActivityIndicator, KeyboardAvoidingView, 
+  Platform, Pressable, Keyboard
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { ScrollView } from 'react-native-gesture-handler';
 import Constants from 'expo-constants';
 import { getAuth } from '../../src/store';
 
@@ -13,11 +13,11 @@ const BACKEND_URL = Constants.expoConfig?.extra?.EXPO_PUBLIC_BACKEND_URL
   || process.env.EXPO_PUBLIC_BACKEND_URL 
   || '';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const GRID_PADDING = 16;
-const GRID_GAP = 10;
+const GRID_PADDING = 12;
+const GRID_GAP = 8;
 const NUM_COLUMNS = 3;
-const CARD_WIDTH = (SCREEN_WIDTH - (GRID_PADDING * 2) - (GRID_GAP * (NUM_COLUMNS - 1))) / NUM_COLUMNS;
+// Calculate card width based on percentage to work across platforms
+const CARD_PERCENTAGE = (100 - ((GRID_GAP * (NUM_COLUMNS - 1)) / 3.9)) / NUM_COLUMNS;
 
 const COLORS = {
   primary: '#E50914',
@@ -30,6 +30,8 @@ const COLORS = {
   border: '#333333',
   success: '#4CAF50',
   warning: '#FF9800',
+  like: '#4CAF50',
+  dislike: '#F44336',
 };
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w342';
@@ -62,6 +64,13 @@ interface Movie {
   vote_average?: number;
   overview?: string;
   genre_ids?: number[];
+}
+
+interface RatedMovie extends Movie {
+  isLike: boolean;
+  rating: number;
+  reasons: string[];
+  ratedAt: string;
 }
 
 interface RatingModalProps {
@@ -102,132 +111,134 @@ function RatingModal({ visible, movie, onClose, onSubmit }: RatingModalProps) {
 
   if (!movie) return null;
 
-  const reasons = isLike ? LIKE_REASONS : DISLIKE_REASONS;
-
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={handleClose}>
-      <View style={modalStyles.overlay}>
-        <View style={modalStyles.container}>
-          <ScrollView showsVerticalScrollIndicator={false}>
-            {/* Movie Info */}
-            <View style={modalStyles.movieHeader}>
-              {movie.poster_path && (
-                <Image
-                  source={{ uri: `${TMDB_IMAGE_BASE}${movie.poster_path}` }}
-                  style={modalStyles.moviePoster}
-                />
+    <Modal
+      visible={visible}
+      animationType="slide"
+      transparent={true}
+      onRequestClose={handleClose}
+    >
+      <Pressable style={modalStyles.overlay} onPress={handleClose}>
+        <Pressable style={modalStyles.container} onPress={() => {}}>
+          {/* Movie Info Header */}
+          <View style={modalStyles.movieHeader}>
+            {movie.poster_path && (
+              <Image
+                source={{ uri: `${TMDB_IMAGE_BASE}${movie.poster_path}` }}
+                style={modalStyles.moviePoster}
+              />
+            )}
+            <View style={modalStyles.movieInfo}>
+              <Text style={modalStyles.movieTitle} numberOfLines={2}>{movie.title}</Text>
+              {movie.release_date && (
+                <Text style={modalStyles.movieYear}>{movie.release_date.slice(0, 4)}</Text>
               )}
-              <View style={modalStyles.movieInfo}>
-                <Text style={modalStyles.movieTitle} numberOfLines={2}>{movie.title}</Text>
-                {movie.release_date && (
-                  <Text style={modalStyles.movieYear}>{movie.release_date.slice(0, 4)}</Text>
-                )}
+              {movie.vote_average && movie.vote_average > 0 && (
+                <View style={modalStyles.ratingBadge}>
+                  <Ionicons name="star" size={12} color="#FFD700" />
+                  <Text style={modalStyles.ratingText}>{movie.vote_average.toFixed(1)}</Text>
+                </View>
+              )}
+            </View>
+          </View>
+
+          {/* Like/Dislike Selection */}
+          {isLike === null ? (
+            <View style={modalStyles.likeDislikeContainer}>
+              <Text style={modalStyles.questionText}>Did you like this movie?</Text>
+              <View style={modalStyles.buttonRow}>
+                <TouchableOpacity
+                  style={[modalStyles.choiceButton, modalStyles.likeButton]}
+                  onPress={() => setIsLike(true)}
+                >
+                  <Ionicons name="thumbs-up" size={28} color="#FFF" />
+                  <Text style={modalStyles.choiceText}>Liked It</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[modalStyles.choiceButton, modalStyles.dislikeButton]}
+                  onPress={() => setIsLike(false)}
+                >
+                  <Ionicons name="thumbs-down" size={28} color="#FFF" />
+                  <Text style={modalStyles.choiceText}>Didn't Like</Text>
+                </TouchableOpacity>
               </View>
             </View>
-
-            {/* Like/Dislike Selection */}
-            {isLike === null ? (
-              <View style={modalStyles.actionSelection}>
-                <Text style={modalStyles.sectionTitle}>What do you think?</Text>
-                <View style={modalStyles.actionButtons}>
-                  <TouchableOpacity
-                    style={[modalStyles.actionBtn, modalStyles.likeBtn]}
-                    onPress={() => setIsLike(true)}
-                  >
-                    <Ionicons name="heart" size={32} color="#FFF" />
-                    <Text style={modalStyles.actionBtnText}>Like</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[modalStyles.actionBtn, modalStyles.dislikeBtn]}
-                    onPress={() => setIsLike(false)}
-                  >
-                    <Ionicons name="close" size={32} color="#FFF" />
-                    <Text style={modalStyles.actionBtnText}>Dislike</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ) : (
-              <>
-                {/* Rating Stars (only for likes) */}
-                {isLike && (
-                  <View style={modalStyles.ratingSection}>
-                    <Text style={modalStyles.sectionTitle}>Rate this movie</Text>
-                    <View style={modalStyles.starsContainer}>
-                      {[1, 2, 3, 4, 5].map(star => (
-                        <TouchableOpacity key={star} onPress={() => setRating(star)}>
-                          <Ionicons
-                            name={star <= rating ? 'star' : 'star-outline'}
-                            size={36}
-                            color={star <= rating ? '#FFD700' : COLORS.textMuted}
-                          />
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                    {rating > 0 && (
-                      <Text style={modalStyles.ratingLabel}>
-                        {rating === 5 ? 'Masterpiece!' : rating === 4 ? 'Great!' : rating === 3 ? 'Good' : rating === 2 ? 'Okay' : 'Not great'}
-                      </Text>
-                    )}
-                  </View>
-                )}
-
-                {/* Reasons */}
-                <View style={modalStyles.reasonsSection}>
-                  <Text style={modalStyles.sectionTitle}>
-                    {isLike ? 'Why did you love it?' : 'What went wrong?'}
-                  </Text>
-                  <View style={modalStyles.reasonsGrid}>
-                    {reasons.map(reason => (
-                      <TouchableOpacity
-                        key={reason.id}
-                        style={[
-                          modalStyles.reasonChip,
-                          selectedReasons.includes(reason.id) && modalStyles.reasonChipActive
-                        ]}
-                        onPress={() => toggleReason(reason.id)}
-                      >
+          ) : (
+            <>
+              {/* Rating Stars for Likes */}
+              {isLike && (
+                <View style={modalStyles.ratingSection}>
+                  <Text style={modalStyles.sectionLabel}>How much did you like it?</Text>
+                  <View style={modalStyles.starsContainer}>
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <TouchableOpacity key={star} onPress={() => setRating(star)}>
                         <Ionicons
-                          name={reason.icon as any}
-                          size={16}
-                          color={selectedReasons.includes(reason.id) ? '#FFF' : COLORS.textMuted}
+                          name={star <= rating ? 'star' : 'star-outline'}
+                          size={36}
+                          color="#FFD700"
                         />
-                        <Text style={[
-                          modalStyles.reasonText,
-                          selectedReasons.includes(reason.id) && modalStyles.reasonTextActive
-                        ]}>
-                          {reason.label}
-                        </Text>
                       </TouchableOpacity>
                     ))}
                   </View>
                 </View>
+              )}
 
-                {/* Submit Button */}
+              {/* Reasons */}
+              <View style={modalStyles.reasonsSection}>
+                <Text style={modalStyles.sectionLabel}>
+                  {isLike ? 'What did you like about it?' : 'What went wrong?'}
+                </Text>
+                <View style={modalStyles.reasonsGrid}>
+                  {(isLike ? LIKE_REASONS : DISLIKE_REASONS).map((reason) => (
+                    <TouchableOpacity
+                      key={reason.id}
+                      style={[
+                        modalStyles.reasonChip,
+                        selectedReasons.includes(reason.id) && modalStyles.reasonChipSelected,
+                        selectedReasons.includes(reason.id) && (isLike ? modalStyles.reasonChipLike : modalStyles.reasonChipDislike),
+                      ]}
+                      onPress={() => toggleReason(reason.id)}
+                    >
+                      <Ionicons
+                        name={reason.icon as any}
+                        size={16}
+                        color={selectedReasons.includes(reason.id) ? '#FFF' : COLORS.textMuted}
+                      />
+                      <Text
+                        style={[
+                          modalStyles.reasonText,
+                          selectedReasons.includes(reason.id) && modalStyles.reasonTextSelected,
+                        ]}
+                      >
+                        {reason.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Action Buttons */}
+              <View style={modalStyles.actionRow}>
+                <TouchableOpacity style={modalStyles.backButton} onPress={() => setIsLike(null)}>
+                  <Ionicons name="arrow-back" size={20} color={COLORS.text} />
+                  <Text style={modalStyles.backButtonText}>Back</Text>
+                </TouchableOpacity>
                 <TouchableOpacity
-                  style={[modalStyles.submitBtn, (!isLike || rating > 0) && modalStyles.submitBtnActive]}
+                  style={[
+                    modalStyles.submitButton,
+                    (!isLike || rating > 0) ? {} : modalStyles.submitButtonDisabled,
+                  ]}
                   onPress={handleSubmit}
                   disabled={isLike && rating === 0}
                 >
-                  <Text style={modalStyles.submitBtnText}>
-                    {isLike ? 'Add to Liked' : 'Add to Disliked'}
-                  </Text>
+                  <Text style={modalStyles.submitButtonText}>Save Rating</Text>
+                  <Ionicons name="checkmark" size={20} color="#FFF" />
                 </TouchableOpacity>
-
-                {/* Back Button */}
-                <TouchableOpacity style={modalStyles.backBtn} onPress={() => setIsLike(null)}>
-                  <Ionicons name="arrow-back" size={18} color={COLORS.textMuted} />
-                  <Text style={modalStyles.backBtnText}>Change selection</Text>
-                </TouchableOpacity>
-              </>
-            )}
-          </ScrollView>
-
-          {/* Close Button */}
-          <TouchableOpacity style={modalStyles.closeBtn} onPress={handleClose}>
-            <Ionicons name="close" size={24} color={COLORS.textMuted} />
-          </TouchableOpacity>
-        </View>
-      </View>
+              </View>
+            </>
+          )}
+        </Pressable>
+      </Pressable>
     </Modal>
   );
 }
@@ -236,11 +247,13 @@ export default function LibraryScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Movie[]>([]);
   const [trendingMovies, setTrendingMovies] = useState<Movie[]>([]);
+  const [ratedMovies, setRatedMovies] = useState<RatedMovie[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedMovie, setSelectedMovie] = useState<Movie | null>(null);
   const [showRatingModal, setShowRatingModal] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'search' | 'rated'>('search');
 
   useEffect(() => {
     loadInitialData();
@@ -251,12 +264,26 @@ export default function LibraryScreen() {
       const auth = await getAuth();
       if (auth?.user_id) {
         setUserId(auth.user_id);
+        // Load user's rated movies
+        await loadRatedMovies(auth.user_id);
       }
       await fetchTrendingMovies();
     } catch (error) {
       console.error('Error loading initial data:', error);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const loadRatedMovies = async (uid: string) => {
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/user/library?user_id=${uid}`);
+      if (response.ok) {
+        const data = await response.json();
+        setRatedMovies(data.movies || []);
+      }
+    } catch (error) {
+      console.error('Error loading rated movies:', error);
     }
   };
 
@@ -305,6 +332,7 @@ export default function LibraryScreen() {
   }, [searchQuery, searchMovies]);
 
   const handleMoviePress = (movie: Movie) => {
+    Keyboard.dismiss();
     setSelectedMovie(movie);
     setShowRatingModal(true);
   };
@@ -314,18 +342,33 @@ export default function LibraryScreen() {
 
     try {
       // Send to backend
-      await fetch(`${BACKEND_URL}/api/user/swipe`, {
+      const response = await fetch(`${BACKEND_URL}/api/user/library/add`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user_id: userId,
           movie_id: selectedMovie.id,
-          direction: isLike ? 'right' : 'left',
-          rating: isLike ? rating : null,
-          reason: reasons.join(','),
+          movie_title: selectedMovie.title,
+          poster_path: selectedMovie.poster_path,
+          release_date: selectedMovie.release_date,
+          is_like: isLike,
+          rating: isLike ? rating : 0,
+          reasons: reasons,
           didnt_watch: reasons.includes('not_watched'),
         }),
       });
+
+      if (response.ok) {
+        // Add to local state
+        const newRatedMovie: RatedMovie = {
+          ...selectedMovie,
+          isLike,
+          rating: isLike ? rating : 0,
+          reasons,
+          ratedAt: new Date().toISOString(),
+        };
+        setRatedMovies(prev => [newRatedMovie, ...prev.filter(m => m.id !== selectedMovie.id)]);
+      }
 
       setShowRatingModal(false);
       setSelectedMovie(null);
@@ -334,22 +377,88 @@ export default function LibraryScreen() {
     }
   };
 
-  const renderMovieCard = ({ item }: { item: Movie }) => (
-    <TouchableOpacity
-      style={styles.movieCard}
-      onPress={() => handleMoviePress(item)}
-      activeOpacity={0.8}
-    >
-      {item.poster_path ? (
-        <Image
-          source={{ uri: `${TMDB_IMAGE_BASE}${item.poster_path}` }}
-          style={styles.moviePoster}
-        />
-      ) : (
-        <View style={[styles.moviePoster, styles.noPoster]}>
-          <Ionicons name="film-outline" size={32} color={COLORS.textMuted} />
+  const renderMovieCard = ({ item, index }: { item: Movie; index: number }) => {
+    const isRated = ratedMovies.some(m => m.id === item.id);
+    const ratedInfo = ratedMovies.find(m => m.id === item.id);
+    
+    return (
+      <TouchableOpacity
+        onPress={() => handleMoviePress(item)}
+        activeOpacity={0.7}
+      >
+        <View style={styles.posterContainer}>
+          {item.poster_path ? (
+            <Image
+              source={{ uri: `${TMDB_IMAGE_BASE}${item.poster_path}` }}
+              style={styles.moviePoster}
+              resizeMode="cover"
+            />
+          ) : (
+            <View style={[styles.moviePoster, styles.noPoster]}>
+              <Ionicons name="film-outline" size={28} color={COLORS.textMuted} />
+            </View>
+          )}
+          {isRated && (
+            <View style={[
+              styles.ratedBadge,
+              ratedInfo?.isLike ? styles.ratedBadgeLike : styles.ratedBadgeDislike
+            ]}>
+              <Ionicons 
+                name={ratedInfo?.isLike ? 'heart' : 'heart-dislike'} 
+                size={14} 
+                color="#FFF" 
+              />
+            </View>
+          )}
+          {item.vote_average && item.vote_average > 0 && (
+            <View style={styles.tmdbRating}>
+              <Ionicons name="star" size={10} color="#FFD700" />
+              <Text style={styles.tmdbRatingText}>{item.vote_average.toFixed(1)}</Text>
+            </View>
+          )}
         </View>
-      )}
+        <Text style={styles.movieTitle} numberOfLines={2}>{item.title}</Text>
+        {item.release_date && (
+          <Text style={styles.movieYear}>{item.release_date.slice(0, 4)}</Text>
+        )}
+      </TouchableOpacity>
+    );
+  };
+
+  const renderRatedMovieCard = ({ item }: { item: RatedMovie }) => (
+    <TouchableOpacity
+      onPress={() => handleMoviePress(item)}
+      activeOpacity={0.7}
+    >
+      <View style={styles.posterContainer}>
+        {item.poster_path ? (
+          <Image
+            source={{ uri: `${TMDB_IMAGE_BASE}${item.poster_path}` }}
+            style={styles.moviePoster}
+            resizeMode="cover"
+          />
+        ) : (
+          <View style={[styles.moviePoster, styles.noPoster]}>
+            <Ionicons name="film-outline" size={28} color={COLORS.textMuted} />
+          </View>
+        )}
+        <View style={[
+          styles.ratedBadge,
+          item.isLike ? styles.ratedBadgeLike : styles.ratedBadgeDislike
+        ]}>
+          <Ionicons 
+            name={item.isLike ? 'heart' : 'heart-dislike'} 
+            size={14} 
+            color="#FFF" 
+          />
+        </View>
+        {item.isLike && item.rating > 0 && (
+          <View style={styles.userRating}>
+            <Text style={styles.userRatingText}>{item.rating}</Text>
+            <Ionicons name="star" size={10} color="#FFD700" />
+          </View>
+        )}
+      </View>
       <Text style={styles.movieTitle} numberOfLines={2}>{item.title}</Text>
       {item.release_date && (
         <Text style={styles.movieYear}>{item.release_date.slice(0, 4)}</Text>
@@ -382,54 +491,160 @@ export default function LibraryScreen() {
           <Text style={styles.headerSubtitle}>Search and rate any movie</Text>
         </View>
 
-        {/* Search Bar */}
-        <View style={styles.searchContainer}>
-          <Ionicons name="search" size={20} color={COLORS.textMuted} style={styles.searchIcon} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search movies..."
-            placeholderTextColor={COLORS.textMuted}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            autoCorrect={false}
-          />
-          {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => setSearchQuery('')}>
-              <Ionicons name="close-circle" size={20} color={COLORS.textMuted} />
-            </TouchableOpacity>
-          )}
+        {/* Tab Switcher */}
+        <View style={styles.tabContainer}>
+          <TouchableOpacity 
+            style={[styles.tab, activeTab === 'search' && styles.tabActive]}
+            onPress={() => setActiveTab('search')}
+          >
+            <Ionicons 
+              name="search" 
+              size={18} 
+              color={activeTab === 'search' ? COLORS.primary : COLORS.textMuted} 
+            />
+            <Text style={[styles.tabText, activeTab === 'search' && styles.tabTextActive]}>
+              Search
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={[styles.tab, activeTab === 'rated' && styles.tabActive]}
+            onPress={() => setActiveTab('rated')}
+          >
+            <Ionicons 
+              name="heart" 
+              size={18} 
+              color={activeTab === 'rated' ? COLORS.primary : COLORS.textMuted} 
+            />
+            <Text style={[styles.tabText, activeTab === 'rated' && styles.tabTextActive]}>
+              My Ratings ({ratedMovies.length})
+            </Text>
+          </TouchableOpacity>
         </View>
 
-        {/* Section Title */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>
-            {searchQuery.length >= 2 
-              ? `Results for "${searchQuery}"` 
-              : 'Trending Movies'}
-          </Text>
-          {isSearching && <ActivityIndicator size="small" color={COLORS.primary} />}
-        </View>
-
-        {/* Movies Grid */}
-        <FlatList
-          data={displayMovies}
-          renderItem={renderMovieCard}
-          keyExtractor={(item) => item.id.toString()}
-          numColumns={NUM_COLUMNS}
-          columnWrapperStyle={styles.gridRow}
-          contentContainerStyle={styles.gridContainer}
-          showsVerticalScrollIndicator={false}
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Ionicons name="film-outline" size={48} color={COLORS.textMuted} />
-              <Text style={styles.emptyText}>
-                {searchQuery.length >= 2 
-                  ? 'No movies found' 
-                  : 'No trending movies available'}
-              </Text>
+        {activeTab === 'search' ? (
+          <>
+            {/* Search Bar */}
+            <View style={styles.searchContainer}>
+              <Ionicons name="search" size={20} color={COLORS.textMuted} style={styles.searchIcon} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search movies by title..."
+                placeholderTextColor={COLORS.textMuted}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                autoCorrect={false}
+                returnKeyType="search"
+              />
+              {searchQuery.length > 0 && (
+                <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearButton}>
+                  <Ionicons name="close-circle" size={20} color={COLORS.textMuted} />
+                </TouchableOpacity>
+              )}
             </View>
-          }
-        />
+
+            {/* Section Title */}
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>
+                {searchQuery.length >= 2 
+                  ? `Results for "${searchQuery}"` 
+                  : 'Trending This Week'}
+              </Text>
+              {isSearching && <ActivityIndicator size="small" color={COLORS.primary} />}
+            </View>
+
+            {/* Movies Grid - Using ScrollView for better web compatibility */}
+            <ScrollView 
+              style={styles.scrollView}
+              contentContainerStyle={styles.gridContainer}
+              showsVerticalScrollIndicator={false}
+              onScrollBeginDrag={Keyboard.dismiss}
+            >
+              {displayMovies.length === 0 ? (
+                <View style={styles.emptyContainer}>
+                  <Ionicons name="film-outline" size={48} color={COLORS.textMuted} />
+                  <Text style={styles.emptyText}>
+                    {searchQuery.length >= 2 
+                      ? 'No movies found' 
+                      : 'No trending movies available'}
+                  </Text>
+                  {searchQuery.length >= 2 && (
+                    <Text style={styles.emptySubtext}>Try a different search term</Text>
+                  )}
+                </View>
+              ) : (
+                <View style={{
+                  flexDirection: 'row',
+                  flexWrap: 'wrap',
+                  justifyContent: 'flex-start',
+                  paddingHorizontal: 0,
+                }}>
+                  {displayMovies.map((item, index) => (
+                    <View 
+                      key={`movie-${item.id}`} 
+                      style={{
+                        width: '32%',
+                        marginRight: index % 3 === 2 ? 0 : '2%',
+                        marginBottom: 12,
+                      }}
+                    >
+                      {renderMovieCard({ item, index })}
+                    </View>
+                  ))}
+                </View>
+              )}
+            </ScrollView>
+          </>
+        ) : (
+          <>
+            {/* My Ratings Section */}
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>My Rated Movies</Text>
+            </View>
+
+            <ScrollView 
+              style={styles.scrollView}
+              contentContainerStyle={styles.gridContainer}
+              showsVerticalScrollIndicator={false}
+            >
+              {ratedMovies.length === 0 ? (
+                <View style={styles.emptyContainer}>
+                  <Ionicons name="heart-outline" size={48} color={COLORS.textMuted} />
+                  <Text style={styles.emptyText}>No rated movies yet</Text>
+                  <Text style={styles.emptySubtext}>
+                    Search and rate movies to build your library
+                  </Text>
+                  <TouchableOpacity 
+                    style={styles.switchTabButton}
+                    onPress={() => setActiveTab('search')}
+                  >
+                    <Ionicons name="search" size={18} color="#FFF" />
+                    <Text style={styles.switchTabText}>Search Movies</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={{
+                  flexDirection: 'row',
+                  flexWrap: 'wrap',
+                  justifyContent: 'flex-start',
+                  paddingHorizontal: 0,
+                }}>
+                  {ratedMovies.map((item, index) => (
+                    <View 
+                      key={`rated-${item.id}`} 
+                      style={{
+                        width: '32%',
+                        marginRight: index % 3 === 2 ? 0 : '2%',
+                        marginBottom: 12,
+                      }}
+                    >
+                      {renderRatedMovieCard({ item })}
+                    </View>
+                  ))}
+                </View>
+              )}
+            </ScrollView>
+          </>
+        )}
 
         {/* Rating Modal */}
         <RatingModal
@@ -466,63 +681,112 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: GRID_PADDING,
-    paddingTop: 12,
-    paddingBottom: 8,
+    paddingTop: 8,
+    paddingBottom: 4,
   },
   headerTitle: {
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: 'bold',
     color: COLORS.text,
   },
   headerSubtitle: {
+    fontSize: 13,
+    color: COLORS.textMuted,
+    marginTop: 2,
+  },
+  tabContainer: {
+    flexDirection: 'row',
+    marginHorizontal: GRID_PADDING,
+    marginVertical: 10,
+    backgroundColor: COLORS.bgCard,
+    borderRadius: 10,
+    padding: 4,
+  },
+  tab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: 8,
+    gap: 6,
+  },
+  tabActive: {
+    backgroundColor: COLORS.bgInput,
+  },
+  tabText: {
     fontSize: 14,
     color: COLORS.textMuted,
-    marginTop: 4,
+    fontWeight: '500',
+  },
+  tabTextActive: {
+    color: COLORS.text,
   },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.bgInput,
     marginHorizontal: GRID_PADDING,
-    marginVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    height: 48,
+    marginBottom: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    height: 44,
   },
   searchIcon: {
-    marginRight: 12,
+    marginRight: 10,
   },
   searchInput: {
     flex: 1,
-    fontSize: 16,
+    fontSize: 15,
     color: COLORS.text,
+  },
+  clearButton: {
+    padding: 4,
   },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: GRID_PADDING,
-    paddingBottom: 12,
+    paddingBottom: 10,
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
     color: COLORS.text,
   },
   gridContainer: {
     paddingHorizontal: GRID_PADDING,
-    paddingBottom: 20,
+    paddingBottom: 100,
+  },
+  scrollView: {
+    flex: 1,
+  },
+  gridWrapper: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  cardWrapper: {
+    width: '31%',
+    marginBottom: 12,
   },
   gridRow: {
+    justifyContent: 'flex-start',
     gap: GRID_GAP,
     marginBottom: GRID_GAP,
   },
   movieCard: {
-    width: CARD_WIDTH,
+    width: '31%',
+  },
+  posterContainer: {
+    width: '100%',
+    aspectRatio: 2/3,
+    position: 'relative',
   },
   moviePoster: {
     width: '100%',
-    height: CARD_WIDTH * 1.5,
+    height: '100%',
     borderRadius: 8,
     backgroundColor: COLORS.bgCard,
   },
@@ -530,11 +794,62 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  ratedBadge: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  ratedBadgeLike: {
+    backgroundColor: COLORS.like,
+  },
+  ratedBadgeDislike: {
+    backgroundColor: COLORS.dislike,
+  },
+  tmdbRating: {
+    position: 'absolute',
+    bottom: 6,
+    left: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 4,
+    gap: 3,
+  },
+  tmdbRatingText: {
+    fontSize: 11,
+    color: '#FFF',
+    fontWeight: '600',
+  },
+  userRating: {
+    position: 'absolute',
+    bottom: 6,
+    right: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 4,
+    gap: 2,
+  },
+  userRatingText: {
+    fontSize: 12,
+    color: '#FFD700',
+    fontWeight: 'bold',
+  },
   movieTitle: {
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '500',
     color: COLORS.text,
     marginTop: 6,
+    lineHeight: 16,
   },
   movieYear: {
     fontSize: 11,
@@ -546,11 +861,33 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingTop: 60,
-    gap: 12,
+    gap: 10,
   },
   emptyText: {
     fontSize: 16,
     color: COLORS.textMuted,
+    fontWeight: '500',
+  },
+  emptySubtext: {
+    fontSize: 13,
+    color: COLORS.textMuted,
+    textAlign: 'center',
+    paddingHorizontal: 40,
+  },
+  switchTabButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginTop: 16,
+    gap: 8,
+  },
+  switchTabText: {
+    fontSize: 14,
+    color: '#FFF',
+    fontWeight: '600',
   },
 });
 
@@ -558,28 +895,19 @@ const modalStyles = StyleSheet.create({
   overlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.85)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
+    justifyContent: 'flex-end',
   },
   container: {
     backgroundColor: COLORS.bgCard,
-    borderRadius: 20,
-    padding: 24,
-    width: '100%',
-    maxWidth: 400,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 20,
+    paddingBottom: 40,
     maxHeight: '85%',
-  },
-  closeBtn: {
-    position: 'absolute',
-    top: 16,
-    right: 16,
-    zIndex: 10,
   },
   movieHeader: {
     flexDirection: 'row',
-    gap: 16,
-    marginBottom: 24,
+    marginBottom: 20,
   },
   moviePoster: {
     width: 80,
@@ -588,66 +916,79 @@ const modalStyles = StyleSheet.create({
   },
   movieInfo: {
     flex: 1,
+    marginLeft: 16,
     justifyContent: 'center',
   },
   movieTitle: {
     fontSize: 18,
     fontWeight: 'bold',
     color: COLORS.text,
+    marginBottom: 4,
   },
   movieYear: {
     fontSize: 14,
     color: COLORS.textMuted,
-    marginTop: 4,
+    marginBottom: 8,
   },
-  actionSelection: {
+  ratingBadge: {
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 4,
   },
-  sectionTitle: {
-    fontSize: 16,
+  ratingText: {
+    fontSize: 14,
+    color: '#FFD700',
+    fontWeight: '600',
+  },
+  likeDislikeContainer: {
+    alignItems: 'center',
+    paddingVertical: 10,
+  },
+  questionText: {
+    fontSize: 18,
     fontWeight: '600',
     color: COLORS.text,
-    marginBottom: 16,
-    textAlign: 'center',
+    marginBottom: 20,
   },
-  actionButtons: {
+  buttonRow: {
     flexDirection: 'row',
-    gap: 20,
+    gap: 16,
   },
-  actionBtn: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    justifyContent: 'center',
+  choiceButton: {
+    flex: 1,
     alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 24,
+    borderRadius: 12,
     gap: 8,
   },
-  likeBtn: {
-    backgroundColor: COLORS.primary,
+  likeButton: {
+    backgroundColor: COLORS.like,
   },
-  dislikeBtn: {
-    backgroundColor: '#666',
+  dislikeButton: {
+    backgroundColor: COLORS.dislike,
   },
-  actionBtnText: {
-    fontSize: 14,
+  choiceText: {
+    fontSize: 15,
     fontWeight: '600',
     color: '#FFF',
   },
   ratingSection: {
-    alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 20,
+  },
+  sectionLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: COLORS.text,
+    marginBottom: 12,
   },
   starsContainer: {
     flexDirection: 'row',
+    justifyContent: 'center',
     gap: 8,
   },
-  ratingLabel: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    marginTop: 8,
-  },
   reasonsSection: {
-    marginBottom: 24,
+    marginBottom: 20,
   },
   reasonsGrid: {
     flexDirection: 'row',
@@ -657,48 +998,65 @@ const modalStyles = StyleSheet.create({
   reasonChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 20,
     backgroundColor: COLORS.bgInput,
-    borderWidth: 1,
-    borderColor: COLORS.border,
+    gap: 6,
   },
-  reasonChipActive: {
-    backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
+  reasonChipSelected: {
+    borderWidth: 0,
+  },
+  reasonChipLike: {
+    backgroundColor: COLORS.like,
+  },
+  reasonChipDislike: {
+    backgroundColor: COLORS.dislike,
   },
   reasonText: {
-    fontSize: 12,
+    fontSize: 13,
     color: COLORS.textMuted,
   },
-  reasonTextActive: {
+  reasonTextSelected: {
     color: '#FFF',
   },
-  submitBtn: {
-    backgroundColor: COLORS.border,
-    paddingVertical: 14,
-    borderRadius: 25,
-    alignItems: 'center',
-    marginBottom: 12,
+  actionRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 10,
   },
-  submitBtnActive: {
-    backgroundColor: COLORS.primary,
-  },
-  submitBtnText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFF',
-  },
-  backBtn: {
+  backButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 10,
+    backgroundColor: COLORS.bgInput,
     gap: 6,
   },
-  backBtnText: {
-    fontSize: 14,
-    color: COLORS.textMuted,
+  backButtonText: {
+    fontSize: 15,
+    color: COLORS.text,
+    fontWeight: '500',
+  },
+  submitButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: 10,
+    backgroundColor: COLORS.primary,
+    gap: 8,
+  },
+  submitButtonDisabled: {
+    backgroundColor: COLORS.textMuted,
+    opacity: 0.5,
+  },
+  submitButtonText: {
+    fontSize: 15,
+    color: '#FFF',
+    fontWeight: '600',
   },
 });
