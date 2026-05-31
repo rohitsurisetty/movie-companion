@@ -283,6 +283,38 @@ class RecommendationRequest(BaseModel):
     limit: int = 20
 
 
+class FiltersRequest(BaseModel):
+    """User matching filters and preferences"""
+    user_id: str
+    session_id: Optional[str] = None
+    # Filter values
+    distance_radius: Optional[int] = None
+    age_min: Optional[int] = None
+    age_max: Optional[int] = None
+    height_min: Optional[str] = None
+    height_max: Optional[str] = None
+    languages: Optional[List[str]] = None
+    genres: Optional[List[str]] = None
+    ott_theatre: Optional[str] = None
+    film_languages: Optional[List[str]] = None
+    religion: Optional[str] = None
+    zodiac: Optional[str] = None
+    siblings: Optional[str] = None
+    education: Optional[str] = None
+    travel: Optional[str] = None
+    smoking: Optional[str] = None
+    drinking: Optional[str] = None
+    exercise: Optional[str] = None
+    pets: Optional[str] = None
+    family_planning: Optional[str] = None
+    marital_status: Optional[str] = None
+    food_preference: Optional[str] = None
+    intent: Optional[str] = None
+    # Toggle settings
+    exclusive_toggles: Optional[Dict[str, bool]] = None
+    expand_if_run_out_toggles: Optional[Dict[str, bool]] = None
+
+
 @api_router.get("/")
 async def root():
     return {"message": "Film Companion API"}
@@ -1012,6 +1044,72 @@ async def save_user_profile(req: UserProfileRequest):
             "age": req.age,
         }
     }
+
+
+@api_router.post("/user/filters")
+async def save_user_filters(req: FiltersRequest):
+    """
+    Save user matching filters and preferences to Supabase.
+    Also saves exclusive toggles and expand_if_run_out settings.
+    """
+    try:
+        # Prepare preferences data
+        preferences_data = {
+            "distanceRadius": req.distance_radius,
+            "ageRange": f"{req.age_min}-{req.age_max}" if req.age_min and req.age_max else None,
+            "heightPreference": f"{req.height_min}-{req.height_max}" if req.height_min and req.height_max else None,
+            "languagesTheySpeak": ",".join(req.languages) if req.languages else None,
+            "favouriteGenres": ",".join(req.genres) if req.genres else None,
+            "ottOrTheatrePreference": req.ott_theatre,
+            "languagesTheyWatch": ",".join(req.film_languages) if req.film_languages else None,
+            "religion": req.religion,
+            "zodiacSign": req.zodiac,
+            "siblings": req.siblings,
+            "education": req.education,
+            "travelFrequency": req.travel,
+            "smokingPreference": req.smoking,
+            "drinkingPreference": req.drinking,
+            "exercisePreference": req.exercise,
+            "petsPreference": req.pets,
+            "familyPlanning": req.family_planning,
+            "maritalStatus": req.marital_status,
+            "foodPreference": req.food_preference,
+            "intentPreference": req.intent,
+        }
+        
+        # Save to Supabase
+        await supabase.save_preferences_and_filters(req.user_id, preferences_data, req.session_id)
+        
+        # Save exclusive toggles if provided
+        if req.exclusive_toggles:
+            await supabase.save_exclusive_toggle(req.user_id, req.exclusive_toggles, req.session_id)
+        
+        # Save expand_if_run_out toggles if provided
+        if req.expand_if_run_out_toggles:
+            await supabase.save_expand_if_run_out(req.user_id, req.expand_if_run_out_toggles, req.session_id)
+        
+        logger.info(f"Saved filters to Supabase for user {req.user_id}")
+        return {"success": True, "message": "Filters saved successfully"}
+    except Exception as e:
+        logger.error(f"Failed to save filters to Supabase: {e}")
+        return {"success": False, "error": str(e)}
+
+
+class ModeRequest(BaseModel):
+    user_id: str
+    mode: str  # 'buddy' or 'date'
+
+
+@api_router.post("/user/mode")
+async def save_user_mode(req: ModeRequest):
+    """Save user's selected mode to Supabase"""
+    try:
+        await supabase.save_mode_selected(req.user_id, req.mode)
+        logger.info(f"Saved mode to Supabase for user {req.user_id}: {req.mode}")
+        return {"success": True, "message": "Mode saved successfully"}
+    except Exception as e:
+        logger.error(f"Failed to save mode to Supabase: {e}")
+        return {"success": False, "error": str(e)}
 
 
 @api_router.post("/user/swipe")
