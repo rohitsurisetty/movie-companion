@@ -743,6 +743,24 @@ TMDB_LANG_CODES = {
 }
 
 
+@api_router.get("/tmdb/trending")
+async def get_trending_movies(page: int = 1):
+    """Get trending movies for the Library screen"""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as http_client:
+            resp = await http_client.get(
+                "https://api.themoviedb.org/3/trending/movie/week",
+                params={"page": min(page, 100)},
+                headers={"Authorization": f"Bearer {TMDB_ACCESS_TOKEN}"}
+            )
+            if resp.status_code == 200:
+                return resp.json()
+            return {"results": [], "page": page, "total_results": 0}
+    except Exception as e:
+        logger.error(f"Error fetching trending movies: {e}")
+        return {"results": [], "page": page, "total_results": 0, "error": str(e)}
+
+
 @api_router.get("/tmdb/feed")
 async def get_movie_feed(
     genres: str = "",

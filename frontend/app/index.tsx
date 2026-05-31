@@ -56,7 +56,7 @@ export default function AuthScreen() {
       if (auth) {
         const onboardingDone = await AsyncStorage.getItem('@film_companion_onboarding_complete');
         if (onboardingDone === 'true') {
-          router.replace('/swipe');
+          router.replace('/(tabs)/feed');
         } else {
           router.replace('/onboarding');
         }
@@ -88,7 +88,7 @@ export default function AuthScreen() {
       } else {
         const onboardingDone = await AsyncStorage.getItem('@film_companion_onboarding_complete');
         if (onboardingDone === 'true') {
-          router.replace('/swipe');
+          router.replace('/(tabs)/feed');
         } else {
           router.replace('/onboarding');
         }
@@ -239,7 +239,7 @@ export default function AuthScreen() {
         } else {
           const onboardingDone = await AsyncStorage.getItem('@film_companion_onboarding_complete');
           if (onboardingDone === 'true') {
-            router.replace('/swipe');
+            router.replace('/(tabs)/feed');
           } else {
             router.replace('/onboarding');
           }

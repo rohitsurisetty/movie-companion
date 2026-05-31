@@ -659,9 +659,7 @@ export default function ProfileScreen() {
     <SafeAreaView style={styles.container} testID="profile-screen">
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-          <Ionicons name="chevron-back" size={24} color={COLORS.text} />
-        </TouchableOpacity>
+        <View style={styles.backBtn} />
         <Text style={styles.headerTitle}>My Profile</Text>
         {saving ? (
           <ActivityIndicator size="small" color={COLORS.primary} style={styles.savingIndicator} />
