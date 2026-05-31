@@ -638,34 +638,111 @@ async def save_visibility_toggles(user_id: str, toggles: Dict[str, bool], sessio
         return {"success": False, "error": str(e)}
 
 
-# ============== MOVIE LIBRARY ==============
-# (Movie library can update since it's reference data, not user data)
+# ============== MOVIE LIBRARY (GLOBAL CATALOG) ==============
+# Stores full movie details for movies users have interacted with
+# This is NOT user-specific - it's a global movie reference table
 
 async def save_movie_to_library(movie_data: Dict[str, Any]) -> Dict[str, Any]:
-    """Save movie information to the library (upsert - updates if exists)"""
+    """
+    Save comprehensive movie information to the global movie library.
+    Only stores movies that users have interacted with (searched, liked, disliked).
+    This creates a curated catalog for analytics.
+    """
     try:
         client = get_supabase_client()
         
-        # Extract cast names safely
+        movie_id = movie_data.get("id")
+        if not movie_id:
+            logger.warning(f"Movie data missing ID, skipping library save")
+            return {"success": False, "error": "Missing movie ID"}
+        
+        # Check if movie already exists
+        existing = client.table("movie_library").select("movie_id").eq("movie_id", movie_id).execute()
+        if existing.data:
+            logger.debug(f"Movie {movie_id} already in library, skipping")
+            return {"success": True, "message": "Movie already exists", "data": existing.data}
+        
+        # Extract cast names safely (top 10)
         cast_names = []
+        cast_ids = []
         credits = movie_data.get("credits")
         if credits and isinstance(credits, dict):
             cast_list = credits.get("cast")
             if cast_list and isinstance(cast_list, list):
-                cast_names = [c.get("name", "") for c in cast_list[:10] if isinstance(c, dict)]
+                for c in cast_list[:10]:
+                    if isinstance(c, dict):
+                        cast_names.append(c.get("name", ""))
+                        cast_ids.append(str(c.get("id", "")))
         
-        # Extract genres safely
+        # Extract director(s) from crew
+        directors = []
+        director_ids = []
+        if credits and isinstance(credits, dict):
+            crew_list = credits.get("crew")
+            if crew_list and isinstance(crew_list, list):
+                for c in crew_list:
+                    if isinstance(c, dict) and c.get("job") == "Director":
+                        directors.append(c.get("name", ""))
+                        director_ids.append(str(c.get("id", "")))
+        
+        # Extract genres
         genres_list = movie_data.get("genres", [])
         genres_str = ""
+        genre_ids_str = ""
         if genres_list and isinstance(genres_list, list):
-            genres_str = ",".join([g.get("name", "") if isinstance(g, dict) else str(g) for g in genres_list])
+            genre_names = []
+            genre_ids = []
+            for g in genres_list:
+                if isinstance(g, dict):
+                    genre_names.append(g.get("name", ""))
+                    genre_ids.append(str(g.get("id", "")))
+            genres_str = ",".join(genre_names)
+            genre_ids_str = ",".join(genre_ids)
+        
+        # Extract keywords
+        keywords_list = []
+        keyword_ids = []
+        keywords_data = movie_data.get("keywords")
+        if keywords_data:
+            kw_list = keywords_data.get("keywords") if isinstance(keywords_data, dict) else keywords_data
+            if kw_list and isinstance(kw_list, list):
+                for k in kw_list[:20]:  # Top 20 keywords
+                    if isinstance(k, dict):
+                        keywords_list.append(k.get("name", ""))
+                        keyword_ids.append(str(k.get("id", "")))
+        
+        # Extract production companies
+        production_companies = []
+        prod_companies_data = movie_data.get("production_companies", [])
+        if prod_companies_data and isinstance(prod_companies_data, list):
+            for pc in prod_companies_data[:5]:  # Top 5
+                if isinstance(pc, dict):
+                    production_companies.append(pc.get("name", ""))
+        
+        # Extract production countries
+        production_countries = []
+        prod_countries_data = movie_data.get("production_countries", [])
+        if prod_countries_data and isinstance(prod_countries_data, list):
+            for pc in prod_countries_data:
+                if isinstance(pc, dict):
+                    production_countries.append(pc.get("name", ""))
+        
+        # Extract spoken languages
+        spoken_languages = []
+        spoken_lang_data = movie_data.get("spoken_languages", [])
+        if spoken_lang_data and isinstance(spoken_lang_data, list):
+            for sl in spoken_lang_data:
+                if isinstance(sl, dict):
+                    spoken_languages.append(sl.get("english_name", sl.get("name", "")))
         
         # Get release year safely
         release_date = movie_data.get("release_date", "")
         release_year = release_date[:4] if release_date and len(release_date) >= 4 else None
         
+        # Build data object - only include columns that exist in the table
+        # Note: Run supabase_movie_library_schema.sql to add new columns for full functionality
         data = {
-            "movie_id": movie_data.get("id"),
+            "movie_id": movie_id,
             "movie_name": movie_data.get("title"),
             "movie_release_year": release_year,
             "movie_cast": ",".join(cast_names) if cast_names else None,
@@ -682,24 +759,71 @@ async def save_movie_to_library(movie_data: Dict[str, Any]) -> Dict[str, Any]:
             "revenue": movie_data.get("revenue"),
             "tagline": movie_data.get("tagline"),
             "status": movie_data.get("status"),
-            "imdb_id": movie_data.get("imdb_id")
+            "imdb_id": movie_data.get("imdb_id"),
         }
         
-        # Upsert for movie library (it's reference data)
-        movie_id = movie_data.get("id")
-        if movie_id:
-            existing = client.table("movie_library").select("movie_id").eq("movie_id", movie_id).execute()
-            
-            if existing.data:
-                result = client.table("movie_library").update(data).eq("movie_id", movie_id).execute()
-            else:
-                result = client.table("movie_library").insert(data).execute()
-                
-            logger.info(f"Saved movie to library: {movie_data.get('title')}")
+        # Try to add extended columns (will be ignored if they don't exist)
+        extended_data = {
+            "original_title": movie_data.get("original_title"),
+            "release_date": release_date if release_date else None,
+            "cast_ids": ",".join(cast_ids) if cast_ids else None,
+            "directors": ",".join(directors) if directors else None,
+            "director_ids": ",".join(director_ids) if director_ids else None,
+            "genre_ids": genre_ids_str if genre_ids_str else None,
+            "keywords": ",".join(keywords_list) if keywords_list else None,
+            "keyword_ids": ",".join(keyword_ids) if keyword_ids else None,
+            "spoken_languages": ",".join(spoken_languages) if spoken_languages else None,
+            "production_companies": ",".join(production_companies) if production_companies else None,
+            "production_countries": ",".join(production_countries) if production_countries else None,
+            "homepage": movie_data.get("homepage"),
+            "first_added_ts": datetime.utcnow().isoformat(),
+            "interaction_count": 1,
+        }
+        
+        # Try inserting with extended columns first, fall back to base columns if needed
+        try:
+            merged_data = {**data, **extended_data}
+            result = client.table("movie_library").insert(merged_data).execute()
+            logger.info(f"Saved movie to library with extended data: {movie_data.get('title')} (ID: {movie_id})")
             return {"success": True, "data": result.data}
-        else:
-            logger.warning(f"Movie data missing ID, skipping library save: {movie_data.get('title')}")
-            return {"success": False, "error": "Missing movie ID"}
+        except Exception as ext_err:
+            # Extended columns don't exist, use base data only
+            logger.warning(f"Extended columns not available, using base data: {ext_err}")
+            result = client.table("movie_library").insert(data).execute()
+            logger.info(f"Saved movie to library: {movie_data.get('title')} (ID: {movie_id})")
+            return {"success": True, "data": result.data}
+        
     except Exception as e:
         logger.error(f"Error saving movie to library: {e}")
         return {"success": False, "error": str(e)}
+
+
+async def increment_movie_interaction(movie_id: int) -> Dict[str, Any]:
+    """Increment the interaction count for a movie (tracks popularity)"""
+    try:
+        client = get_supabase_client()
+        
+        # Get current count
+        existing = client.table("movie_library").select("interaction_count").eq("movie_id", movie_id).execute()
+        if existing.data:
+            current_count = existing.data[0].get("interaction_count", 0) or 0
+            result = client.table("movie_library").update({
+                "interaction_count": current_count + 1,
+                "last_interaction_ts": datetime.utcnow().isoformat()
+            }).eq("movie_id", movie_id).execute()
+            return {"success": True, "data": result.data}
+        return {"success": False, "error": "Movie not found"}
+    except Exception as e:
+        logger.error(f"Error incrementing movie interaction: {e}")
+        return {"success": False, "error": str(e)}
+
+
+async def check_movie_exists(movie_id: int) -> bool:
+    """Check if a movie exists in the library"""
+    try:
+        client = get_supabase_client()
+        result = client.table("movie_library").select("movie_id").eq("movie_id", movie_id).execute()
+        return bool(result.data)
+    except Exception as e:
+        logger.error(f"Error checking movie existence: {e}")
+        return False

@@ -1336,6 +1336,26 @@ async def add_to_library(req: LibraryAddRequest):
         upsert=True
     )
     
+    # Record interaction and store movie in Supabase catalog if not already there
+    try:
+        exists = await supabase.check_movie_exists(req.movie_id)
+        if not exists:
+            # Fetch full movie details from TMDB and store
+            async with httpx.AsyncClient(timeout=10.0) as http_client:
+                resp = await http_client.get(
+                    f"https://api.themoviedb.org/3/movie/{req.movie_id}",
+                    params={"append_to_response": "credits,keywords"},
+                    headers={"Authorization": f"Bearer {TMDB_ACCESS_TOKEN}"}
+                )
+                if resp.status_code == 200:
+                    movie_details = resp.json()
+                    await supabase.save_movie_to_library(movie_details)
+                    logger.info(f"Stored movie {req.movie_title} in Supabase catalog")
+        else:
+            await supabase.increment_movie_interaction(req.movie_id)
+    except Exception as e:
+        logger.warning(f"Failed to sync movie to Supabase catalog: {e}")
+    
     logger.info(f"Added movie {req.movie_title} to library for user {req.user_id}")
     
     return {"success": True, "message": "Movie added to library"}
@@ -1363,6 +1383,103 @@ async def get_user_library(user_id: str):
         })
     
     return {"movies": movies, "total": len(movies)}
+
+
+class MovieInteractionRequest(BaseModel):
+    movie_id: int
+    interaction_type: str  # "search_click", "library_add", "swipe"
+    user_id: Optional[str] = None
+
+
+@api_router.post("/movie/interaction")
+async def record_movie_interaction(req: MovieInteractionRequest):
+    """
+    Record a user interaction with a movie.
+    This fetches full movie details from TMDB and stores them in Supabase
+    ONLY if the movie hasn't been stored before.
+    This creates a curated catalog of movies users have actually interacted with.
+    """
+    try:
+        # First check if movie already exists in Supabase
+        exists = await supabase.check_movie_exists(req.movie_id)
+        
+        if exists:
+            # Just increment the interaction count
+            await supabase.increment_movie_interaction(req.movie_id)
+            return {
+                "success": True, 
+                "message": "Interaction recorded", 
+                "new_movie": False
+            }
+        
+        # Movie doesn't exist - fetch full details from TMDB
+        async with httpx.AsyncClient(timeout=10.0) as http_client:
+            resp = await http_client.get(
+                f"https://api.themoviedb.org/3/movie/{req.movie_id}",
+                params={"append_to_response": "credits,keywords"},
+                headers={"Authorization": f"Bearer {TMDB_ACCESS_TOKEN}"}
+            )
+            
+            if resp.status_code == 200:
+                movie_details = resp.json()
+                
+                # Save to Supabase movie library
+                result = await supabase.save_movie_to_library(movie_details)
+                
+                if result.get("success"):
+                    logger.info(f"Stored new movie in catalog: {movie_details.get('title')} (ID: {req.movie_id})")
+                    return {
+                        "success": True,
+                        "message": "New movie added to catalog",
+                        "new_movie": True,
+                        "movie_title": movie_details.get("title")
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "error": result.get("error", "Failed to save movie")
+                    }
+            else:
+                logger.warning(f"Failed to fetch movie {req.movie_id} from TMDB: {resp.status_code}")
+                return {
+                    "success": False,
+                    "error": f"TMDB returned status {resp.status_code}"
+                }
+                
+    except Exception as e:
+        logger.error(f"Error recording movie interaction: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@api_router.get("/movie/catalog/stats")
+async def get_catalog_stats():
+    """Get statistics about the movie catalog"""
+    try:
+        client = supabase.get_supabase_client()
+        
+        # Get total count
+        result = client.table("movie_library").select("movie_id", count="exact").execute()
+        total_movies = result.count if hasattr(result, 'count') else len(result.data)
+        
+        # Get top movies by popularity (fallback if interaction_count doesn't exist)
+        try:
+            top_movies = client.table("movie_library").select(
+                "movie_id,movie_name,interaction_count,genres,vote_average"
+            ).order("interaction_count", desc=True).limit(10).execute()
+        except Exception:
+            # Fallback to popularity
+            top_movies = client.table("movie_library").select(
+                "movie_id,movie_name,genres,vote_average,popularity"
+            ).order("popularity", desc=True).limit(10).execute()
+        
+        return {
+            "success": True,
+            "total_movies_in_catalog": total_movies,
+            "top_interacted_movies": top_movies.data if top_movies.data else []
+        }
+    except Exception as e:
+        logger.error(f"Error getting catalog stats: {e}")
+        return {"success": False, "error": str(e)}
 
 
 @api_router.post("/recommendations")

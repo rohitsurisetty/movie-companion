@@ -331,10 +331,25 @@ export default function LibraryScreen() {
     return () => clearTimeout(debounceTimer);
   }, [searchQuery, searchMovies]);
 
-  const handleMoviePress = (movie: Movie) => {
+  const handleMoviePress = async (movie: Movie) => {
     Keyboard.dismiss();
     setSelectedMovie(movie);
     setShowRatingModal(true);
+    
+    // Record interaction for analytics catalog (non-blocking)
+    try {
+      fetch(`${BACKEND_URL}/api/movie/interaction`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          movie_id: movie.id,
+          interaction_type: 'search_click',
+          user_id: userId,
+        }),
+      }).catch(err => console.log('Interaction recording failed:', err));
+    } catch (error) {
+      // Non-blocking, ignore errors
+    }
   };
 
   const handleRatingSubmit = async (rating: number, reasons: string[], isLike: boolean) => {
