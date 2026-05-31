@@ -1457,14 +1457,7 @@ export default function SwipeScreen() {
           <Ionicons name={colors.modeIcon} size={22} color={colors.primary} />
           <Text style={[styles.headerTitle, { color: colors.text }]}>{colors.modeName}</Text>
         </View>
-        <TouchableOpacity
-          style={styles.profileBtn}
-          onPress={() => setShowProfileDrawer(true)}
-          testID="profile-btn"
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <Ionicons name="person-circle-outline" size={28} color={colors.text} />
-        </TouchableOpacity>
+        <View style={styles.profileBtn} />
       </View>
 
       {/* Progress indicator */}

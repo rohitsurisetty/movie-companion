@@ -12,6 +12,7 @@ import { COLORS, SPACING, BORDER_RADIUS } from '../../src/theme';
 import { ProfileData, initialProfileData, MovieSelection } from '../../src/types';
 import { getProfile, saveProfile, clearAll } from '../../src/store';
 import { getPartialLocation } from '../../src/utils/location';
+import { SharedHeader, ModeSwitcher, useAppMode } from '../../src/components/SharedHeader';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -505,6 +506,9 @@ export default function ProfileScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [editModal, setEditModal] = useState<EditModalType>(null);
+  
+  // Mode and theme hooks
+  const { mode, setMode, colors, showModeDrawer, setShowModeDrawer } = useAppMode();
 
   useEffect(() => {
     loadProfile();
@@ -657,16 +661,13 @@ export default function ProfileScreen() {
 
   return (
     <SafeAreaView style={styles.container} testID="profile-screen">
-      {/* Header */}
-      <View style={styles.header}>
-        <View style={styles.backBtn} />
-        <Text style={styles.headerTitle}>My Profile</Text>
-        {saving ? (
-          <ActivityIndicator size="small" color={COLORS.primary} style={styles.savingIndicator} />
-        ) : (
-          <View style={styles.savingIndicator} />
-        )}
-      </View>
+      {/* Shared Header with Mode Switcher */}
+      <SharedHeader
+        title="My Profile"
+        showModeIcon={true}
+        onMenuPress={() => setShowModeDrawer(true)}
+        colors={colors}
+      />
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {/* Profile Header */}
@@ -763,6 +764,53 @@ export default function ProfileScreen() {
           <ProfileField icon="people-circle-outline" label="Siblings" value={profile.siblings} onPress={() => setEditModal('siblings')} isEmpty={!profile.siblings} />
           <ProfileField icon="school-outline" label="Education" value={profile.education} onPress={() => setEditModal('education')} isEmpty={!profile.education} />
           <ProfileField icon="briefcase-outline" label="Work Profile" value={profile.workProfile} onPress={() => setEditModal('workProfile')} isEmpty={!profile.workProfile} />
+        </View>
+
+        {/* Settings & Filters Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Settings & Filters</Text>
+          
+          <TouchableOpacity 
+            style={styles.settingsRow}
+            onPress={() => router.push('/profile-preview')}
+          >
+            <View style={styles.settingsIcon}>
+              <Ionicons name="eye-outline" size={22} color={COLORS.primary} />
+            </View>
+            <View style={styles.settingsInfo}>
+              <Text style={styles.settingsLabel}>Profile Preview</Text>
+              <Text style={styles.settingsDesc}>See how others view your profile</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={styles.settingsRow}
+            onPress={() => router.push('/filters')}
+          >
+            <View style={styles.settingsIcon}>
+              <Ionicons name="options-outline" size={22} color={COLORS.primary} />
+            </View>
+            <View style={styles.settingsInfo}>
+              <Text style={styles.settingsLabel}>Preferences & Filters</Text>
+              <Text style={styles.settingsDesc}>Set your match preferences</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={styles.settingsRow}
+            onPress={() => router.push('/visibility')}
+          >
+            <View style={styles.settingsIcon}>
+              <Ionicons name="shield-outline" size={22} color={COLORS.primary} />
+            </View>
+            <View style={styles.settingsInfo}>
+              <Text style={styles.settingsLabel}>Profile Visibility</Text>
+              <Text style={styles.settingsDesc}>Control what others can see</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
+          </TouchableOpacity>
         </View>
 
         {/* Logout Button */}
@@ -1006,6 +1054,15 @@ export default function ProfileScreen() {
         selected={profile.workProfile}
         onSelect={(val) => updateField('workProfile', val)}
       />
+
+      {/* Mode Switcher Modal */}
+      <ModeSwitcher
+        visible={showModeDrawer}
+        onClose={() => setShowModeDrawer(false)}
+        currentMode={mode}
+        onModeChange={setMode}
+        colors={colors}
+      />
     </SafeAreaView>
   );
 }
@@ -1035,4 +1092,9 @@ const styles = StyleSheet.create({
   ratingText: { fontSize: 10, fontWeight: '600', color: COLORS.gold },
   logoutBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SPACING.s, marginHorizontal: SPACING.l, marginTop: SPACING.xl, paddingVertical: 16, borderRadius: BORDER_RADIUS.full, borderWidth: 2, borderColor: '#FF6B6B' },
   logoutText: { fontSize: 16, fontWeight: '600', color: '#FF6B6B' },
+  settingsRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: SPACING.m, borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  settingsIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(229, 9, 20, 0.1)', alignItems: 'center', justifyContent: 'center', marginRight: SPACING.m },
+  settingsInfo: { flex: 1 },
+  settingsLabel: { fontSize: 16, fontWeight: '600', color: COLORS.text, marginBottom: 2 },
+  settingsDesc: { fontSize: 13, color: COLORS.textMuted },
 });

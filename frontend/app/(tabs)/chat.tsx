@@ -3,6 +3,7 @@ import { View, Text, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { SharedHeader, ModeSwitcher, useAppMode } from '../../src/components/SharedHeader';
 
 const COLORS = {
   primary: '#E50914',
@@ -14,13 +15,18 @@ const COLORS = {
 };
 
 export default function ChatScreen() {
+  const { mode, setMode, colors, showModeDrawer, setShowModeDrawer } = useAppMode();
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.content}>
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Messages</Text>
-        </View>
+        {/* Shared Header with Mode Switcher */}
+        <SharedHeader
+          title="Messages"
+          showModeIcon={true}
+          onMenuPress={() => setShowModeDrawer(true)}
+          colors={colors}
+        />
 
         {/* Coming Soon Content */}
         <View style={styles.comingSoonContainer}>
@@ -56,6 +62,15 @@ export default function ChatScreen() {
           </Text>
         </View>
       </View>
+
+      {/* Mode Switcher Modal */}
+      <ModeSwitcher
+        visible={showModeDrawer}
+        onClose={() => setShowModeDrawer(false)}
+        currentMode={mode}
+        onModeChange={setMode}
+        colors={colors}
+      />
     </SafeAreaView>
   );
 }

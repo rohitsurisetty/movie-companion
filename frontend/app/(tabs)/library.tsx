@@ -9,6 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import { getAuth } from '../../src/store';
 import { LEFT_SWIPE_REASONS, RIGHT_SWIPE_REASONS } from '../../src/theme';
+import { SharedHeader, ModeSwitcher, useAppMode } from '../../src/components/SharedHeader';
 
 const BACKEND_URL = Constants.expoConfig?.extra?.EXPO_PUBLIC_BACKEND_URL 
   || process.env.EXPO_PUBLIC_BACKEND_URL 
@@ -229,6 +230,9 @@ function RatingModal({ visible, movie, onClose, onSubmit }: RatingModalProps) {
 }
 
 export default function LibraryScreen() {
+  // Mode and theme hooks - must be at the top
+  const { mode, setMode, colors, showModeDrawer, setShowModeDrawer } = useAppMode();
+  
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Movie[]>([]);
   const [trendingMovies, setTrendingMovies] = useState<Movie[]>([]);
@@ -402,11 +406,13 @@ export default function LibraryScreen() {
         style={styles.content} 
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Movie Library</Text>
-          <Text style={styles.headerSubtitle}>Search and rate any movie</Text>
-        </View>
+        {/* Shared Header with Mode Switcher */}
+        <SharedHeader
+          title="Movie Library"
+          showModeIcon={true}
+          onMenuPress={() => setShowModeDrawer(true)}
+          colors={colors}
+        />
 
         {/* Search Bar */}
         <View style={styles.searchContainer}>
@@ -474,6 +480,15 @@ export default function LibraryScreen() {
             setSelectedMovie(null);
           }}
           onSubmit={handleRatingSubmit}
+        />
+
+        {/* Mode Switcher Modal */}
+        <ModeSwitcher
+          visible={showModeDrawer}
+          onClose={() => setShowModeDrawer(false)}
+          currentMode={mode}
+          onModeChange={setMode}
+          colors={colors}
         />
       </KeyboardAvoidingView>
     </SafeAreaView>
