@@ -71,10 +71,10 @@ export const LEFT_SWIPE_REASONS = [
   { id: 'bad_acting', label: "Didn't like acting", icon: 'person-outline' },
   { id: 'bad_story', label: 'Boring story', icon: 'book-outline' },
   { id: 'too_long', label: 'Too long/slow', icon: 'time-outline' },
-  { id: 'other', label: 'Other reason', icon: 'ellipsis-horizontal' },
+  { id: 'confusing', label: 'Confusing plot', icon: 'help-circle-outline' },
 ];
 
-// Swipe reasons for right swipe (like) - optional
+// Swipe reasons for right swipe (like)
 export const RIGHT_SWIPE_REASONS = [
   { id: 'great_story', label: 'Great story/plot', icon: 'book' },
   { id: 'great_acting', label: 'Amazing acting', icon: 'star' },

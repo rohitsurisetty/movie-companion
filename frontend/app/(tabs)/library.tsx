@@ -8,6 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import { getAuth } from '../../src/store';
+import { LEFT_SWIPE_REASONS, RIGHT_SWIPE_REASONS } from '../../src/theme';
 
 const BACKEND_URL = Constants.expoConfig?.extra?.EXPO_PUBLIC_BACKEND_URL 
   || process.env.EXPO_PUBLIC_BACKEND_URL 
@@ -36,25 +37,9 @@ const COLORS = {
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w342';
 
-// Rating reasons for likes
-const LIKE_REASONS = [
-  { id: 'story', label: 'Great Story', icon: 'book-outline' },
-  { id: 'acting', label: 'Amazing Acting', icon: 'person-outline' },
-  { id: 'visuals', label: 'Stunning Visuals', icon: 'eye-outline' },
-  { id: 'music', label: 'Great Music', icon: 'musical-notes-outline' },
-  { id: 'emotional', label: 'Emotionally Moving', icon: 'heart-outline' },
-  { id: 'rewatchable', label: 'Highly Rewatchable', icon: 'refresh-outline' },
-];
-
-// Reasons for dislikes
-const DISLIKE_REASONS = [
-  { id: 'boring', label: 'Boring', icon: 'bed-outline' },
-  { id: 'bad_acting', label: 'Poor Acting', icon: 'sad-outline' },
-  { id: 'confusing', label: 'Confusing Plot', icon: 'help-circle-outline' },
-  { id: 'too_long', label: 'Too Long', icon: 'time-outline' },
-  { id: 'not_my_genre', label: 'Not My Genre', icon: 'close-circle-outline' },
-  { id: 'not_watched', label: "Didn't Watch", icon: 'eye-off-outline' },
-];
+// Use shared reasons from theme for consistency across the app
+const LIKE_REASONS = RIGHT_SWIPE_REASONS;
+const DISLIKE_REASONS = LEFT_SWIPE_REASONS;
 
 interface Movie {
   id: number;
@@ -395,33 +380,8 @@ export default function LibraryScreen() {
   const renderMovieCard = ({ item, index }: { item: Movie; index: number }) => {
     const isRated = ratedMovies.some(m => m.id === item.id);
     const ratedInfo = ratedMovies.find(m => m.id === item.id);
-    
-    return (
-      <TouchableOpacity onPress={() => handleMoviePress(item)} activeOpacity={0.7}><View style={styles.posterContainer}>
-          {item.poster_path ? (
-            <Image
-              source={{ uri: `${TMDB_IMAGE_BASE}${item.poster_path}` }}
-              style={styles.moviePoster}
-              resizeMode="cover"
-            />
-          ) : (
-            <View style={[styles.moviePoster, styles.noPoster]}>
-              <Ionicons name="film-outline" size={28} color={COLORS.textMuted} />
-            </View>
-          )}
-          {isRated && (
-            <View style={[styles.ratedBadge, ratedInfo?.isLike ? styles.ratedBadgeLike : styles.ratedBadgeDislike]}>
-              <Ionicons name={ratedInfo?.isLike ? 'heart' : 'heart-dislike'} size={14} color="#FFF" />
-            </View>
-          )}
-          {item.vote_average && item.vote_average > 0 && (
-            <View style={styles.tmdbRating}>
-              <Ionicons name="star" size={10} color="#FFD700" />
-              <Text style={styles.tmdbRatingText}>{item.vote_average.toFixed(1)}</Text>
-            </View>
-          )}
-        </View><Text style={styles.movieTitle} numberOfLines={2}>{item.title}</Text>{item.release_date && (<Text style={styles.movieYear}>{item.release_date.slice(0, 4)}</Text>)}</TouchableOpacity>
-    );
+    const posterUri = item.poster_path ? `${TMDB_IMAGE_BASE}${item.poster_path}` : null;
+    return (<TouchableOpacity onPress={() => handleMoviePress(item)} activeOpacity={0.7}><View style={styles.posterContainer}>{posterUri ? (<Image source={{ uri: posterUri }} style={styles.moviePoster} resizeMode="cover" />) : (<View style={[styles.moviePoster, styles.noPoster]}><Ionicons name="film-outline" size={28} color={COLORS.textMuted} /></View>)}{isRated && (<View style={[styles.ratedBadge, ratedInfo?.isLike ? styles.ratedBadgeLike : styles.ratedBadgeDislike]}><Ionicons name={ratedInfo?.isLike ? 'heart' : 'heart-dislike'} size={14} color="#FFF" /></View>)}{item.vote_average && item.vote_average > 0 && (<View style={styles.tmdbRating}><Ionicons name="star" size={10} color="#FFD700" /><Text style={styles.tmdbRatingText}>{item.vote_average.toFixed(1)}</Text></View>)}</View><Text style={styles.movieTitle} numberOfLines={2}>{item.title}</Text>{item.release_date && (<Text style={styles.movieYear}>{item.release_date.slice(0, 4)}</Text>)}</TouchableOpacity>);
   };
 
   const renderRatedMovieCard = ({ item }: { item: RatedMovie }) => (

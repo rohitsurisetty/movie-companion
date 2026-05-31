@@ -677,7 +677,10 @@ async def get_me(request: Request):
 
 @api_router.get("/tmdb/search")
 async def search_movies(query: str):
-    """Search movies via TMDB API"""
+    """Search movies via TMDB API - excludes unreleased movies"""
+    from datetime import datetime
+    today = datetime.now().strftime("%Y-%m-%d")
+    
     async with httpx.AsyncClient() as http_client:
         resp = await http_client.get(
             "https://api.themoviedb.org/3/search/movie",
@@ -688,13 +691,19 @@ async def search_movies(query: str):
         raise HTTPException(status_code=resp.status_code, detail="TMDB error")
     data = resp.json()
     results = []
-    for m in data.get("results", [])[:20]:
-        results.append({
-            "id": m["id"], "title": m["title"],
-            "poster_path": m.get("poster_path", ""),
-            "release_date": m.get("release_date", ""),
-            "overview": m.get("overview", ""),
-        })
+    for m in data.get("results", [])[:30]:  # Get more to filter
+        release_date = m.get("release_date", "")
+        # Include movie if no release date or release date is today or earlier
+        if not release_date or release_date <= today:
+            results.append({
+                "id": m["id"], "title": m["title"],
+                "poster_path": m.get("poster_path", ""),
+                "release_date": m.get("release_date", ""),
+                "overview": m.get("overview", ""),
+                "vote_average": m.get("vote_average", 0),
+            })
+        if len(results) >= 20:
+            break
     return {"results": results}
 
 
@@ -745,8 +754,11 @@ TMDB_LANG_CODES = {
 
 @api_router.get("/tmdb/trending")
 async def get_trending_movies(page: int = 1):
-    """Get trending movies for the Library screen"""
+    """Get trending movies for the Library screen - excludes unreleased movies"""
     try:
+        from datetime import datetime
+        today = datetime.now().strftime("%Y-%m-%d")
+        
         async with httpx.AsyncClient(timeout=10.0) as http_client:
             resp = await http_client.get(
                 "https://api.themoviedb.org/3/trending/movie/week",
@@ -754,7 +766,18 @@ async def get_trending_movies(page: int = 1):
                 headers={"Authorization": f"Bearer {TMDB_ACCESS_TOKEN}"}
             )
             if resp.status_code == 200:
-                return resp.json()
+                data = resp.json()
+                # Filter out unreleased movies (future release dates)
+                if "results" in data:
+                    released_movies = []
+                    for movie in data["results"]:
+                        release_date = movie.get("release_date", "")
+                        # Include movie if no release date or release date is today or earlier
+                        if not release_date or release_date <= today:
+                            released_movies.append(movie)
+                    data["results"] = released_movies
+                    data["total_results"] = len(released_movies)
+                return data
             return {"results": [], "page": page, "total_results": 0}
     except Exception as e:
         logger.error(f"Error fetching trending movies: {e}")
