@@ -58,18 +58,20 @@ export default function TabsLayout() {
         options={{
           title: 'Match',
           tabBarIcon: ({ color, focused }) => (
-            <View style={[
-              styles.centerIcon,
-              focused && styles.centerIconActive
-            ]}>
+            <View style={styles.centerIcon}>
               <Ionicons 
-                name={focused ? "heart" : "heart-outline"} 
-                size={28} 
-                color={focused ? '#FFF' : COLORS.primary} 
+                name="heart" 
+                size={26} 
+                color="#FFF" 
               />
             </View>
           ),
-          tabBarLabel: () => null,
+          tabBarLabel: 'Match',
+          tabBarLabelStyle: {
+            fontSize: 10,
+            fontWeight: '600',
+            marginTop: -12,
+          },
         }}
       />
       <Tabs.Screen
@@ -96,18 +98,17 @@ export default function TabsLayout() {
 
 const styles = StyleSheet.create({
   centerIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: 'transparent',
-    borderWidth: 2,
-    borderColor: COLORS.primary,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: COLORS.primary,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 20,
-  },
-  centerIconActive: {
-    backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
+    marginBottom: 16,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
   },
 });
