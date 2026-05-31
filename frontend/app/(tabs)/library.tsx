@@ -397,8 +397,7 @@ export default function LibraryScreen() {
     const ratedInfo = ratedMovies.find(m => m.id === item.id);
     
     return (
-      <TouchableOpacity onPress={() => handleMoviePress(item)} activeOpacity={0.7}>
-        <View style={styles.posterContainer}>
+      <TouchableOpacity onPress={() => handleMoviePress(item)} activeOpacity={0.7}><View style={styles.posterContainer}>
           {item.poster_path ? (
             <Image
               source={{ uri: `${TMDB_IMAGE_BASE}${item.poster_path}` }}
@@ -421,51 +420,19 @@ export default function LibraryScreen() {
               <Text style={styles.tmdbRatingText}>{item.vote_average.toFixed(1)}</Text>
             </View>
           )}
-        </View>
-        <Text style={styles.movieTitle} numberOfLines={2}>{item.title}</Text>
-        {item.release_date && (<Text style={styles.movieYear}>{item.release_date.slice(0, 4)}</Text>)}
-      </TouchableOpacity>
+        </View><Text style={styles.movieTitle} numberOfLines={2}>{item.title}</Text>{item.release_date && (<Text style={styles.movieYear}>{item.release_date.slice(0, 4)}</Text>)}</TouchableOpacity>
     );
   };
 
   const renderRatedMovieCard = ({ item }: { item: RatedMovie }) => (
-    <TouchableOpacity
-      onPress={() => handleMoviePress(item)}
-      activeOpacity={0.7}
-    >
+    <TouchableOpacity onPress={() => handleMoviePress(item)} activeOpacity={0.7}>
       <View style={styles.posterContainer}>
-        {item.poster_path ? (
-          <Image
-            source={{ uri: `${TMDB_IMAGE_BASE}${item.poster_path}` }}
-            style={styles.moviePoster}
-            resizeMode="cover"
-          />
-        ) : (
-          <View style={[styles.moviePoster, styles.noPoster]}>
-            <Ionicons name="film-outline" size={28} color={COLORS.textMuted} />
-          </View>
-        )}
-        <View style={[
-          styles.ratedBadge,
-          item.isLike ? styles.ratedBadgeLike : styles.ratedBadgeDislike
-        ]}>
-          <Ionicons 
-            name={item.isLike ? 'heart' : 'heart-dislike'} 
-            size={14} 
-            color="#FFF" 
-          />
-        </View>
-        {item.isLike && item.rating > 0 && (
-          <View style={styles.userRating}>
-            <Text style={styles.userRatingText}>{item.rating}</Text>
-            <Ionicons name="star" size={10} color="#FFD700" />
-          </View>
-        )}
+        {item.poster_path ? (<Image source={{ uri: `${TMDB_IMAGE_BASE}${item.poster_path}` }} style={styles.moviePoster} resizeMode="cover" />) : (<View style={[styles.moviePoster, styles.noPoster]}><Ionicons name="film-outline" size={28} color={COLORS.textMuted} /></View>)}
+        <View style={[styles.ratedBadge, item.isLike ? styles.ratedBadgeLike : styles.ratedBadgeDislike]}><Ionicons name={item.isLike ? 'heart' : 'heart-dislike'} size={14} color="#FFF" /></View>
+        {item.isLike && item.rating > 0 && (<View style={styles.userRating}><Text style={styles.userRatingText}>{item.rating}</Text><Ionicons name="star" size={10} color="#FFD700" /></View>)}
       </View>
       <Text style={styles.movieTitle} numberOfLines={2}>{item.title}</Text>
-      {item.release_date && (
-        <Text style={styles.movieYear}>{item.release_date.slice(0, 4)}</Text>
-      )}
+      {item.release_date && (<Text style={styles.movieYear}>{item.release_date.slice(0, 4)}</Text>)}
     </TouchableOpacity>
   );
 
@@ -575,23 +542,9 @@ export default function LibraryScreen() {
                   )}
                 </View>
               ) : (
-                <View style={{
-                  flexDirection: 'row',
-                  flexWrap: 'wrap',
-                  justifyContent: 'flex-start',
-                  paddingHorizontal: 0,
-                }}>
+                <View style={{flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-start', paddingHorizontal: 0}}>
                   {displayMovies.map((item, index) => (
-                    <View 
-                      key={`movie-${item.id}`} 
-                      style={{
-                        width: '32%',
-                        marginRight: index % 3 === 2 ? 0 : '2%',
-                        marginBottom: 12,
-                      }}
-                    >
-                      {renderMovieCard({ item, index })}
-                    </View>
+                    <View key={`movie-${item.id}`} style={{width: '32%', marginRight: index % 3 === 2 ? 0 : '2%', marginBottom: 12}}>{renderMovieCard({ item, index })}</View>
                   ))}
                 </View>
               )}
@@ -625,23 +578,9 @@ export default function LibraryScreen() {
                   </TouchableOpacity>
                 </View>
               ) : (
-                <View style={{
-                  flexDirection: 'row',
-                  flexWrap: 'wrap',
-                  justifyContent: 'flex-start',
-                  paddingHorizontal: 0,
-                }}>
+                <View style={{flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-start', paddingHorizontal: 0}}>
                   {ratedMovies.map((item, index) => (
-                    <View 
-                      key={`rated-${item.id}`} 
-                      style={{
-                        width: '32%',
-                        marginRight: index % 3 === 2 ? 0 : '2%',
-                        marginBottom: 12,
-                      }}
-                    >
-                      {renderRatedMovieCard({ item })}
-                    </View>
+                    <View key={`rated-${item.id}`} style={{width: '32%', marginRight: index % 3 === 2 ? 0 : '2%', marginBottom: 12}}>{renderRatedMovieCard({ item })}</View>
                   ))}
                 </View>
               )}
