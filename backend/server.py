@@ -26,6 +26,9 @@ from recommendation_engine import (
     GENRE_ID_TO_NAME
 )
 
+# Import Supabase service for analytics tracking
+import supabase_service as supabase
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
@@ -553,6 +556,20 @@ async def verify_otp(req: VerifyOTPRequest):
     # Get user data
     user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
     
+    # Log to Supabase for analytics
+    try:
+        await supabase.log_user_login(
+            user_id=user_id,
+            email=user.get("email"),
+            phone=user.get("phone"),
+            login_method=req.type,
+            login_success_state=True,
+            session_id=session_token
+        )
+        logger.info(f"Logged login to Supabase for user {user_id}")
+    except Exception as e:
+        logger.error(f"Failed to log to Supabase: {e}")
+    
     return {
         "user_id": user_id,
         "email": user.get("email", ""),
@@ -949,6 +966,32 @@ async def save_user_profile(req: UserProfileRequest):
     except Exception as e:
         logger.error(f"Failed to broadcast profile update: {e}")
     
+    # Save to Supabase for analytics
+    try:
+        # Save user signup details
+        await supabase.save_user_signup_data(req.user_id, profile_data)
+        
+        # Save top 5 movies
+        if top_movies_data:
+            await supabase.save_top_movies(req.user_id, top_movies_data)
+        
+        # Save visibility toggles if provided
+        if hasattr(req, 'visibilityToggles') and req.visibilityToggles:
+            await supabase.save_visibility_toggles(req.user_id, req.visibilityToggles)
+        
+        # Save mode selection
+        modes = []
+        if req.movieBuddyMode:
+            modes.append("movie_buddy")
+        if req.movieDateMode:
+            modes.append("movie_date")
+        if modes:
+            await supabase.save_mode_selected(req.user_id, ",".join(modes))
+        
+        logger.info(f"Saved profile to Supabase for user {req.user_id}")
+    except Exception as e:
+        logger.error(f"Failed to save to Supabase: {e}")
+    
     return {
         "success": True,
         "message": "Profile saved with comprehensive taste vector",
@@ -1095,6 +1138,23 @@ async def record_swipe(req: SwipeRequest):
         })
     except Exception as e:
         logger.error(f"Failed to broadcast swipe: {e}")
+    
+    # Save swipe to Supabase for analytics
+    try:
+        await supabase.save_movie_swipe(
+            user_id=req.user_id,
+            movie_name=movie_details.get("title", ""),
+            swiped_direction=req.direction,
+            rating_given=req.rating,
+            reasons=req.reason if isinstance(req.reason, list) else [req.reason] if req.reason else None
+        )
+        
+        # Also save movie to library if not already there
+        await supabase.save_movie_to_library(movie_details)
+        
+        logger.info(f"Saved swipe to Supabase for user {req.user_id}")
+    except Exception as e:
+        logger.error(f"Failed to save swipe to Supabase: {e}")
     
     return {
         "success": True,
