@@ -172,9 +172,10 @@ async def save_user_signup_data(user_id: str, profile_data: Dict[str, Any], sess
             "session_id": session_id,
             "name": profile_data.get("name"),
             "gender": profile_data.get("gender"),
-            "date_of_birth": profile_data.get("dateOfBirth"),
-            "looking_for": ",".join(profile_data.get("lookingFor", [])) if isinstance(profile_data.get("lookingFor"), list) else profile_data.get("lookingFor"),
-            "who_do_you_want_to_meet": profile_data.get("whoDoYouWantToMeet"),
+            "date_of_birth": profile_data.get("dateOfBirth") or profile_data.get("date_of_birth"),
+            "age": profile_data.get("age"),
+            "looking_for": ",".join(profile_data.get("lookingFor", [])) if isinstance(profile_data.get("lookingFor"), list) else (profile_data.get("lookingFor") or ",".join(profile_data.get("relationshipIntent", [])) if isinstance(profile_data.get("relationshipIntent"), list) else profile_data.get("relationshipIntent")),
+            "who_do_you_want_to_meet": profile_data.get("whoDoYouWantToMeet") or profile_data.get("partnerPreference"),
             "who_do_you_want_to_meet_toggle_status": profile_data.get("whoDoYouWantToMeetToggle"),
             "languages_you_speak": ",".join(profile_data.get("languagesSpoken", [])) if isinstance(profile_data.get("languagesSpoken"), list) else profile_data.get("languagesSpoken"),
             "how_often_do_you_watch_movies": profile_data.get("movieFrequency"),
@@ -645,23 +646,36 @@ async def save_movie_to_library(movie_data: Dict[str, Any]) -> Dict[str, Any]:
     try:
         client = get_supabase_client()
         
-        # Extract cast names
+        # Extract cast names safely
         cast_names = []
-        if movie_data.get("credits", {}).get("cast"):
-            cast_names = [c["name"] for c in movie_data["credits"]["cast"][:10]]
+        credits = movie_data.get("credits")
+        if credits and isinstance(credits, dict):
+            cast_list = credits.get("cast")
+            if cast_list and isinstance(cast_list, list):
+                cast_names = [c.get("name", "") for c in cast_list[:10] if isinstance(c, dict)]
+        
+        # Extract genres safely
+        genres_list = movie_data.get("genres", [])
+        genres_str = ""
+        if genres_list and isinstance(genres_list, list):
+            genres_str = ",".join([g.get("name", "") if isinstance(g, dict) else str(g) for g in genres_list])
+        
+        # Get release year safely
+        release_date = movie_data.get("release_date", "")
+        release_year = release_date[:4] if release_date and len(release_date) >= 4 else None
         
         data = {
             "movie_id": movie_data.get("id"),
             "movie_name": movie_data.get("title"),
-            "movie_release_year": movie_data.get("release_date", "")[:4] if movie_data.get("release_date") else None,
-            "movie_cast": ",".join(cast_names),
+            "movie_release_year": release_year,
+            "movie_cast": ",".join(cast_names) if cast_names else None,
             "movie_summary": movie_data.get("overview"),
             "poster_path": movie_data.get("poster_path"),
             "backdrop_path": movie_data.get("backdrop_path"),
             "vote_average": movie_data.get("vote_average"),
             "vote_count": movie_data.get("vote_count"),
             "popularity": movie_data.get("popularity"),
-            "genres": ",".join([g["name"] for g in movie_data.get("genres", [])]),
+            "genres": genres_str if genres_str else None,
             "original_language": movie_data.get("original_language"),
             "runtime": movie_data.get("runtime"),
             "budget": movie_data.get("budget"),
@@ -672,15 +686,20 @@ async def save_movie_to_library(movie_data: Dict[str, Any]) -> Dict[str, Any]:
         }
         
         # Upsert for movie library (it's reference data)
-        existing = client.table("movie_library").select("movie_id").eq("movie_id", movie_data.get("id")).execute()
-        
-        if existing.data:
-            result = client.table("movie_library").update(data).eq("movie_id", movie_data.get("id")).execute()
-        else:
-            result = client.table("movie_library").insert(data).execute()
+        movie_id = movie_data.get("id")
+        if movie_id:
+            existing = client.table("movie_library").select("movie_id").eq("movie_id", movie_id).execute()
             
-        logger.info(f"Saved movie to library: {movie_data.get('title')}")
-        return {"success": True, "data": result.data}
+            if existing.data:
+                result = client.table("movie_library").update(data).eq("movie_id", movie_id).execute()
+            else:
+                result = client.table("movie_library").insert(data).execute()
+                
+            logger.info(f"Saved movie to library: {movie_data.get('title')}")
+            return {"success": True, "data": result.data}
+        else:
+            logger.warning(f"Movie data missing ID, skipping library save: {movie_data.get('title')}")
+            return {"success": False, "error": "Missing movie ID"}
     except Exception as e:
         logger.error(f"Error saving movie to library: {e}")
         return {"success": False, "error": str(e)}
