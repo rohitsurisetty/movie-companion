@@ -238,7 +238,6 @@ export default function LibraryScreen() {
   const [selectedMovie, setSelectedMovie] = useState<Movie | null>(null);
   const [showRatingModal, setShowRatingModal] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'search' | 'rated'>('search');
 
   useEffect(() => {
     loadInitialData();
@@ -249,7 +248,7 @@ export default function LibraryScreen() {
       const auth = await getAuth();
       if (auth?.user_id) {
         setUserId(auth.user_id);
-        // Load user's rated movies
+        // Load user's rated movies to show badges
         await loadRatedMovies(auth.user_id);
       }
       await fetchTrendingMovies();
@@ -384,18 +383,6 @@ export default function LibraryScreen() {
     return (<TouchableOpacity onPress={() => handleMoviePress(item)} activeOpacity={0.7}><View style={styles.posterContainer}>{posterUri ? (<Image source={{ uri: posterUri }} style={styles.moviePoster} resizeMode="cover" />) : (<View style={[styles.moviePoster, styles.noPoster]}><Ionicons name="film-outline" size={28} color={COLORS.textMuted} /></View>)}{isRated && (<View style={[styles.ratedBadge, ratedInfo?.isLike ? styles.ratedBadgeLike : styles.ratedBadgeDislike]}><Ionicons name={ratedInfo?.isLike ? 'heart' : 'heart-dislike'} size={14} color="#FFF" /></View>)}{item.vote_average && item.vote_average > 0 && (<View style={styles.tmdbRating}><Ionicons name="star" size={10} color="#FFD700" /><Text style={styles.tmdbRatingText}>{item.vote_average.toFixed(1)}</Text></View>)}</View><Text style={styles.movieTitle} numberOfLines={2}>{item.title}</Text>{item.release_date && (<Text style={styles.movieYear}>{item.release_date.slice(0, 4)}</Text>)}</TouchableOpacity>);
   };
 
-  const renderRatedMovieCard = ({ item }: { item: RatedMovie }) => (
-    <TouchableOpacity onPress={() => handleMoviePress(item)} activeOpacity={0.7}>
-      <View style={styles.posterContainer}>
-        {item.poster_path ? (<Image source={{ uri: `${TMDB_IMAGE_BASE}${item.poster_path}` }} style={styles.moviePoster} resizeMode="cover" />) : (<View style={[styles.moviePoster, styles.noPoster]}><Ionicons name="film-outline" size={28} color={COLORS.textMuted} /></View>)}
-        <View style={[styles.ratedBadge, item.isLike ? styles.ratedBadgeLike : styles.ratedBadgeDislike]}><Ionicons name={item.isLike ? 'heart' : 'heart-dislike'} size={14} color="#FFF" /></View>
-        {item.isLike && item.rating > 0 && (<View style={styles.userRating}><Text style={styles.userRatingText}>{item.rating}</Text><Ionicons name="star" size={10} color="#FFD700" /></View>)}
-      </View>
-      <Text style={styles.movieTitle} numberOfLines={2}>{item.title}</Text>
-      {item.release_date && (<Text style={styles.movieYear}>{item.release_date.slice(0, 4)}</Text>)}
-    </TouchableOpacity>
-  );
-
   if (isLoading) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
@@ -421,132 +408,62 @@ export default function LibraryScreen() {
           <Text style={styles.headerSubtitle}>Search and rate any movie</Text>
         </View>
 
-        {/* Tab Switcher */}
-        <View style={styles.tabContainer}>
-          <TouchableOpacity 
-            style={[styles.tab, activeTab === 'search' && styles.tabActive]}
-            onPress={() => setActiveTab('search')}
-          >
-            <Ionicons 
-              name="search" 
-              size={18} 
-              color={activeTab === 'search' ? COLORS.primary : COLORS.textMuted} 
-            />
-            <Text style={[styles.tabText, activeTab === 'search' && styles.tabTextActive]}>
-              Search
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={[styles.tab, activeTab === 'rated' && styles.tabActive]}
-            onPress={() => setActiveTab('rated')}
-          >
-            <Ionicons 
-              name="heart" 
-              size={18} 
-              color={activeTab === 'rated' ? COLORS.primary : COLORS.textMuted} 
-            />
-            <Text style={[styles.tabText, activeTab === 'rated' && styles.tabTextActive]}>
-              My Ratings ({ratedMovies.length})
-            </Text>
-          </TouchableOpacity>
+        {/* Search Bar */}
+        <View style={styles.searchContainer}>
+          <Ionicons name="search" size={20} color={COLORS.textMuted} style={styles.searchIcon} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search movies by title..."
+            placeholderTextColor={COLORS.textMuted}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            autoCorrect={false}
+            returnKeyType="search"
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearButton}>
+              <Ionicons name="close-circle" size={20} color={COLORS.textMuted} />
+            </TouchableOpacity>
+          )}
         </View>
 
-        {activeTab === 'search' ? (
-          <>
-            {/* Search Bar */}
-            <View style={styles.searchContainer}>
-              <Ionicons name="search" size={20} color={COLORS.textMuted} style={styles.searchIcon} />
-              <TextInput
-                style={styles.searchInput}
-                placeholder="Search movies by title..."
-                placeholderTextColor={COLORS.textMuted}
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-                autoCorrect={false}
-                returnKeyType="search"
-              />
-              {searchQuery.length > 0 && (
-                <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearButton}>
-                  <Ionicons name="close-circle" size={20} color={COLORS.textMuted} />
-                </TouchableOpacity>
-              )}
-            </View>
+        {/* Section Title */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>
+            {searchQuery.length >= 2 
+              ? `Results for "${searchQuery}"` 
+              : 'Trending This Week'}
+          </Text>
+          {isSearching && <ActivityIndicator size="small" color={COLORS.primary} />}
+        </View>
 
-            {/* Section Title */}
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>
+        {/* Movies Grid */}
+        <ScrollView 
+          style={styles.scrollView}
+          contentContainerStyle={styles.gridContainer}
+          showsVerticalScrollIndicator={false}
+          onScrollBeginDrag={Keyboard.dismiss}
+        >
+          {displayMovies.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Ionicons name="film-outline" size={48} color={COLORS.textMuted} />
+              <Text style={styles.emptyText}>
                 {searchQuery.length >= 2 
-                  ? `Results for "${searchQuery}"` 
-                  : 'Trending This Week'}
+                  ? 'No movies found' 
+                  : 'No trending movies available'}
               </Text>
-              {isSearching && <ActivityIndicator size="small" color={COLORS.primary} />}
-            </View>
-
-            {/* Movies Grid - Using ScrollView for better web compatibility */}
-            <ScrollView 
-              style={styles.scrollView}
-              contentContainerStyle={styles.gridContainer}
-              showsVerticalScrollIndicator={false}
-              onScrollBeginDrag={Keyboard.dismiss}
-            >
-              {displayMovies.length === 0 ? (
-                <View style={styles.emptyContainer}>
-                  <Ionicons name="film-outline" size={48} color={COLORS.textMuted} />
-                  <Text style={styles.emptyText}>
-                    {searchQuery.length >= 2 
-                      ? 'No movies found' 
-                      : 'No trending movies available'}
-                  </Text>
-                  {searchQuery.length >= 2 && (
-                    <Text style={styles.emptySubtext}>Try a different search term</Text>
-                  )}
-                </View>
-              ) : (
-                <View style={{flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-start', paddingHorizontal: 0}}>
-                  {displayMovies.map((item, index) => (
-                    <View key={`movie-${item.id}`} style={{width: '32%', marginRight: index % 3 === 2 ? 0 : '2%', marginBottom: 12}}>{renderMovieCard({ item, index })}</View>
-                  ))}
-                </View>
+              {searchQuery.length >= 2 && (
+                <Text style={styles.emptySubtext}>Try a different search term</Text>
               )}
-            </ScrollView>
-          </>
-        ) : (
-          <>
-            {/* My Ratings Section */}
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>My Rated Movies</Text>
             </View>
-
-            <ScrollView 
-              style={styles.scrollView}
-              contentContainerStyle={styles.gridContainer}
-              showsVerticalScrollIndicator={false}
-            >
-              {ratedMovies.length === 0 ? (
-                <View style={styles.emptyContainer}>
-                  <Ionicons name="heart-outline" size={48} color={COLORS.textMuted} />
-                  <Text style={styles.emptyText}>No rated movies yet</Text>
-                  <Text style={styles.emptySubtext}>
-                    Search and rate movies to build your library
-                  </Text>
-                  <TouchableOpacity 
-                    style={styles.switchTabButton}
-                    onPress={() => setActiveTab('search')}
-                  >
-                    <Ionicons name="search" size={18} color="#FFF" />
-                    <Text style={styles.switchTabText}>Search Movies</Text>
-                  </TouchableOpacity>
-                </View>
-              ) : (
-                <View style={{flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-start', paddingHorizontal: 0}}>
-                  {ratedMovies.map((item, index) => (
-                    <View key={`rated-${item.id}`} style={{width: '32%', marginRight: index % 3 === 2 ? 0 : '2%', marginBottom: 12}}>{renderRatedMovieCard({ item })}</View>
-                  ))}
-                </View>
-              )}
-            </ScrollView>
-          </>
-        )}
+          ) : (
+            <View style={{flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-start', paddingHorizontal: 0}}>
+              {displayMovies.map((item, index) => (
+                <View key={`movie-${item.id}`} style={{width: '32%', marginRight: index % 3 === 2 ? 0 : '2%', marginBottom: 12}}>{renderMovieCard({ item, index })}</View>
+              ))}
+            </View>
+          )}
+        </ScrollView>
 
         {/* Rating Modal */}
         <RatingModal
@@ -595,34 +512,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: COLORS.textMuted,
     marginTop: 2,
-  },
-  tabContainer: {
-    flexDirection: 'row',
-    marginHorizontal: GRID_PADDING,
-    marginVertical: 10,
-    backgroundColor: COLORS.bgCard,
-    borderRadius: 10,
-    padding: 4,
-  },
-  tab: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 10,
-    borderRadius: 8,
-    gap: 6,
-  },
-  tabActive: {
-    backgroundColor: COLORS.bgInput,
-  },
-  tabText: {
-    fontSize: 14,
-    color: COLORS.textMuted,
-    fontWeight: '500',
-  },
-  tabTextActive: {
-    color: COLORS.text,
   },
   searchContainer: {
     flexDirection: 'row',
@@ -729,23 +618,6 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontWeight: '600',
   },
-  userRating: {
-    position: 'absolute',
-    bottom: 6,
-    right: 6,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-    borderRadius: 4,
-    gap: 2,
-  },
-  userRatingText: {
-    fontSize: 12,
-    color: '#FFD700',
-    fontWeight: 'bold',
-  },
   movieTitle: {
     fontSize: 12,
     fontWeight: '500',
@@ -775,21 +647,6 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     textAlign: 'center',
     paddingHorizontal: 40,
-  },
-  switchTabButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.primary,
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 8,
-    marginTop: 16,
-    gap: 8,
-  },
-  switchTabText: {
-    fontSize: 14,
-    color: '#FFF',
-    fontWeight: '600',
   },
 });
 
