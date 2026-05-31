@@ -1,0 +1,134 @@
+import React from 'react';
+import { View, Text, StyleSheet } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+
+const COLORS = {
+  primary: '#E50914',
+  bg: '#121212',
+  bgCard: '#1E1E1E',
+  text: '#FFFFFF',
+  textSecondary: '#CCCCCC',
+  textMuted: '#888888',
+};
+
+export default function ChatScreen() {
+  return (
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <View style={styles.content}>
+        {/* Header */}
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Messages</Text>
+        </View>
+
+        {/* Coming Soon Content */}
+        <View style={styles.comingSoonContainer}>
+          <View style={styles.iconContainer}>
+            <LinearGradient
+              colors={['#4A90D9', '#67B8DE']}
+              style={styles.iconGradient}
+            >
+              <Ionicons name="chatbubbles" size={60} color="#FFF" />
+            </LinearGradient>
+          </View>
+          
+          <Text style={styles.comingSoonTitle}>Chat</Text>
+          <Text style={styles.comingSoonSubtitle}>Coming Soon</Text>
+          
+          <View style={styles.featuresList}>
+            <View style={styles.featureItem}>
+              <Ionicons name="chatbubble-ellipses" size={20} color="#4A90D9" />
+              <Text style={styles.featureText}>Real-time messaging with matches</Text>
+            </View>
+            <View style={styles.featureItem}>
+              <Ionicons name="film" size={20} color="#4A90D9" />
+              <Text style={styles.featureText}>Share movie recommendations</Text>
+            </View>
+            <View style={styles.featureItem}>
+              <Ionicons name="calendar" size={20} color="#4A90D9" />
+              <Text style={styles.featureText}>Plan movie dates together</Text>
+            </View>
+          </View>
+
+          <Text style={styles.hint}>
+            Once you match with someone, you'll be able to chat here!
+          </Text>
+        </View>
+      </View>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: COLORS.bg,
+  },
+  content: {
+    flex: 1,
+  },
+  header: {
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#333',
+  },
+  headerTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: COLORS.text,
+  },
+  comingSoonContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+  },
+  iconContainer: {
+    marginBottom: 24,
+  },
+  iconGradient: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  comingSoonTitle: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: COLORS.text,
+    marginBottom: 8,
+  },
+  comingSoonSubtitle: {
+    fontSize: 18,
+    color: '#4A90D9',
+    fontWeight: '600',
+    marginBottom: 32,
+  },
+  featuresList: {
+    width: '100%',
+    gap: 16,
+    marginBottom: 32,
+  },
+  featureItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: COLORS.bgCard,
+    padding: 16,
+    borderRadius: 12,
+  },
+  featureText: {
+    flex: 1,
+    fontSize: 14,
+    color: COLORS.textSecondary,
+  },
+  hint: {
+    fontSize: 13,
+    color: COLORS.textMuted,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+});

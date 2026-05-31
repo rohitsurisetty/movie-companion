@@ -75,7 +75,7 @@ export default function SuccessScreen() {
         </Animated.View>
 
         <Animated.View style={[styles.buttonContainer, buttonStyle]}>
-          <TouchableOpacity style={styles.enterBtn} testID="enter-app-btn" activeOpacity={0.8} onPress={() => router.replace('/filters')}>
+          <TouchableOpacity style={styles.enterBtn} testID="enter-app-btn" activeOpacity={0.8} onPress={() => router.replace('/(tabs)/feed')}>
             <Ionicons name="play" size={20} color={COLORS.white} />
             <Text style={styles.enterBtnText}>Enter Film Companion</Text>
           </TouchableOpacity>

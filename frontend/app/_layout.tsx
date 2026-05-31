@@ -13,7 +13,13 @@ export default function RootLayout() {
           contentStyle: { backgroundColor: '#121212' },
           animation: 'slide_from_right',
         }}
-      />
+      >
+        <Stack.Screen name="index" />
+        <Stack.Screen name="onboarding" />
+        <Stack.Screen name="success" />
+        <Stack.Screen name="filters" />
+        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      </Stack>
     </GestureHandlerRootView>
   );
 }
