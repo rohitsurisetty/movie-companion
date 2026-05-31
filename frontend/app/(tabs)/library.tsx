@@ -397,10 +397,7 @@ export default function LibraryScreen() {
     const ratedInfo = ratedMovies.find(m => m.id === item.id);
     
     return (
-      <TouchableOpacity
-        onPress={() => handleMoviePress(item)}
-        activeOpacity={0.7}
-      >
+      <TouchableOpacity onPress={() => handleMoviePress(item)} activeOpacity={0.7}>
         <View style={styles.posterContainer}>
           {item.poster_path ? (
             <Image
@@ -414,15 +411,8 @@ export default function LibraryScreen() {
             </View>
           )}
           {isRated && (
-            <View style={[
-              styles.ratedBadge,
-              ratedInfo?.isLike ? styles.ratedBadgeLike : styles.ratedBadgeDislike
-            ]}>
-              <Ionicons 
-                name={ratedInfo?.isLike ? 'heart' : 'heart-dislike'} 
-                size={14} 
-                color="#FFF" 
-              />
+            <View style={[styles.ratedBadge, ratedInfo?.isLike ? styles.ratedBadgeLike : styles.ratedBadgeDislike]}>
+              <Ionicons name={ratedInfo?.isLike ? 'heart' : 'heart-dislike'} size={14} color="#FFF" />
             </View>
           )}
           {item.vote_average && item.vote_average > 0 && (
@@ -433,9 +423,7 @@ export default function LibraryScreen() {
           )}
         </View>
         <Text style={styles.movieTitle} numberOfLines={2}>{item.title}</Text>
-        {item.release_date && (
-          <Text style={styles.movieYear}>{item.release_date.slice(0, 4)}</Text>
-        )}
+        {item.release_date && (<Text style={styles.movieYear}>{item.release_date.slice(0, 4)}</Text>)}
       </TouchableOpacity>
     );
   };
