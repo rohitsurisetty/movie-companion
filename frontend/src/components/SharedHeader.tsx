@@ -1,17 +1,14 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, Modal, Pressable, Image,
-  ScrollView,
+  View, Text, StyleSheet, TouchableOpacity, Modal, Pressable,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import BottomSheet, { BottomSheetScrollView, BottomSheetBackdrop } from '@gorhom/bottom-sheet';
-import { getProfile, getAuth, useAppStore, ProfileData } from '../store';
+import { useAppStore, AppMode, getAuth } from '../store';
 import Constants from 'expo-constants';
 
 const BACKEND_URL = Constants.expoConfig?.extra?.EXPO_PUBLIC_BACKEND_URL || process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
-export type AppMode = 'date' | 'buddy';
+export type { AppMode };
 
 export interface ThemeColors {
   primary: string;
@@ -132,25 +129,16 @@ export function SharedHeader({
   );
 }
 
-// Hook to manage mode state
+// Hook to manage mode state - Uses Zustand global store
 export function useAppMode() {
-  const [mode, setModeState] = React.useState('date' as AppMode);
+  const mode = useAppStore((state) => state.mode);
+  const setModeGlobal = useAppStore((state) => state.setMode);
   const [showModeDrawer, setShowModeDrawer] = React.useState(false);
   
   const colors = getThemeColors(mode);
 
   const setMode = (newMode: AppMode) => {
-    setModeState(newMode);
-    // Save to backend in background (non-blocking)
-    getAuth().then(auth => {
-      if (auth?.user_id) {
-        fetch(`${BACKEND_URL}/api/user/mode`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ user_id: auth.user_id, mode: newMode }),
-        }).catch(e => console.log('Failed to save mode:', e));
-      }
-    });
+    setModeGlobal(newMode);
   };
 
   return {

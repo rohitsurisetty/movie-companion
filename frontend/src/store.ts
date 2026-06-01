@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { create } from 'zustand';
 import { FiltersData, SwipeState } from './types';
 
 const AUTH_KEY = '@film_companion_auth';
@@ -9,6 +10,42 @@ const SWIPES_KEY = '@film_companion_swipes';
 const MODE_KEY = '@film_companion_mode';
 
 export type AppMode = 'buddy' | 'date';
+
+// Zustand store for global app state (shared across all tabs)
+interface AppState {
+  mode: AppMode;
+  setMode: (mode: AppMode) => void;
+  initializeMode: () => Promise<void>;
+}
+
+export const useAppStore = create<AppState>((set) => ({
+  mode: 'date',
+  setMode: async (mode: AppMode) => {
+    set({ mode });
+    // Save to AsyncStorage
+    await AsyncStorage.setItem(MODE_KEY, mode);
+    // Sync to backend
+    try {
+      const auth = await getAuth();
+      if (auth?.user_id) {
+        const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+        fetch(`${BACKEND_URL}/api/user/mode`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: auth.user_id, mode }),
+        }).catch(e => console.log('Failed to sync mode:', e));
+      }
+    } catch (e) {
+      console.log('Failed to sync mode to backend:', e);
+    }
+  },
+  initializeMode: async () => {
+    const savedMode = await AsyncStorage.getItem(MODE_KEY);
+    if (savedMode) {
+      set({ mode: savedMode as AppMode });
+    }
+  },
+}));
 
 export const saveMode = async (mode: AppMode) => {
   await AsyncStorage.setItem(MODE_KEY, mode);
