@@ -4,7 +4,6 @@ import {
   Modal, Image, Switch, ActivityIndicator, Alert, Platform,
   ScrollView as RNScrollView,
 } from 'react-native';
-import { ScrollView } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -669,7 +668,7 @@ export default function ProfileScreen() {
         colors={colors}
       />
 
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <RNScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {/* Profile Header */}
         <TouchableOpacity style={styles.profileHeader} onPress={() => setEditModal('avatar')} activeOpacity={0.8}>
           <View style={[styles.avatarLarge, { backgroundColor: getAvatarColor() }]}>
@@ -818,7 +817,7 @@ export default function ProfileScreen() {
           <Ionicons name="log-out-outline" size={20} color="#FF6B6B" />
           <Text style={styles.logoutText}>Logout & Clear Data</Text>
         </TouchableOpacity>
-      </ScrollView>
+      </RNScrollView>
 
       {/* Edit Modals */}
       <AvatarSelectModal
@@ -1074,8 +1073,8 @@ const styles = StyleSheet.create({
   backBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { flex: 1, fontSize: 18, fontWeight: 'bold', color: COLORS.text, textAlign: 'center' },
   savingIndicator: { width: 44 },
-  scroll: { flex: 1 },
-  scrollContent: { paddingBottom: SPACING.xxl },
+  scroll: { flex: 1, overflow: 'scroll' as any },
+  scrollContent: { paddingBottom: 120 },
   profileHeader: { alignItems: 'center', paddingVertical: SPACING.xl, borderBottomWidth: 1, borderBottomColor: COLORS.border },
   avatarLarge: { width: 100, height: 100, borderRadius: 50, alignItems: 'center', justifyContent: 'center', marginBottom: SPACING.m },
   editAvatarBadge: { position: 'absolute', bottom: 0, right: 0, width: 28, height: 28, borderRadius: 14, backgroundColor: COLORS.primary, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: COLORS.bg },
