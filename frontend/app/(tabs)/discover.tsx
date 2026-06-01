@@ -19,7 +19,8 @@ import {
 import {
   FeedMovie, SwipeState, SwipeRecord, initialSwipeState, TMDB_GENRE_MAP, ProfileData, MovieDetail, initialProfileData,
 } from '../../src/types';
-import { saveSwipeState, getSwipeState, getFilters, getProfile, saveMode, getMode, AppMode, clearAll } from '../../src/store';
+import { saveSwipeState, getSwipeState, getFilters, getProfile, clearAll } from '../../src/store';
+import { useAppMode, ModeSwitcher } from '../../src/components/SharedHeader';
 import InAppProfilePreview from '../../src/components/InAppProfilePreview';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -539,83 +540,6 @@ function RatingModal({
   );
 }
 
-// Mode Switcher Drawer
-function ModeSwitcher({
-  visible, onClose, currentMode, onModeChange, colors,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  currentMode: AppMode;
-  onModeChange: (mode: AppMode) => void;
-  colors: ReturnType<typeof getThemeColors>;
-}) {
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={drawerStyles.overlay} onPress={onClose}>
-        <Pressable style={[drawerStyles.container, { backgroundColor: colors.bgCard }]} onPress={(e) => e.stopPropagation()}>
-          <View style={drawerStyles.handle} />
-          <Text style={[drawerStyles.title, { color: colors.text }]}>Switch Mode</Text>
-          
-          <TouchableOpacity
-            style={[
-              drawerStyles.modeOption,
-              currentMode === 'date' && { borderColor: '#E50914', backgroundColor: 'rgba(229,9,20,0.1)' }
-            ]}
-            onPress={() => { onModeChange('date'); onClose(); }}
-            testID="mode-date-btn"
-          >
-            <View style={[drawerStyles.modeIcon, { backgroundColor: 'rgba(229,9,20,0.2)' }]}>
-              <Ionicons name="heart" size={28} color="#E50914" />
-            </View>
-            <View style={drawerStyles.modeInfo}>
-              <Text style={[drawerStyles.modeName, { color: colors.text }]}>Movie Date</Text>
-              <Text style={[drawerStyles.modeDesc, { color: colors.textSecondary }]}>Find romantic movie partners</Text>
-            </View>
-            {currentMode === 'date' && (
-              <Ionicons name="checkmark-circle" size={24} color="#E50914" />
-            )}
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              drawerStyles.modeOption,
-              currentMode === 'buddy' && { borderColor: '#2196F3', backgroundColor: 'rgba(33,150,243,0.1)' }
-            ]}
-            onPress={() => { onModeChange('buddy'); onClose(); }}
-            testID="mode-buddy-btn"
-          >
-            <View style={[drawerStyles.modeIcon, { backgroundColor: 'rgba(33,150,243,0.2)' }]}>
-              <Ionicons name="people" size={28} color="#2196F3" />
-            </View>
-            <View style={drawerStyles.modeInfo}>
-              <Text style={[drawerStyles.modeName, { color: colors.text }]}>Movie Buddy</Text>
-              <Text style={[drawerStyles.modeDesc, { color: colors.textSecondary }]}>Find friends to watch with</Text>
-            </View>
-            {currentMode === 'buddy' && (
-              <Ionicons name="checkmark-circle" size={24} color="#2196F3" />
-            )}
-          </TouchableOpacity>
-        </Pressable>
-      </Pressable>
-    </Modal>
-  );
-}
-
-const drawerStyles = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
-  container: { borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: SPACING.l, paddingBottom: SPACING.xxl },
-  handle: { width: 40, height: 4, backgroundColor: '#555', borderRadius: 2, alignSelf: 'center', marginBottom: SPACING.l },
-  title: { fontSize: 22, fontWeight: 'bold', marginBottom: SPACING.l, textAlign: 'center' },
-  modeOption: {
-    flexDirection: 'row', alignItems: 'center', padding: SPACING.m,
-    borderRadius: BORDER_RADIUS.l, borderWidth: 2, borderColor: '#333', marginBottom: SPACING.m,
-  },
-  modeIcon: { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', marginRight: SPACING.m },
-  modeInfo: { flex: 1 },
-  modeName: { fontSize: 18, fontWeight: '600', marginBottom: 2 },
-  modeDesc: { fontSize: 13 },
-});
-
 // Profile Drawer Component - Fully Scrollable with Swipe Dismiss
 function ProfileDrawer({
   visible, onClose, onLogout, colors, onFilters, onViewProfile, onProfilePreview,
@@ -1022,22 +946,22 @@ function SwipeCard({
 
 export default function SwipeScreen() {
   const router = useRouter();
+  // Use global Zustand store for mode (synced across all tabs)
+  const { mode, setMode, colors, showModeDrawer, setShowModeDrawer } = useAppMode();
+  
   const [movies, setMovies] = useState<FeedMovie[]>([]);
   const [swipeState, setSwipeState] = useState<SwipeState>(initialSwipeState);
   const [loading, setLoading] = useState(true);
   const [showRatingModal, setShowRatingModal] = useState(false);
   const [showLeftModal, setShowLeftModal] = useState(false);
-  const [showModeDrawer, setShowModeDrawer] = useState(false);
   const [showProfileDrawer, setShowProfileDrawer] = useState(false);
   const [showProfilePreview, setShowProfilePreview] = useState(false);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [selectedMovieId, setSelectedMovieId] = useState(0);
   const [pendingMovie, setPendingMovie] = useState<FeedMovie | null>(null);
   const [page, setPage] = useState(0);  // Start at 0, will be set to 1 when userId is ready
-  const [mode, setMode] = useState<AppMode>('date');
   const fetchingRef = useRef(false);
 
-  const colors = getThemeColors(mode);
   const remainingSwipes = Math.max(0, REQUIRED_SWIPES - swipeState.totalSwipes);
   // Track last swiped movie for undo functionality
   const [lastSwipedMovie, setLastSwipedMovie] = useState<FeedMovie | null>(null);
@@ -1046,19 +970,13 @@ export default function SwipeScreen() {
 
   const isProfileComplete = swipeState.totalSwipes >= REQUIRED_SWIPES;
 
-  // Load saved state
+  // Load saved swipe state on mount
   useEffect(() => {
     (async () => {
-      const [savedSwipes, savedMode] = await Promise.all([getSwipeState(), getMode()]);
+      const savedSwipes = await getSwipeState();
       if (savedSwipes) setSwipeState(savedSwipes);
-      if (savedMode) setMode(savedMode);
     })();
   }, []);
-
-  const handleModeChange = async (newMode: AppMode) => {
-    setMode(newMode);
-    await saveMode(newMode);
-  };
 
   const handleLogout = async () => {
     await clearAll();
@@ -1564,7 +1482,7 @@ export default function SwipeScreen() {
         visible={showModeDrawer}
         onClose={() => setShowModeDrawer(false)}
         currentMode={mode}
-        onModeChange={handleModeChange}
+        onModeChange={setMode}
         colors={colors}
       />
       <ProfileDrawer

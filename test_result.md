@@ -293,8 +293,7 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Bottom Tab Navigation Architecture"
-    - "Library Screen TMDB Integration"
+    - "Global App Mode Synchronization (Zustand)"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
