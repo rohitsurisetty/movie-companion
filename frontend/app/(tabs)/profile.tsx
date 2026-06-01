@@ -785,6 +785,20 @@ export default function ProfileScreen() {
 
           <TouchableOpacity 
             style={styles.settingsRow}
+            onPress={() => router.push('/photos?from=profile')}
+          >
+            <View style={styles.settingsIcon}>
+              <Ionicons name="images-outline" size={22} color={COLORS.primary} />
+            </View>
+            <View style={styles.settingsInfo}>
+              <Text style={styles.settingsLabel}>Edit Photos</Text>
+              <Text style={styles.settingsDesc}>Add or change your profile photos</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={styles.settingsRow}
             onPress={() => router.push('/filters?from=profile')}
           >
             <View style={styles.settingsIcon}>

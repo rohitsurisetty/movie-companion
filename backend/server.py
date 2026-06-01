@@ -34,6 +34,17 @@ from matchmaking_service import (
     apply_hard_filters
 )
 
+# Import picture service for profile photos
+from picture_service import (
+    upload_picture_to_storage,
+    delete_picture_from_storage,
+    save_user_pictures,
+    get_user_pictures,
+    update_single_picture,
+    initialize_picture_service,
+    set_mongodb_db
+)
+
 # Import Supabase service for analytics tracking
 import supabase_service as supabase
 
@@ -2297,6 +2308,210 @@ async def get_mock_users():
     }
 
 
+# =============================================
+# Profile Pictures API Endpoints
+# =============================================
+
+class PictureUploadRequest(BaseModel):
+    """Request to upload a profile picture"""
+    user_id: str
+    session_id: str
+    picture_number: int  # 1-5
+    image_data: str  # Base64 encoded image
+    content_type: str = "image/jpeg"
+
+
+class PicturesUpdateRequest(BaseModel):
+    """Request to update multiple pictures at once"""
+    user_id: str
+    session_id: str
+    pictures: Dict[str, Optional[str]]  # {"picture_1": "base64...", "picture_2": "base64...", ...}
+
+
+@api_router.post("/user/pictures/upload")
+async def upload_picture(req: PictureUploadRequest):
+    """
+    Upload a single profile picture.
+    Stores image in Supabase storage and updates user_pictures table.
+    """
+    try:
+        if req.picture_number < 1 or req.picture_number > 5:
+            raise HTTPException(status_code=400, detail="picture_number must be between 1 and 5")
+        
+        # Upload to MongoDB storage
+        picture_url = await upload_picture_to_storage(
+            user_id=req.user_id,
+            picture_data=req.image_data,
+            picture_number=req.picture_number,
+            content_type=req.content_type
+        )
+        
+        if not picture_url:
+            raise HTTPException(status_code=500, detail="Failed to upload picture to storage")
+        
+        # Update database
+        success = await update_single_picture(
+            user_id=req.user_id,
+            session_id=req.session_id,
+            picture_number=req.picture_number,
+            picture_url=picture_url
+        )
+        
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to save picture to database")
+        
+        logger.info(f"Uploaded picture {req.picture_number} for user {req.user_id}")
+        
+        return {
+            "success": True,
+            "picture_number": req.picture_number,
+            "picture_url": picture_url
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Picture upload error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.post("/user/pictures/upload-batch")
+async def upload_pictures_batch(req: PicturesUpdateRequest):
+    """
+    Upload multiple pictures at once.
+    Used during onboarding to upload all pictures in one request.
+    """
+    try:
+        picture_urls = {}
+        errors = []
+        
+        for key, image_data in req.pictures.items():
+            if not image_data:
+                continue
+                
+            # Extract picture number from key (e.g., "picture_1" -> 1)
+            try:
+                picture_number = int(key.split("_")[1])
+            except:
+                errors.append(f"Invalid key format: {key}")
+                continue
+            
+            if picture_number < 1 or picture_number > 5:
+                errors.append(f"Invalid picture number: {picture_number}")
+                continue
+            
+            # Upload to storage
+            picture_url = await upload_picture_to_storage(
+                user_id=req.user_id,
+                picture_data=image_data,
+                picture_number=picture_number,
+                content_type="image/jpeg"
+            )
+            
+            if picture_url:
+                picture_urls[f"picture_{picture_number}"] = picture_url
+            else:
+                errors.append(f"Failed to upload picture_{picture_number}")
+        
+        if not picture_urls:
+            raise HTTPException(status_code=400, detail="No pictures were uploaded successfully")
+        
+        # Save all URLs to database
+        success = await save_user_pictures(
+            user_id=req.user_id,
+            session_id=req.session_id,
+            picture_urls=picture_urls
+        )
+        
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to save pictures to database")
+        
+        logger.info(f"Uploaded {len(picture_urls)} pictures for user {req.user_id}")
+        
+        return {
+            "success": True,
+            "uploaded_count": len(picture_urls),
+            "picture_urls": picture_urls,
+            "errors": errors if errors else None
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Batch picture upload error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.get("/user/pictures/{user_id}")
+async def get_pictures(user_id: str):
+    """Get all pictures for a user"""
+    try:
+        pictures = await get_user_pictures(user_id)
+        
+        if not pictures:
+            return {
+                "success": True,
+                "pictures": {
+                    "picture_1": None,
+                    "picture_2": None,
+                    "picture_3": None,
+                    "picture_4": None,
+                    "picture_5": None
+                },
+                "count": 0
+            }
+        
+        # Count non-null pictures
+        count = sum(1 for i in range(1, 6) if pictures.get(f"picture_{i}"))
+        
+        return {
+            "success": True,
+            "pictures": {
+                "picture_1": pictures.get("picture_1"),
+                "picture_2": pictures.get("picture_2"),
+                "picture_3": pictures.get("picture_3"),
+                "picture_4": pictures.get("picture_4"),
+                "picture_5": pictures.get("picture_5"),
+            },
+            "count": count,
+            "last_modified": pictures.get("last_modified_ts")
+        }
+        
+    except Exception as e:
+        logger.error(f"Get pictures error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.delete("/user/pictures/{user_id}/{picture_number}")
+async def delete_picture(user_id: str, picture_number: int, session_id: str = ""):
+    """Delete a specific picture"""
+    try:
+        if picture_number < 1 or picture_number > 5:
+            raise HTTPException(status_code=400, detail="picture_number must be between 1 and 5")
+        
+        # Delete from storage
+        deleted = await delete_picture_from_storage(user_id, picture_number)
+        
+        # Update database to set picture to null
+        await update_single_picture(
+            user_id=user_id,
+            session_id=session_id or "system",
+            picture_number=picture_number,
+            picture_url=None
+        )
+        
+        return {
+            "success": True,
+            "deleted_picture": picture_number
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Delete picture error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # Include router after all routes are defined
 app.include_router(api_router)
 
@@ -2315,6 +2530,14 @@ app.add_middleware(
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize services on startup"""
+    # Pass MongoDB db to picture service
+    set_mongodb_db(db)
+    logger.info("Picture service connected to MongoDB")
 
 
 @app.on_event("shutdown")
