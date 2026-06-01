@@ -13,11 +13,12 @@ import OptionalProfileStep from '../src/components/OptionalProfileStep';
 import ProfilePreviewStep from '../src/components/ProfilePreviewStep';
 import PublicProfilePreviewStep from '../src/components/PublicProfilePreviewStep';
 import ModeSelectionStep from '../src/components/ModeSelectionStep';
+import PhotoUploadStep from '../src/components/PhotoUploadStep';
 
-const TOTAL_STEPS = 13; // Added PublicProfilePreview step
+const TOTAL_STEPS = 14; // Added PhotoUpload step after Basic Info
 
 const STEP_LABELS = [
-  'Basic Info', 'Looking For', 'Want to Meet', 'Languages',
+  'Basic Info', 'Add Photos', 'Looking For', 'Want to Meet', 'Languages',
   'Movie Frequency', 'OTT / Theatre', 'Film Languages', 'Genres',
   'Top Movies', 'Optional Info', 'Preview', 'Public Preview', 'Mode',
 ];
@@ -31,42 +32,43 @@ type SelectionConfig = {
   field: keyof ProfileData;
 };
 
+// Selection configs now start at step 2 (after BasicInfo at 0 and PhotoUpload at 1)
 const SELECTION_CONFIGS: Record<number, SelectionConfig> = {
-  1: {
+  2: {
     title: 'What are you looking for?',
     subtitle: 'Select all that apply',
     options: ['Casual', 'Friendship', 'Serious relationship', 'Exploring'],
     multiSelect: true, displayAs: 'chips', field: 'relationshipIntent',
   },
-  2: {
+  3: {
     title: 'Who do you want to meet?',
     subtitle: 'This helps us find better matches for you',
     options: ['Men', 'Women', 'Anyone'],
     multiSelect: false, displayAs: 'chips', field: 'partnerPreference',
   },
-  3: {
+  4: {
     title: 'Languages you speak',
     subtitle: 'Select all that apply',
     options: ['English', 'Hindi', 'Telugu', 'Tamil', 'Kannada', 'Malayalam', 'Bengali', 'Marathi', 'Gujarati', 'Punjabi', 'Urdu'],
     multiSelect: true, displayAs: 'chips', field: 'languagesSpoken',
   },
-  4: {
+  5: {
     title: 'How often do you watch movies?',
     options: ['More than twice a week', 'Twice a week', 'Once a week', 'Twice a month', 'Once a month', 'Rarely'],
     multiSelect: false, displayAs: 'list', field: 'movieFrequency',
   },
-  5: {
+  6: {
     title: 'What describes you more?',
     options: ['OTT Person', 'Theatre Person', 'Both', 'None'],
     multiSelect: false, displayAs: 'chips', field: 'ottTheatre',
   },
-  6: {
+  7: {
     title: 'Languages of films you watch',
     subtitle: 'Select all that apply',
     options: ['Hindi', 'English', 'Telugu', 'Tamil', 'Malayalam', 'Kannada', 'Korean', 'Others'],
     multiSelect: true, displayAs: 'language-tiles', field: 'filmLanguages',
   },
-  7: {
+  8: {
     title: 'Your favourite genres',
     subtitle: 'Select all that apply',
     options: ['Action', 'Romance', 'Comedy', 'Thriller', 'Horror', 'Sci-Fi', 'Drama', 'Documentary'],
@@ -115,22 +117,36 @@ export default function OnboardingScreen() {
     return val !== undefined && val !== null && val !== '';
   };
 
-  const STEPS_WITH_OWN_BUTTON = [0, 8, 9, 10, 11, 12];
+  // Steps 0 (BasicInfo), 1 (PhotoUpload), 9 (TopMovies), 10 (OptionalProfile), 11 (ProfilePreview), 12 (PublicPreview), 13 (ModeSelection) have their own buttons
+  const STEPS_WITH_OWN_BUTTON = [0, 1, 9, 10, 11, 12, 13];
   const showSharedButton = !STEPS_WITH_OWN_BUTTON.includes(step);
 
   // Go back to edit step from public preview
   const handleEditFromPreview = () => {
-    setStep(10); // Go back to ProfilePreviewStep (visibility toggles)
+    setStep(11); // Go back to ProfilePreviewStep (visibility toggles)
+  };
+
+  // Handle photo upload completion
+  const handlePhotoUploadComplete = (uploadedPictures: string[]) => {
+    // Store pictures in profile data
+    updateField('uploadedPictures', uploadedPictures);
+    handleNext();
   };
 
   const renderStep = () => {
+    // Step 0: Basic Info
     if (step === 0) {
       return <BasicInfoStep data={data} onUpdate={updateField} onNext={handleNext} />;
     }
-    if (step >= 1 && step <= 7) {
+    // Step 1: Photo Upload (NEW - right after Basic Info)
+    if (step === 1) {
+      return <PhotoUploadStep onNext={handlePhotoUploadComplete} />;
+    }
+    // Steps 2-8: Selection Steps (shifted from 1-7)
+    if (step >= 2 && step <= 8) {
       const config = SELECTION_CONFIGS[step];
-      const showOthersInput = step === 6;
-      const showVisibilityToggle = step === 2; // Only for "Who do you want to meet?"
+      const showOthersInput = step === 7; // Film languages (was step 6)
+      const showVisibilityToggle = step === 3; // Who do you want to meet? (was step 2)
       return (
         <SelectionStep
           title={config.title}
@@ -149,19 +165,24 @@ export default function OnboardingScreen() {
         />
       );
     }
-    if (step === 8) {
+    // Step 9: Top Movies (was step 8)
+    if (step === 9) {
       return <TopMoviesStep data={data} onUpdate={updateField} onNext={handleNext} />;
     }
-    if (step === 9) {
+    // Step 10: Optional Profile (was step 9)
+    if (step === 10) {
       return <OptionalProfileStep data={data} onUpdate={updateField} onNext={handleNext} />;
     }
-    if (step === 10) {
+    // Step 11: Profile Preview (was step 10)
+    if (step === 11) {
       return <ProfilePreviewStep data={data} onUpdate={updateField} onNext={handleNext} />;
     }
-    if (step === 11) {
+    // Step 12: Public Profile Preview (was step 11)
+    if (step === 12) {
       return <PublicProfilePreviewStep data={data} onEdit={handleEditFromPreview} onContinue={handleNext} />;
     }
-    if (step === 12) {
+    // Step 13: Mode Selection (was step 12)
+    if (step === 13) {
       return <ModeSelectionStep data={data} onUpdate={updateField} onNext={handleNext} />;
     }
     return null;

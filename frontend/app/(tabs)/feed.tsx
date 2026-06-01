@@ -205,41 +205,43 @@ const ProfileCard = ({
 
   return (
     <View style={styles.cardContainer}>
-      {/* Photo Section */}
-      <PhotoCarousel 
-        photos={photos} 
-        name={profile.name}
-        avatarColor={avatarColor}
-      />
-      
-      {/* Profile Info Overlay */}
-      <View style={styles.profileOverlay}>
-        {/* Name, Age, Location */}
-        <View style={styles.basicInfo}>
-          <View style={styles.nameRow}>
-            <Text style={styles.profileName}>{profile.name}</Text>
-            <Text style={styles.profileAge}>, {profile.age}</Text>
-            {profile.workProfile && (
-              <View style={styles.verifiedBadge}>
-                <Ionicons name="checkmark-circle" size={18} color={COLORS.buddy} />
-              </View>
-            )}
+      {/* Photo Section with overlay */}
+      <View style={styles.photoSection}>
+        <PhotoCarousel 
+          photos={photos} 
+          name={profile.name}
+          avatarColor={avatarColor}
+        />
+        
+        {/* Profile Info Overlay - inside photoSection for correct positioning */}
+        <View style={styles.profileOverlay}>
+          {/* Name, Age, Location */}
+          <View style={styles.basicInfo}>
+            <View style={styles.nameRow}>
+              <Text style={styles.profileName}>{profile.name}</Text>
+              <Text style={styles.profileAge}>, {profile.age}</Text>
+              {profile.workProfile && (
+                <View style={styles.verifiedBadge}>
+                  <Ionicons name="checkmark-circle" size={18} color={COLORS.buddy} />
+                </View>
+              )}
+            </View>
+            <View style={styles.locationRow}>
+              <Ionicons name="location" size={14} color={COLORS.textSecondary} />
+              <Text style={styles.locationText}>{profile.location}</Text>
+              {profile.workProfile && (
+                <>
+                  <Text style={styles.dotSeparator}>•</Text>
+                  <Ionicons name="briefcase-outline" size={14} color={COLORS.textSecondary} />
+                  <Text style={styles.locationText}>{profile.workProfile}</Text>
+                </>
+              )}
+            </View>
           </View>
-          <View style={styles.locationRow}>
-            <Ionicons name="location" size={14} color={COLORS.textSecondary} />
-            <Text style={styles.locationText}>{profile.location}</Text>
-            {profile.workProfile && (
-              <>
-                <Text style={styles.dotSeparator}>•</Text>
-                <Ionicons name="briefcase-outline" size={14} color={COLORS.textSecondary} />
-                <Text style={styles.locationText}>{profile.workProfile}</Text>
-              </>
-            )}
-          </View>
-        </View>
 
-        {/* Match Badge */}
-        <MatchBadge level={profile.match_level} score={profile.compatibility_score} />
+          {/* Match Badge */}
+          <MatchBadge level={profile.match_level} score={profile.compatibility_score} />
+        </View>
       </View>
 
       {/* Expandable Content */}
@@ -373,15 +375,12 @@ const ProfileCard = ({
   );
 };
 
-// Loading Skeleton
-const LoadingSkeleton = () => (
-  <View style={styles.skeletonContainer}>
-    <View style={styles.skeletonPhoto} />
-    <View style={styles.skeletonContent}>
-      <View style={styles.skeletonTitle} />
-      <View style={styles.skeletonSubtitle} />
-      <View style={styles.skeletonBadge} />
-    </View>
+// Loading Skeleton - Simple Spinner with text
+const LoadingState = ({ mode }: { mode: string }) => (
+  <View style={styles.loadingContainer}>
+    <ActivityIndicator size="large" color={mode === 'date' ? COLORS.primary : COLORS.buddy} />
+    <Text style={styles.loadingText}>Finding your matches...</Text>
+    <Text style={styles.loadingSubtext}>Our AI is analyzing movie tastes</Text>
   </View>
 );
 
@@ -480,7 +479,7 @@ export default function FeedScreen() {
           </Text>
           <Text style={styles.headerSubtitle}>Finding compatible profiles...</Text>
         </View>
-        <LoadingSkeleton />
+        <LoadingState mode={mode} />
       </SafeAreaView>
     );
   }
@@ -618,7 +617,14 @@ const styles = StyleSheet.create({
     minHeight: SCREEN_HEIGHT - 150,
   },
   
-  // Photo Section
+  // Photo Section wrapper
+  photoSection: {
+    width: SCREEN_WIDTH,
+    height: CARD_HEIGHT,
+    position: 'relative',
+  },
+  
+  // Photo Container (inside PhotoCarousel)
   photoContainer: {
     width: SCREEN_WIDTH,
     height: CARD_HEIGHT,
@@ -673,6 +679,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     padding: 20,
+    zIndex: 10,
   },
   basicInfo: { marginBottom: 12 },
   nameRow: { flexDirection: 'row', alignItems: 'baseline' },
@@ -788,18 +795,24 @@ const styles = StyleSheet.create({
   },
   messageButtonText: { color: 'white', fontSize: 18, fontWeight: '700' },
   
-  // Loading Skeleton
-  skeletonContainer: { flex: 1, padding: 20 },
-  skeletonPhoto: {
-    width: '100%',
-    height: CARD_HEIGHT - 100,
-    backgroundColor: COLORS.bgCard,
-    borderRadius: 20,
+  // Loading State
+  loadingContainer: { 
+    flex: 1, 
+    justifyContent: 'center', 
+    alignItems: 'center',
+    padding: 40,
   },
-  skeletonContent: { marginTop: 16 },
-  skeletonTitle: { width: '60%', height: 28, backgroundColor: COLORS.bgCard, borderRadius: 8 },
-  skeletonSubtitle: { width: '40%', height: 18, backgroundColor: COLORS.bgCard, borderRadius: 6, marginTop: 8 },
-  skeletonBadge: { width: 120, height: 32, backgroundColor: COLORS.bgCard, borderRadius: 16, marginTop: 12 },
+  loadingText: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: COLORS.text,
+    marginTop: 20,
+  },
+  loadingSubtext: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    marginTop: 8,
+  },
   
   // Empty State
   emptyState: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 },
