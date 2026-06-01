@@ -83,6 +83,11 @@ export const getAuth = async () => {
   return data ? JSON.parse(data) : null;
 };
 
+export const getUserId = async (): Promise<string> => {
+  const auth = await getAuth();
+  return auth?.user_id || `guest_${Date.now()}`;
+};
+
 export const saveProfile = async (data: any) => {
   await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(data));
 };

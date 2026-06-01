@@ -26,6 +26,14 @@ from recommendation_engine import (
     GENRE_ID_TO_NAME
 )
 
+# Import matchmaking service for AI-based user matching
+from matchmaking_service import (
+    get_matches_for_user,
+    get_all_mock_users,
+    get_mock_user_by_id,
+    apply_hard_filters
+)
+
 # Import Supabase service for analytics tracking
 import supabase_service as supabase
 
@@ -2163,6 +2171,129 @@ async def get_user_details(user_id: str):
         "profile": profile,
         "total_swipes": swipe_count,
         "recent_swipes": recent_swipes
+    }
+
+
+# =============================================
+# Matchmaking API Endpoints
+# =============================================
+
+class MatchRequest(BaseModel):
+    """Request for AI-based matches"""
+    user_id: str
+    filters: Optional[Dict] = None
+    limit: int = 15
+
+
+@api_router.post("/matches")
+async def get_matches(req: MatchRequest):
+    """
+    Get AI-matched profiles for a user.
+    
+    1. Fetches user profile
+    2. Applies hard filters (gender, age, language, intent)
+    3. Uses LLM to score compatibility based on movie taste
+    4. Returns top matches with explanations
+    """
+    try:
+        # Get user profile from database
+        user_profile = await db.user_profiles.find_one({"user_id": req.user_id})
+        
+        # Get user's swipe history for taste analysis
+        swipes = await db.user_swipes.find(
+            {"user_id": req.user_id}
+        ).to_list(length=100)
+        
+        # Build taste profile from swipes
+        liked_genres = set()
+        disliked_genres = set()
+        liked_movies = []
+        
+        for swipe in swipes:
+            if swipe.get("direction") == "right":
+                liked_genres.update(swipe.get("genres", []))
+                liked_movies.append(swipe.get("movie_title", ""))
+            else:
+                disliked_genres.update(swipe.get("genres", []))
+        
+        # Construct profile for matching
+        # If user has no profile, use defaults that will show women (for demo purposes)
+        has_profile = user_profile is not None
+        profile_for_matching = {
+            "user_id": req.user_id,
+            "name": user_profile.get("name", "User") if has_profile else "Demo User",
+            "age": user_profile.get("age", 28) if has_profile else 28,
+            "gender": user_profile.get("gender", "Male") if has_profile else "Male",
+            "location": user_profile.get("location", "Mumbai") if has_profile else "Mumbai",
+            "partnerPreference": user_profile.get("partnerPreference", "Women") if has_profile else "Women",
+            "relationshipIntent": user_profile.get("relationshipIntent", ["Long-term relationship"]) if has_profile else ["Long-term relationship"],
+            "genres": user_profile.get("genres", ["Drama", "Sci-Fi", "Thriller"]) if has_profile else ["Drama", "Sci-Fi", "Thriller"],
+            "filmLanguages": user_profile.get("filmLanguages", ["Hindi", "English"]) if has_profile else ["Hindi", "English"],
+            "languagesSpoken": user_profile.get("languagesSpoken", ["Hindi", "English"]) if has_profile else ["Hindi", "English"],
+            "topMovies": user_profile.get("topMovies", []) if has_profile else [{"title": "Inception"}, {"title": "Interstellar"}],
+            "movieFrequency": user_profile.get("movieFrequency", "Weekly") if has_profile else "Weekly",
+            "ottTheatre": user_profile.get("ottTheatre", "Both") if has_profile else "Both",
+            "bio": user_profile.get("bio", "") if has_profile else "Looking for movie companions!",
+            "swipe_history": {
+                "liked_genres": list(liked_genres) if liked_genres else ["Drama", "Sci-Fi", "Thriller"],
+                "disliked_genres": list(disliked_genres),
+                "liked_actors": ["Leonardo DiCaprio", "Christian Bale"],
+                "liked_directors": ["Christopher Nolan", "Denis Villeneuve"]
+            }
+        }
+        
+        # Get matches using AI
+        matches = await get_matches_for_user(
+            user_id=req.user_id,
+            user_profile=profile_for_matching,
+            filters=req.filters,
+            use_mock_data=True  # Using mock users for now
+        )
+        
+        logger.info(f"Found {len(matches)} matches for user {req.user_id}")
+        
+        return {
+            "success": True,
+            "matches": matches[:req.limit],
+            "total_candidates": len(matches)
+        }
+        
+    except Exception as e:
+        logger.error(f"Match error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.get("/matches/profile/{user_id}")
+async def get_match_profile(user_id: str):
+    """Get detailed profile of a matched user"""
+    # First check mock users
+    mock_user = get_mock_user_by_id(user_id)
+    if mock_user:
+        return {
+            "success": True,
+            "profile": mock_user
+        }
+    
+    # Then check real users in database
+    user_profile = await db.user_profiles.find_one({"user_id": user_id})
+    if user_profile:
+        user_profile.pop("_id", None)
+        return {
+            "success": True,
+            "profile": user_profile
+        }
+    
+    raise HTTPException(status_code=404, detail="User not found")
+
+
+@api_router.get("/matches/mock-users")
+async def get_mock_users():
+    """Get all mock users for testing (admin endpoint)"""
+    users = get_all_mock_users()
+    return {
+        "success": True,
+        "users": users,
+        "total": len(users)
     }
 
 
