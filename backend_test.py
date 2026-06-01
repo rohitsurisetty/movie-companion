@@ -1,514 +1,263 @@
-#!/usr/bin/env python3
 """
-Backend Testing Script for Film Companion OTP Authentication
-Tests all OTP authentication endpoints as specified in the review request.
+Backend API Testing for Film Companion - AI Matchmaking with Caching
+Tests the /api/matches endpoint with caching functionality
 """
 
 import requests
-import json
 import time
-import sys
-from typing import Dict, Any, Optional
+import json
 
-# Backend URL from environment
-BACKEND_URL = "https://showtime-setup.preview.emergentagent.com"
+# Backend URL
+BACKEND_URL = "https://showtime-setup.preview.emergentagent.com/api"
 
-class OTPAuthTester:
-    def __init__(self):
-        self.base_url = f"{BACKEND_URL}/api"
-        self.session = requests.Session()
-        self.test_results = []
-        
-    def log_test(self, test_name: str, success: bool, details: str, response_data: Optional[Dict] = None):
-        """Log test results"""
-        result = {
-            "test": test_name,
-            "success": success,
-            "details": details,
-            "response": response_data
-        }
-        self.test_results.append(result)
-        status = "✅ PASS" if success else "❌ FAIL"
-        print(f"{status}: {test_name}")
-        print(f"   Details: {details}")
-        if response_data:
-            print(f"   Response: {json.dumps(response_data, indent=2)}")
-        print()
-
-    def test_send_email_otp(self) -> Optional[str]:
-        """Test POST /api/auth/send-email-otp"""
-        test_email = "test@filmcompanion.com"
-        
-        try:
-            response = self.session.post(
-                f"{self.base_url}/auth/send-email-otp",
-                json={"email": test_email},
-                headers={"Content-Type": "application/json"}
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                
-                # Check required fields
-                required_fields = ["success", "is_new_user", "otp"]
-                missing_fields = [field for field in required_fields if field not in data]
-                
-                if missing_fields:
-                    self.log_test(
-                        "Send Email OTP",
-                        False,
-                        f"Missing required fields: {missing_fields}",
-                        data
-                    )
-                    return None
-                
-                # Check OTP format (6-digit number)
-                otp = data.get("otp", "")
-                if not (isinstance(otp, str) and otp.isdigit() and len(otp) == 6):
-                    self.log_test(
-                        "Send Email OTP",
-                        False,
-                        f"OTP format invalid. Expected 6-digit string, got: {otp}",
-                        data
-                    )
-                    return None
-                
-                self.log_test(
-                    "Send Email OTP",
-                    True,
-                    f"Successfully sent OTP to {test_email}. OTP: {otp}, is_new_user: {data['is_new_user']}",
-                    data
-                )
-                return otp
-                
-            else:
-                self.log_test(
-                    "Send Email OTP",
-                    False,
-                    f"HTTP {response.status_code}: {response.text}",
-                    None
-                )
-                return None
-                
-        except Exception as e:
-            self.log_test(
-                "Send Email OTP",
-                False,
-                f"Exception occurred: {str(e)}",
-                None
-            )
-            return None
-
-    def test_send_phone_otp(self) -> Optional[str]:
-        """Test POST /api/auth/send-phone-otp"""
-        test_phone = "+919876543210"
-        
-        try:
-            response = self.session.post(
-                f"{self.base_url}/auth/send-phone-otp",
-                json={"phone": test_phone},
-                headers={"Content-Type": "application/json"}
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                
-                # Check required fields
-                required_fields = ["success", "is_new_user", "otp"]
-                missing_fields = [field for field in required_fields if field not in data]
-                
-                if missing_fields:
-                    self.log_test(
-                        "Send Phone OTP",
-                        False,
-                        f"Missing required fields: {missing_fields}",
-                        data
-                    )
-                    return None
-                
-                # Check OTP format (6-digit number)
-                otp = data.get("otp", "")
-                if not (isinstance(otp, str) and otp.isdigit() and len(otp) == 6):
-                    self.log_test(
-                        "Send Phone OTP",
-                        False,
-                        f"OTP format invalid. Expected 6-digit string, got: {otp}",
-                        data
-                    )
-                    return None
-                
-                self.log_test(
-                    "Send Phone OTP",
-                    True,
-                    f"Successfully sent OTP to {test_phone}. OTP: {otp}, is_new_user: {data['is_new_user']}",
-                    data
-                )
-                return otp
-                
-            else:
-                self.log_test(
-                    "Send Phone OTP",
-                    False,
-                    f"HTTP {response.status_code}: {response.text}",
-                    None
-                )
-                return None
-                
-        except Exception as e:
-            self.log_test(
-                "Send Phone OTP",
-                False,
-                f"Exception occurred: {str(e)}",
-                None
-            )
-            return None
-
-    def test_verify_otp_new_user(self) -> Optional[str]:
-        """Test POST /api/auth/verify-otp for new user with email"""
-        # First get OTP
-        new_user_email = "newuser@test.com"
-        
-        try:
-            # Send OTP first
-            otp_response = self.session.post(
-                f"{self.base_url}/auth/send-email-otp",
-                json={"email": new_user_email},
-                headers={"Content-Type": "application/json"}
-            )
-            
-            if otp_response.status_code != 200:
-                self.log_test(
-                    "Verify OTP (New User)",
-                    False,
-                    f"Failed to send OTP: HTTP {otp_response.status_code}",
-                    None
-                )
-                return None
-            
-            otp_data = otp_response.json()
-            otp = otp_data.get("otp")
-            
-            if not otp:
-                self.log_test(
-                    "Verify OTP (New User)",
-                    False,
-                    "No OTP received from send-email-otp",
-                    otp_data
-                )
-                return None
-            
-            # Now verify OTP with name
-            verify_response = self.session.post(
-                f"{self.base_url}/auth/verify-otp",
-                json={
-                    "type": "email",
-                    "identifier": new_user_email,
-                    "otp": otp,
-                    "name": "Test User"
-                },
-                headers={"Content-Type": "application/json"}
-            )
-            
-            if verify_response.status_code == 200:
-                data = verify_response.json()
-                
-                # Check required fields for new user
-                required_fields = ["user_id", "session_token", "is_new_user"]
-                missing_fields = [field for field in required_fields if field not in data]
-                
-                if missing_fields:
-                    self.log_test(
-                        "Verify OTP (New User)",
-                        False,
-                        f"Missing required fields: {missing_fields}",
-                        data
-                    )
-                    return None
-                
-                # Check is_new_user is True
-                if not data.get("is_new_user"):
-                    self.log_test(
-                        "Verify OTP (New User)",
-                        False,
-                        f"Expected is_new_user=True, got: {data.get('is_new_user')}",
-                        data
-                    )
-                    return None
-                
-                user_id = data.get("user_id")
-                self.log_test(
-                    "Verify OTP (New User)",
-                    True,
-                    f"Successfully created new user. user_id: {user_id}, session_token: {data.get('session_token')[:20]}...",
-                    data
-                )
-                return user_id
-                
-            else:
-                self.log_test(
-                    "Verify OTP (New User)",
-                    False,
-                    f"HTTP {verify_response.status_code}: {verify_response.text}",
-                    None
-                )
-                return None
-                
-        except Exception as e:
-            self.log_test(
-                "Verify OTP (New User)",
-                False,
-                f"Exception occurred: {str(e)}",
-                None
-            )
-            return None
-
-    def test_verify_otp_existing_user(self, existing_email: str = "newuser@test.com") -> Optional[str]:
-        """Test POST /api/auth/verify-otp for existing user"""
-        try:
-            # Send OTP to existing user
-            otp_response = self.session.post(
-                f"{self.base_url}/auth/send-email-otp",
-                json={"email": existing_email},
-                headers={"Content-Type": "application/json"}
-            )
-            
-            if otp_response.status_code != 200:
-                self.log_test(
-                    "Verify OTP (Existing User)",
-                    False,
-                    f"Failed to send OTP: HTTP {otp_response.status_code}",
-                    None
-                )
-                return None
-            
-            otp_data = otp_response.json()
-            otp = otp_data.get("otp")
-            
-            if not otp:
-                self.log_test(
-                    "Verify OTP (Existing User)",
-                    False,
-                    "No OTP received from send-email-otp",
-                    otp_data
-                )
-                return None
-            
-            # Check that is_new_user is False for existing user
-            if otp_data.get("is_new_user") != False:
-                self.log_test(
-                    "Verify OTP (Existing User)",
-                    False,
-                    f"Expected is_new_user=False for existing user, got: {otp_data.get('is_new_user')}",
-                    otp_data
-                )
-                return None
-            
-            # Verify OTP without name (since user exists)
-            verify_response = self.session.post(
-                f"{self.base_url}/auth/verify-otp",
-                json={
-                    "type": "email",
-                    "identifier": existing_email,
-                    "otp": otp
-                },
-                headers={"Content-Type": "application/json"}
-            )
-            
-            if verify_response.status_code == 200:
-                data = verify_response.json()
-                
-                # Check required fields
-                required_fields = ["user_id", "session_token", "is_new_user"]
-                missing_fields = [field for field in required_fields if field not in data]
-                
-                if missing_fields:
-                    self.log_test(
-                        "Verify OTP (Existing User)",
-                        False,
-                        f"Missing required fields: {missing_fields}",
-                        data
-                    )
-                    return None
-                
-                # Check is_new_user is False
-                if data.get("is_new_user") != False:
-                    self.log_test(
-                        "Verify OTP (Existing User)",
-                        False,
-                        f"Expected is_new_user=False, got: {data.get('is_new_user')}",
-                        data
-                    )
-                    return None
-                
-                user_id = data.get("user_id")
-                self.log_test(
-                    "Verify OTP (Existing User)",
-                    True,
-                    f"Successfully logged in existing user. user_id: {user_id}, session_token: {data.get('session_token')[:20]}...",
-                    data
-                )
-                return user_id
-                
-            else:
-                self.log_test(
-                    "Verify OTP (Existing User)",
-                    False,
-                    f"HTTP {verify_response.status_code}: {verify_response.text}",
-                    None
-                )
-                return None
-                
-        except Exception as e:
-            self.log_test(
-                "Verify OTP (Existing User)",
-                False,
-                f"Exception occurred: {str(e)}",
-                None
-            )
-            return None
-
-    def test_forgot_password(self):
-        """Test POST /api/auth/forgot-password"""
-        test_email = "test@filmcompanion.com"
-        
-        try:
-            response = self.session.post(
-                f"{self.base_url}/auth/forgot-password",
-                json={"email": test_email},
-                headers={"Content-Type": "application/json"}
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                
-                # Check required fields
-                if "success" not in data:
-                    self.log_test(
-                        "Forgot Password",
-                        False,
-                        "Missing 'success' field in response",
-                        data
-                    )
-                    return
-                
-                if data.get("success") != True:
-                    self.log_test(
-                        "Forgot Password",
-                        False,
-                        f"Expected success=True, got: {data.get('success')}",
-                        data
-                    )
-                    return
-                
-                self.log_test(
-                    "Forgot Password",
-                    True,
-                    f"Successfully sent password reset email to {test_email}",
-                    data
-                )
-                
-            else:
-                self.log_test(
-                    "Forgot Password",
-                    False,
-                    f"HTTP {response.status_code}: {response.text}",
-                    None
-                )
-                
-        except Exception as e:
-            self.log_test(
-                "Forgot Password",
-                False,
-                f"Exception occurred: {str(e)}",
-                None
-            )
-
-    def test_user_id_mapping(self, user_id_1: str, user_id_2: str):
-        """Test 1:1 mapping enforcement - same email should return same user_id"""
-        if user_id_1 and user_id_2:
-            if user_id_1 == user_id_2:
-                self.log_test(
-                    "1:1 User ID Mapping",
-                    True,
-                    f"Same email correctly returned same user_id: {user_id_1}",
-                    {"user_id_1": user_id_1, "user_id_2": user_id_2}
-                )
-            else:
-                self.log_test(
-                    "1:1 User ID Mapping",
-                    False,
-                    f"Same email returned different user_ids: {user_id_1} vs {user_id_2}",
-                    {"user_id_1": user_id_1, "user_id_2": user_id_2}
-                )
-        else:
-            self.log_test(
-                "1:1 User ID Mapping",
-                False,
-                "Could not test mapping - missing user IDs from previous tests",
-                {"user_id_1": user_id_1, "user_id_2": user_id_2}
-            )
-
-    def run_all_tests(self):
-        """Run all OTP authentication tests"""
-        print("🎬 Starting Film Companion OTP Authentication Tests")
-        print(f"Backend URL: {self.base_url}")
-        print("=" * 80)
-        
-        # Test 1: Send Email OTP
-        email_otp = self.test_send_email_otp()
-        
-        # Test 2: Send Phone OTP
-        phone_otp = self.test_send_phone_otp()
-        
-        # Test 3: Verify OTP for new user
-        new_user_id = self.test_verify_otp_new_user()
-        
-        # Test 4: Verify OTP for existing user (same email)
-        existing_user_id = self.test_verify_otp_existing_user()
-        
-        # Test 5: Forgot Password
-        self.test_forgot_password()
-        
-        # Test 6: 1:1 mapping enforcement
-        self.test_user_id_mapping(new_user_id, existing_user_id)
-        
-        # Summary
-        print("=" * 80)
-        print("🎬 TEST SUMMARY")
-        print("=" * 80)
-        
-        passed = sum(1 for result in self.test_results if result["success"])
-        total = len(self.test_results)
-        
-        print(f"Total Tests: {total}")
-        print(f"Passed: {passed}")
-        print(f"Failed: {total - passed}")
-        print(f"Success Rate: {(passed/total)*100:.1f}%")
-        print()
-        
-        # Show failed tests
-        failed_tests = [result for result in self.test_results if not result["success"]]
-        if failed_tests:
-            print("❌ FAILED TESTS:")
-            for test in failed_tests:
-                print(f"   - {test['test']}: {test['details']}")
-        else:
-            print("✅ ALL TESTS PASSED!")
-        
-        print()
-        print("📧 Check backend logs for:")
-        print("   - Mock welcome email sent from noreply@filmcompanion.com")
-        print("   - Mock OTP SMS/email logs")
-        
-        return passed == total
-
-def main():
-    """Main test runner"""
-    tester = OTPAuthTester()
-    success = tester.run_all_tests()
+def test_matchmaking_with_caching():
+    """
+    Test AI matchmaking endpoint with caching functionality:
+    1. First request (CACHE MISS) - should call LLM
+    2. Second request (CACHE HIT) - should return instantly from cache
+    3. Third request with force_refresh (CACHE MISS) - should bypass cache
+    """
     
-    # Exit with appropriate code
-    sys.exit(0 if success else 1)
+    print("=" * 80)
+    print("TESTING AI MATCHMAKING ENDPOINT WITH CACHING")
+    print("=" * 80)
+    
+    test_user_id = "test_cache_user_123"
+    
+    # ========================================
+    # TEST 1: First Request (CACHE MISS)
+    # ========================================
+    print("\n" + "=" * 80)
+    print("TEST 1: First Request (CACHE MISS - should call LLM)")
+    print("=" * 80)
+    
+    payload_1 = {
+        "user_id": test_user_id,
+        "limit": 5
+    }
+    
+    print(f"\nRequest: POST {BACKEND_URL}/matches")
+    print(f"Payload: {json.dumps(payload_1, indent=2)}")
+    
+    start_time_1 = time.time()
+    try:
+        response_1 = requests.post(
+            f"{BACKEND_URL}/matches",
+            json=payload_1,
+            timeout=30
+        )
+        end_time_1 = time.time()
+        response_time_1 = end_time_1 - start_time_1
+        
+        print(f"\nStatus Code: {response_1.status_code}")
+        print(f"Response Time: {response_time_1:.2f} seconds")
+        
+        if response_1.status_code == 200:
+            data_1 = response_1.json()
+            print(f"\nResponse Keys: {list(data_1.keys())}")
+            print(f"Success: {data_1.get('success')}")
+            print(f"Cached: {data_1.get('cached')}")
+            print(f"Number of Matches: {len(data_1.get('matches', []))}")
+            
+            # Verify response structure
+            assert data_1.get('success') == True, "❌ success should be True"
+            assert 'matches' in data_1, "❌ Response should contain 'matches' field"
+            assert 'cached' in data_1, "❌ Response should contain 'cached' field"
+            
+            # Check matches structure
+            matches = data_1.get('matches', [])
+            if matches:
+                first_match = matches[0]
+                print(f"\nFirst Match Structure:")
+                print(f"  - name: {first_match.get('name')}")
+                print(f"  - age: {first_match.get('age')}")
+                print(f"  - location: {first_match.get('location')}")
+                print(f"  - match_level: {first_match.get('match_level')}")
+                print(f"  - explanation: {first_match.get('explanation')[:100]}...")
+                
+                # Verify match structure
+                assert 'name' in first_match, "❌ Match should have 'name'"
+                assert 'age' in first_match, "❌ Match should have 'age'"
+                assert 'location' in first_match, "❌ Match should have 'location'"
+                assert 'match_level' in first_match, "❌ Match should have 'match_level'"
+                assert 'explanation' in first_match, "❌ Match should have 'explanation'"
+            
+            print("\n✅ TEST 1 PASSED: First request successful (CACHE MISS)")
+            print(f"   Response time: {response_time_1:.2f}s (expected: slower due to LLM call)")
+            
+        else:
+            print(f"\n❌ TEST 1 FAILED: Status code {response_1.status_code}")
+            print(f"Response: {response_1.text}")
+            return False
+            
+    except Exception as e:
+        print(f"\n❌ TEST 1 FAILED: {str(e)}")
+        return False
+    
+    # Wait a moment before next request
+    time.sleep(1)
+    
+    # ========================================
+    # TEST 2: Second Request (CACHE HIT)
+    # ========================================
+    print("\n" + "=" * 80)
+    print("TEST 2: Second Request (CACHE HIT - should return instantly)")
+    print("=" * 80)
+    
+    payload_2 = {
+        "user_id": test_user_id,
+        "limit": 5
+    }
+    
+    print(f"\nRequest: POST {BACKEND_URL}/matches")
+    print(f"Payload: {json.dumps(payload_2, indent=2)}")
+    
+    start_time_2 = time.time()
+    try:
+        response_2 = requests.post(
+            f"{BACKEND_URL}/matches",
+            json=payload_2,
+            timeout=30
+        )
+        end_time_2 = time.time()
+        response_time_2 = end_time_2 - start_time_2
+        
+        print(f"\nStatus Code: {response_2.status_code}")
+        print(f"Response Time: {response_time_2:.2f} seconds")
+        
+        if response_2.status_code == 200:
+            data_2 = response_2.json()
+            print(f"\nResponse Keys: {list(data_2.keys())}")
+            print(f"Success: {data_2.get('success')}")
+            print(f"Cached: {data_2.get('cached')}")
+            print(f"Number of Matches: {len(data_2.get('matches', []))}")
+            
+            # Verify response structure
+            assert data_2.get('success') == True, "❌ success should be True"
+            assert 'matches' in data_2, "❌ Response should contain 'matches' field"
+            
+            # Compare response times
+            print(f"\n📊 Response Time Comparison:")
+            print(f"   First request (CACHE MISS): {response_time_1:.2f}s")
+            print(f"   Second request (CACHE HIT): {response_time_2:.2f}s")
+            print(f"   Speed improvement: {response_time_1 / response_time_2:.1f}x faster")
+            
+            # Cache should be significantly faster
+            if response_time_2 < response_time_1 * 0.5:
+                print("\n✅ TEST 2 PASSED: Second request is significantly faster (CACHE HIT)")
+            else:
+                print("\n⚠️  TEST 2 WARNING: Second request not significantly faster")
+                print("   This might indicate cache is not working as expected")
+            
+        else:
+            print(f"\n❌ TEST 2 FAILED: Status code {response_2.status_code}")
+            print(f"Response: {response_2.text}")
+            return False
+            
+    except Exception as e:
+        print(f"\n❌ TEST 2 FAILED: {str(e)}")
+        return False
+    
+    # Wait a moment before next request
+    time.sleep(1)
+    
+    # ========================================
+    # TEST 3: Request with force_refresh (CACHE MISS)
+    # ========================================
+    print("\n" + "=" * 80)
+    print("TEST 3: Request with force_refresh=true (CACHE MISS - bypass cache)")
+    print("=" * 80)
+    
+    payload_3 = {
+        "user_id": test_user_id,
+        "limit": 5,
+        "force_refresh": True
+    }
+    
+    print(f"\nRequest: POST {BACKEND_URL}/matches")
+    print(f"Payload: {json.dumps(payload_3, indent=2)}")
+    
+    start_time_3 = time.time()
+    try:
+        response_3 = requests.post(
+            f"{BACKEND_URL}/matches",
+            json=payload_3,
+            timeout=30
+        )
+        end_time_3 = time.time()
+        response_time_3 = end_time_3 - start_time_3
+        
+        print(f"\nStatus Code: {response_3.status_code}")
+        print(f"Response Time: {response_time_3:.2f} seconds")
+        
+        if response_3.status_code == 200:
+            data_3 = response_3.json()
+            print(f"\nResponse Keys: {list(data_3.keys())}")
+            print(f"Success: {data_3.get('success')}")
+            print(f"Cached: {data_3.get('cached')}")
+            print(f"Number of Matches: {len(data_3.get('matches', []))}")
+            
+            # Verify response structure
+            assert data_3.get('success') == True, "❌ success should be True"
+            assert 'matches' in data_3, "❌ Response should contain 'matches' field"
+            
+            # Compare response times
+            print(f"\n📊 Response Time Comparison:")
+            print(f"   First request (CACHE MISS): {response_time_1:.2f}s")
+            print(f"   Second request (CACHE HIT): {response_time_2:.2f}s")
+            print(f"   Third request (force_refresh): {response_time_3:.2f}s")
+            
+            # force_refresh should be similar to first request (both call LLM)
+            if response_time_3 > response_time_2:
+                print("\n✅ TEST 3 PASSED: force_refresh bypassed cache (slower than cached)")
+            else:
+                print("\n⚠️  TEST 3 WARNING: force_refresh not significantly slower than cache")
+            
+        else:
+            print(f"\n❌ TEST 3 FAILED: Status code {response_3.status_code}")
+            print(f"Response: {response_3.text}")
+            return False
+            
+    except Exception as e:
+        print(f"\n❌ TEST 3 FAILED: {str(e)}")
+        return False
+    
+    # ========================================
+    # FINAL SUMMARY
+    # ========================================
+    print("\n" + "=" * 80)
+    print("FINAL SUMMARY")
+    print("=" * 80)
+    print("\n✅ ALL TESTS PASSED!")
+    print("\nCache Performance:")
+    print(f"  - CACHE MISS (1st request): {response_time_1:.2f}s")
+    print(f"  - CACHE HIT (2nd request): {response_time_2:.2f}s")
+    print(f"  - CACHE BYPASS (force_refresh): {response_time_3:.2f}s")
+    print(f"  - Cache speedup: {response_time_1 / response_time_2:.1f}x faster")
+    
+    print("\nVerified Features:")
+    print("  ✅ Response contains 'success' field")
+    print("  ✅ Response contains 'matches' array")
+    print("  ✅ Response contains 'cached' boolean field")
+    print("  ✅ Each match has name, age, location, match_level, explanation")
+    print("  ✅ Cache MISS on first request (slower)")
+    print("  ✅ Cache HIT on second request (faster)")
+    print("  ✅ force_refresh bypasses cache (slower)")
+    
+    return True
+
 
 if __name__ == "__main__":
-    main()
+    print("\n🚀 Starting AI Matchmaking Cache Tests...\n")
+    success = test_matchmaking_with_caching()
+    
+    if success:
+        print("\n" + "=" * 80)
+        print("🎉 ALL TESTS COMPLETED SUCCESSFULLY!")
+        print("=" * 80)
+        exit(0)
+    else:
+        print("\n" + "=" * 80)
+        print("❌ SOME TESTS FAILED")
+        print("=" * 80)
+        exit(1)

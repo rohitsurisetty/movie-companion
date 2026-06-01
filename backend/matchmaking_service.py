@@ -5,6 +5,7 @@ This module implements an LLM-powered matchmaking algorithm that:
 1. Filters candidates based on user preferences (hard filters)
 2. Uses AI to score compatibility based on movie taste and profile similarity
 3. Generates human-readable match explanations
+4. Caches results in MongoDB for improved performance
 """
 
 import os
@@ -24,6 +25,9 @@ except ImportError:
     print("Warning: emergentintegrations not installed. Run: pip install emergentintegrations --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/")
 
 EMERGENT_LLM_KEY = os.getenv("EMERGENT_LLM_KEY")
+
+# Cache expiry time (1 hour)
+CACHE_EXPIRY_HOURS = 1
 
 
 # ============== MOCK USER DATA ==============
@@ -746,6 +750,121 @@ def get_mock_user_by_id(user_id: str) -> Optional[Dict]:
     return None
 
 
+# ============== CACHE SERVICE ==============
+# MongoDB connection will be passed from server.py
+
+_db = None
+
+def set_db(db_instance):
+    """Set the MongoDB database instance for caching"""
+    global _db
+    _db = db_instance
+
+
+async def get_cached_matches(user_id: str) -> Optional[Dict]:
+    """
+    Get cached matches for a user if they exist and are not expired.
+    
+    Returns:
+        Dict with matches data if cache hit and not expired, None otherwise
+    """
+    if _db is None:
+        return None
+    
+    try:
+        cache_entry = await _db.match_cache.find_one({"user_id": user_id})
+        
+        if cache_entry:
+            cached_at = cache_entry.get("cached_at")
+            if cached_at:
+                # Check if cache is still valid (less than 1 hour old)
+                expiry_time = cached_at + timedelta(hours=CACHE_EXPIRY_HOURS)
+                if datetime.utcnow() < expiry_time:
+                    print(f"Cache HIT for user {user_id} - returning cached matches")
+                    return cache_entry
+                else:
+                    print(f"Cache EXPIRED for user {user_id}")
+            else:
+                print(f"Cache entry has no timestamp for user {user_id}")
+        else:
+            print(f"Cache MISS for user {user_id}")
+        
+        return None
+    except Exception as e:
+        print(f"Cache read error: {e}")
+        return None
+
+
+async def save_matches_to_cache(user_id: str, matches: List[Dict], profile_hash: str) -> bool:
+    """
+    Save matches to cache with timestamp.
+    
+    Args:
+        user_id: The user's ID
+        matches: List of matched profiles
+        profile_hash: Hash of user profile to invalidate cache on profile change
+    
+    Returns:
+        True if saved successfully, False otherwise
+    """
+    if _db is None:
+        return False
+    
+    try:
+        cache_entry = {
+            "user_id": user_id,
+            "matches": matches,
+            "profile_hash": profile_hash,
+            "cached_at": datetime.utcnow(),
+            "match_count": len(matches)
+        }
+        
+        # Upsert - update if exists, insert if not
+        await _db.match_cache.update_one(
+            {"user_id": user_id},
+            {"$set": cache_entry},
+            upsert=True
+        )
+        
+        print(f"Cache SAVED for user {user_id} with {len(matches)} matches")
+        return True
+    except Exception as e:
+        print(f"Cache write error: {e}")
+        return False
+
+
+async def invalidate_user_cache(user_id: str) -> bool:
+    """
+    Invalidate (delete) cached matches for a user.
+    Call this when user updates their profile or preferences.
+    """
+    if _db is None:
+        return False
+    
+    try:
+        result = await _db.match_cache.delete_one({"user_id": user_id})
+        print(f"Cache INVALIDATED for user {user_id}, deleted: {result.deleted_count}")
+        return result.deleted_count > 0
+    except Exception as e:
+        print(f"Cache invalidation error: {e}")
+        return False
+
+
+def generate_profile_hash(profile: Dict) -> str:
+    """
+    Generate a simple hash of profile to detect changes.
+    If profile changes significantly, we should regenerate matches.
+    """
+    key_fields = [
+        str(profile.get("partnerPreference", "")),
+        str(profile.get("genres", [])),
+        str(profile.get("filmLanguages", [])),
+        str(profile.get("relationshipIntent", [])),
+        str(profile.get("topMovies", []))
+    ]
+    return str(hash("".join(key_fields)))
+
+
 # ============== FILTERING SERVICE ==============
 
 def apply_hard_filters(
@@ -1031,16 +1150,23 @@ async def get_matches_for_user(
     user_id: str,
     user_profile: Optional[Dict] = None,
     filters: Optional[Dict] = None,
-    use_mock_data: bool = True
+    use_mock_data: bool = True,
+    force_refresh: bool = False
 ) -> List[Dict]:
     """
     Main function to get matches for a user.
     
-    1. Gets user profile (or uses mock)
-    2. Gets candidate pool (mock users for now)
-    3. Applies hard filters
-    4. Runs AI compatibility scoring
-    5. Returns ranked matches
+    1. Checks cache first (unless force_refresh is True)
+    2. If cache miss/expired: Gets user profile, applies filters, runs AI scoring
+    3. Caches results before returning
+    4. Returns ranked matches
+    
+    Args:
+        user_id: User ID to get matches for
+        user_profile: Optional user profile dict
+        filters: Optional filter dict with age_min, age_max etc.
+        use_mock_data: Whether to use mock users
+        force_refresh: If True, bypass cache and regenerate matches
     """
     # Get current user profile
     if user_profile is None and use_mock_data:
@@ -1069,6 +1195,20 @@ async def get_matches_for_user(
             }
         }
     
+    # Generate profile hash for cache validation
+    profile_hash = generate_profile_hash(user_profile) if user_profile else ""
+    
+    # Step 0: Check cache (unless force refresh requested)
+    if not force_refresh:
+        cached = await get_cached_matches(user_id)
+        if cached:
+            # Verify profile hasn't changed significantly
+            cached_hash = cached.get("profile_hash", "")
+            if cached_hash == profile_hash or cached_hash == "":
+                return cached.get("matches", [])
+            else:
+                print(f"Profile changed for user {user_id}, regenerating matches")
+    
     # Get candidate pool
     if use_mock_data:
         candidates = get_all_mock_users()
@@ -1090,5 +1230,8 @@ async def get_matches_for_user(
     
     # Step 2: Get AI compatibility scores
     matches = await get_ai_compatibility_scores(user_profile, filtered_candidates, top_n=15)
+    
+    # Step 3: Save to cache
+    await save_matches_to_cache(user_id, matches, profile_hash)
     
     return matches

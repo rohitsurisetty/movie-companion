@@ -31,7 +31,9 @@ from matchmaking_service import (
     get_matches_for_user,
     get_all_mock_users,
     get_mock_user_by_id,
-    apply_hard_filters
+    apply_hard_filters,
+    set_db as set_matchmaking_db,
+    invalidate_user_cache
 )
 
 # Import picture service for profile photos
@@ -2194,6 +2196,7 @@ class MatchRequest(BaseModel):
     user_id: str
     filters: Optional[Dict] = None
     limit: int = 15
+    force_refresh: bool = False  # If True, bypass cache and regenerate matches
 
 
 @api_router.post("/matches")
@@ -2253,20 +2256,22 @@ async def get_matches(req: MatchRequest):
             }
         }
         
-        # Get matches using AI
+        # Get matches using AI (with caching)
         matches = await get_matches_for_user(
             user_id=req.user_id,
             user_profile=profile_for_matching,
             filters=req.filters,
-            use_mock_data=True  # Using mock users for now
+            use_mock_data=True,  # Using mock users for now
+            force_refresh=req.force_refresh  # Pass cache bypass option
         )
         
-        logger.info(f"Found {len(matches)} matches for user {req.user_id}")
+        logger.info(f"Found {len(matches)} matches for user {req.user_id} (force_refresh={req.force_refresh})")
         
         return {
             "success": True,
             "matches": matches[:req.limit],
-            "total_candidates": len(matches)
+            "total_candidates": len(matches),
+            "cached": not req.force_refresh  # Indicate if results may be cached
         }
         
     except Exception as e:
@@ -2538,6 +2543,10 @@ async def startup_event():
     # Pass MongoDB db to picture service
     set_mongodb_db(db)
     logger.info("Picture service connected to MongoDB")
+    
+    # Pass MongoDB db to matchmaking service for caching
+    set_matchmaking_db(db)
+    logger.info("Matchmaking service cache connected to MongoDB")
 
 
 @app.on_event("shutdown")
