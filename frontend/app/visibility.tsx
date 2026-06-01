@@ -58,7 +58,8 @@ export default function VisibilityScreen() {
     try {
       await AsyncStorage.setItem(VISIBILITY_KEY, JSON.stringify(settings));
       setHasChanges(false);
-      router.back();
+      // Navigate back to profile tab
+      router.replace('/(tabs)/profile');
     } catch (e) {
       console.error('Failed to save visibility settings:', e);
     }
@@ -101,7 +102,7 @@ export default function VisibilityScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity onPress={() => router.replace('/(tabs)/profile')} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={24} color={COLORS.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Profile Visibility</Text>

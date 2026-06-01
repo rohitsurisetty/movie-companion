@@ -856,7 +856,12 @@ export default function FiltersScreen() {
 
   const handleStart = async () => {
     await saveFilters(filters);
-    router.replace('/swipe');
+    // If coming from profile settings, navigate to profile tab; otherwise go to discover tab
+    if (fromProfile) {
+      router.replace('/(tabs)/profile');
+    } else {
+      router.replace('/(tabs)/discover');
+    }
   };
 
   const handleScroll = (event: any) => {

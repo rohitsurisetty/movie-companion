@@ -785,7 +785,7 @@ export default function ProfileScreen() {
 
           <TouchableOpacity 
             style={styles.settingsRow}
-            onPress={() => router.push('/filters')}
+            onPress={() => router.push('/filters?from=profile')}
           >
             <View style={styles.settingsIcon}>
               <Ionicons name="options-outline" size={22} color={COLORS.primary} />
