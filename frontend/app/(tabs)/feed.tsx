@@ -342,12 +342,39 @@ export default function FeedScreen() {
         const pics = data.pictures || {};
         const photoArray = [pics.picture_1, pics.picture_2, pics.picture_3, pics.picture_4, pics.picture_5]
           .filter(Boolean);
-        setSelectedProfilePhotos(photoArray);
+        
+        // If no photos, add random test images for demo purposes
+        if (photoArray.length === 0) {
+          const randomSeed = profile.user_id.charCodeAt(profile.user_id.length - 1);
+          const testPhotos = [
+            `https://picsum.photos/seed/${randomSeed}/400/600`,
+            `https://picsum.photos/seed/${randomSeed + 1}/400/600`,
+            `https://picsum.photos/seed/${randomSeed + 2}/400/600`,
+            `https://picsum.photos/seed/${randomSeed + 3}/400/600`,
+          ];
+          setSelectedProfilePhotos(testPhotos);
+        } else {
+          setSelectedProfilePhotos(photoArray);
+        }
       } else {
-        setSelectedProfilePhotos([]);
+        // Use random test images as fallback
+        const randomSeed = profile.user_id.charCodeAt(profile.user_id.length - 1);
+        const testPhotos = [
+          `https://picsum.photos/seed/${randomSeed}/400/600`,
+          `https://picsum.photos/seed/${randomSeed + 1}/400/600`,
+          `https://picsum.photos/seed/${randomSeed + 2}/400/600`,
+        ];
+        setSelectedProfilePhotos(testPhotos);
       }
     } catch (error) {
-      setSelectedProfilePhotos([]);
+      // Use random test images on error
+      const randomSeed = Math.floor(Math.random() * 100);
+      const testPhotos = [
+        `https://picsum.photos/seed/${randomSeed}/400/600`,
+        `https://picsum.photos/seed/${randomSeed + 1}/400/600`,
+        `https://picsum.photos/seed/${randomSeed + 2}/400/600`,
+      ];
+      setSelectedProfilePhotos(testPhotos);
     }
     
     bottomSheetRef.current?.expand();
@@ -458,6 +485,15 @@ export default function FeedScreen() {
         >
           {selectedProfile && (
             <BottomSheetScrollView style={styles.sheetContent} showsVerticalScrollIndicator={false}>
+              {/* Back Button Header */}
+              <View style={styles.sheetHeader}>
+                <TouchableOpacity style={styles.backButton} onPress={closeProfile}>
+                  <Ionicons name="chevron-down" size={28} color={COLORS.text} />
+                </TouchableOpacity>
+                <Text style={styles.sheetHeaderTitle}>Profile</Text>
+                <View style={styles.backButtonPlaceholder} />
+              </View>
+
               {/* Photo Carousel */}
               <ExpandedPhotoCarousel
                 photos={selectedProfilePhotos}
@@ -489,10 +525,9 @@ export default function FeedScreen() {
                   </View>
                 </View>
 
-                {/* Match Badge */}
+                {/* Match Badge - without percentage */}
                 <View style={styles.matchSection}>
                   <MatchBadge level={selectedProfile.match_level} score={selectedProfile.compatibility_score} />
-                  <Text style={styles.matchScore}>{selectedProfile.compatibility_score}% Match</Text>
                 </View>
 
                 {/* Bio */}
@@ -756,6 +791,33 @@ const styles = StyleSheet.create({
   sheetContent: {
     flex: 1,
   },
+  
+  // Sheet Header with Back Button
+  sheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  backButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  sheetHeaderTitle: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: COLORS.text,
+  },
+  backButtonPlaceholder: {
+    width: 44,
+  },
 
   // Expanded Photo Carousel
   expandedPhotoContainer: {
@@ -836,12 +898,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 20,
-    gap: 12,
-  },
-  matchScore: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.success,
   },
 
   // Sections
