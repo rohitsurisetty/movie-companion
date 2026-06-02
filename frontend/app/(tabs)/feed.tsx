@@ -1,17 +1,20 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Image, ScrollView,
-  Dimensions, ActivityIndicator, RefreshControl, Animated, PanResponder,
-  TextInput, KeyboardAvoidingView, Platform, Modal, FlatList,
+  Dimensions, ActivityIndicator, RefreshControl, FlatList, Pressable,
 } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAppMode } from '../../src/components/SharedHeader';
 import { getUserId } from '../../src/store';
+import BottomSheet, { BottomSheetScrollView, BottomSheetBackdrop } from '@gorhom/bottom-sheet';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
-const CARD_HEIGHT = SCREEN_HEIGHT * 0.72;
+const TILE_GAP = 12;
+const TILE_WIDTH = (SCREEN_WIDTH - 32 - TILE_GAP) / 2; // 16 padding on each side + gap between
+const TILE_HEIGHT = TILE_WIDTH * 1.35; // Aspect ratio for profile tiles
 const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 const COLORS = {
@@ -21,6 +24,7 @@ const COLORS = {
   buddy: '#2196F3',
   bg: '#0A0A0A',
   bgCard: '#1A1A1A',
+  bgSheet: '#1C1C1E',
   text: '#FFFFFF',
   textSecondary: '#B0B0B0',
   textMuted: '#666666',
@@ -70,51 +74,149 @@ interface MatchProfile {
   };
 }
 
-// Photo Carousel Component
-const PhotoCarousel = ({ 
+// ============ MATCH BADGE COMPONENT ============
+const MatchBadge = ({ level, score }: { level: string; score: number }) => {
+  const getBadgeStyle = () => {
+    switch (level.toLowerCase()) {
+      case 'perfect match':
+        return { bg: ['#FFD700', '#FFA500'], icon: 'star', text: 'Perfect' };
+      case 'great match':
+        return { bg: ['#00D26A', '#00A854'], icon: 'heart', text: 'Great' };
+      case 'good match':
+        return { bg: ['#2196F3', '#1976D2'], icon: 'thumbs-up', text: 'Good' };
+      default:
+        return { bg: ['#9C27B0', '#7B1FA2'], icon: 'sparkles', text: 'Potential' };
+    }
+  };
+
+  const style = getBadgeStyle();
+
+  return (
+    <LinearGradient colors={style.bg as any} style={styles.matchBadge} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
+      <Ionicons name={style.icon as any} size={10} color="#FFF" />
+      <Text style={styles.matchBadgeText}>{style.text}</Text>
+    </LinearGradient>
+  );
+};
+
+// ============ PROFILE TILE COMPONENT ============
+const ProfileTile = ({ 
+  profile, 
+  onPress, 
+  index,
+  mode 
+}: { 
+  profile: MatchProfile; 
+  onPress: () => void;
+  index: number;
+  mode: string;
+}) => {
+  const [profilePicture, setProfilePicture] = useState<string | null>(null);
+  const avatarColor = AVATAR_COLORS[index % AVATAR_COLORS.length];
+
+  // Fetch profile picture
+  useEffect(() => {
+    const fetchPicture = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/user/pictures/${profile.user_id}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.pictures?.picture_1) {
+            setProfilePicture(data.pictures.picture_1);
+          }
+        }
+      } catch (error) {
+        console.log('Error fetching picture:', error);
+      }
+    };
+    fetchPicture();
+  }, [profile.user_id]);
+
+  return (
+    <TouchableOpacity 
+      style={styles.tile} 
+      onPress={onPress}
+      activeOpacity={0.9}
+    >
+      {/* Photo/Avatar */}
+      <View style={styles.tilePhotoContainer}>
+        {profilePicture ? (
+          <Image source={{ uri: profilePicture }} style={styles.tilePhoto} />
+        ) : (
+          <LinearGradient
+            colors={[avatarColor, `${avatarColor}99`]}
+            style={styles.tileAvatar}
+          >
+            <Text style={styles.tileAvatarText}>
+              {profile.name.charAt(0).toUpperCase()}
+            </Text>
+          </LinearGradient>
+        )}
+        
+        {/* Gradient overlay */}
+        <LinearGradient
+          colors={['transparent', 'rgba(0,0,0,0.8)']}
+          style={styles.tileGradient}
+        />
+        
+        {/* Match Badge */}
+        <View style={styles.tileBadgeContainer}>
+          <MatchBadge level={profile.match_level} score={profile.compatibility_score} />
+        </View>
+        
+        {/* Name & Age overlay */}
+        <View style={styles.tileInfo}>
+          <Text style={styles.tileName} numberOfLines={1}>
+            {profile.name}, {profile.age}
+          </Text>
+          <View style={styles.tileLocationRow}>
+            <Ionicons name="location" size={10} color={COLORS.textSecondary} />
+            <Text style={styles.tileLocation} numberOfLines={1}>{profile.location}</Text>
+          </View>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+};
+
+// ============ PHOTO CAROUSEL FOR BOTTOM SHEET ============
+const ExpandedPhotoCarousel = ({ 
   photos, 
   name, 
-  avatarColor,
-  onPhotoChange 
+  avatarColor 
 }: { 
   photos: string[]; 
-  name: string;
+  name: string; 
   avatarColor: string;
-  onPhotoChange?: (index: number) => void;
 }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollViewRef = useRef<ScrollView>(null);
+  const PHOTO_HEIGHT = SCREEN_HEIGHT * 0.4;
 
   const handleScroll = (event: any) => {
-    const x = event.nativeEvent.contentOffset.x;
-    const index = Math.round(x / SCREEN_WIDTH);
-    if (index !== currentIndex) {
-      setCurrentIndex(index);
-      onPhotoChange?.(index);
-    }
+    const offsetX = event.nativeEvent.contentOffset.x;
+    const index = Math.round(offsetX / SCREEN_WIDTH);
+    setCurrentIndex(index);
   };
 
   // If no photos, show avatar placeholder
   if (photos.length === 0) {
     return (
-      <View style={styles.photoContainer}>
-        <View style={[styles.avatarPlaceholder, { backgroundColor: avatarColor }]}>
-          <Ionicons name="person" size={120} color="rgba(255,255,255,0.8)" />
-          <Text style={styles.avatarName}>{name?.charAt(0) || '?'}</Text>
-        </View>
-        {/* Gradient overlay */}
+      <View style={[styles.expandedPhotoContainer, { height: PHOTO_HEIGHT }]}>
         <LinearGradient
-          colors={['transparent', 'rgba(0,0,0,0.3)', 'rgba(0,0,0,0.9)']}
-          style={styles.photoGradient}
-        />
+          colors={[avatarColor, `${avatarColor}88`]}
+          style={styles.expandedAvatarPlaceholder}
+        >
+          <Text style={styles.expandedAvatarText}>{name.charAt(0).toUpperCase()}</Text>
+        </LinearGradient>
       </View>
     );
   }
 
   return (
-    <View style={styles.photoContainer}>
+    <View style={[styles.expandedPhotoContainer, { height: PHOTO_HEIGHT }]}>
       <ScrollView
-        ref={scrollRef}
+        ref={scrollViewRef}
         horizontal
         pagingEnabled
         showsHorizontalScrollIndicator={false}
@@ -125,7 +227,7 @@ const PhotoCarousel = ({
           <Image
             key={index}
             source={{ uri: photo }}
-            style={styles.photo}
+            style={[styles.expandedPhoto, { width: SCREEN_WIDTH, height: PHOTO_HEIGHT }]}
             resizeMode="cover"
           />
         ))}
@@ -139,243 +241,17 @@ const PhotoCarousel = ({
               key={index}
               style={[
                 styles.photoIndicator,
-                currentIndex === index && styles.photoIndicatorActive
+                currentIndex === index && styles.photoIndicatorActive,
               ]}
             />
           ))}
         </View>
       )}
-      
-      {/* Gradient overlay */}
-      <LinearGradient
-        colors={['transparent', 'rgba(0,0,0,0.2)', 'rgba(0,0,0,0.95)']}
-        style={styles.photoGradient}
-      />
     </View>
   );
 };
 
-// Match Badge Component
-const MatchBadge = ({ level, score }: { level: string; score: number }) => {
-  const getStyle = () => {
-    switch (level) {
-      case 'Perfect Match':
-        return { bg: COLORS.primary, icon: 'flame' as const, text: 'Perfect Match' };
-      case 'Great Match':
-        return { bg: COLORS.success, icon: 'star' as const, text: 'Great Match' };
-      case 'Good Match':
-        return { bg: COLORS.buddy, icon: 'heart' as const, text: 'Good Match' };
-      default:
-        return { bg: COLORS.gold, icon: 'sparkles' as const, text: 'Potential' };
-    }
-  };
-  const style = getStyle();
-
-  return (
-    <View style={[styles.matchBadge, { backgroundColor: style.bg }]}>
-      <Ionicons name={style.icon} size={14} color="white" />
-      <Text style={styles.matchBadgeText}>{style.text}</Text>
-    </View>
-  );
-};
-
-// Profile Card Component - Full Dating App Style
-const ProfileCard = ({ 
-  profile, 
-  onMessage,
-  isExpanded,
-  onToggleExpand,
-}: { 
-  profile: MatchProfile;
-  onMessage: () => void;
-  isExpanded: boolean;
-  onToggleExpand: () => void;
-}) => {
-  const avatarColorIndex = profile.name?.charCodeAt(0) % AVATAR_COLORS.length || 0;
-  const avatarColor = AVATAR_COLORS[avatarColorIndex];
-  
-  // Get photos array
-  const photos: string[] = [];
-  if (profile.pictures) {
-    for (let i = 1; i <= 5; i++) {
-      const pic = profile.pictures[`picture_${i}` as keyof typeof profile.pictures];
-      if (pic) photos.push(pic);
-    }
-  }
-
-  return (
-    <View style={styles.cardContainer}>
-      {/* Photo Section with overlay */}
-      <View style={styles.photoSection}>
-        <PhotoCarousel 
-          photos={photos} 
-          name={profile.name}
-          avatarColor={avatarColor}
-        />
-        
-        {/* Profile Info Overlay - inside photoSection for correct positioning */}
-        <View style={styles.profileOverlay}>
-          {/* Name, Age, Location */}
-          <View style={styles.basicInfo}>
-            <View style={styles.nameRow}>
-              <Text style={styles.profileName}>{profile.name}</Text>
-              <Text style={styles.profileAge}>, {profile.age}</Text>
-              {profile.workProfile && (
-                <View style={styles.verifiedBadge}>
-                  <Ionicons name="checkmark-circle" size={18} color={COLORS.buddy} />
-                </View>
-              )}
-            </View>
-            <View style={styles.locationRow}>
-              <Ionicons name="location" size={14} color={COLORS.textSecondary} />
-              <Text style={styles.locationText}>{profile.location}</Text>
-              {profile.workProfile && (
-                <>
-                  <Text style={styles.dotSeparator}>•</Text>
-                  <Ionicons name="briefcase-outline" size={14} color={COLORS.textSecondary} />
-                  <Text style={styles.locationText}>{profile.workProfile}</Text>
-                </>
-              )}
-            </View>
-          </View>
-
-          {/* Match Badge */}
-          <MatchBadge level={profile.match_level} score={profile.compatibility_score} />
-        </View>
-      </View>
-
-      {/* Expandable Content */}
-      <ScrollView 
-        style={styles.detailsScroll}
-        contentContainerStyle={styles.detailsContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Why You Match - AI Generated */}
-        <View style={styles.matchReasonCard}>
-          <View style={styles.matchReasonHeader}>
-            <Ionicons name="sparkles" size={18} color={COLORS.primary} />
-            <Text style={styles.matchReasonTitle}>Why You'd Click</Text>
-          </View>
-          <Text style={styles.matchReasonText}>{profile.explanation}</Text>
-          {profile.shared_interests && profile.shared_interests.length > 0 && (
-            <View style={styles.sharedInterests}>
-              {profile.shared_interests.slice(0, 3).map((interest, idx) => (
-                <View key={idx} style={styles.interestChip}>
-                  <Text style={styles.interestChipText}>{interest}</Text>
-                </View>
-              ))}
-            </View>
-          )}
-        </View>
-
-        {/* Bio */}
-        {profile.bio && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>About</Text>
-            <Text style={styles.bioText}>{profile.bio}</Text>
-          </View>
-        )}
-
-        {/* Movie Taste */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Movie Taste</Text>
-          <View style={styles.tagsContainer}>
-            {profile.genres?.slice(0, 5).map((genre, idx) => (
-              <View key={idx} style={styles.genreTag}>
-                <Ionicons name="film" size={12} color={COLORS.primary} />
-                <Text style={styles.genreTagText}>{genre}</Text>
-              </View>
-            ))}
-          </View>
-          {profile.topMovies && profile.topMovies.length > 0 && (
-            <View style={styles.favMovies}>
-              <Text style={styles.favMoviesLabel}>Favorites:</Text>
-              <Text style={styles.favMoviesText}>
-                {profile.topMovies.slice(0, 3).map(m => m.title).join(' • ')}
-              </Text>
-            </View>
-          )}
-        </View>
-
-        {/* Favorite Directors */}
-        {profile.swipe_history?.liked_directors && profile.swipe_history.liked_directors.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Favorite Directors</Text>
-            <View style={styles.tagsContainer}>
-              {profile.swipe_history.liked_directors.slice(0, 4).map((director, idx) => (
-                <View key={idx} style={styles.directorTag}>
-                  <Ionicons name="videocam" size={12} color={COLORS.buddy} />
-                  <Text style={styles.directorTagText}>{director}</Text>
-                </View>
-              ))}
-            </View>
-          </View>
-        )}
-
-        {/* Lifestyle Quick Facts */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Lifestyle</Text>
-          <View style={styles.lifestyleGrid}>
-            {profile.zodiac && (
-              <View style={styles.lifestyleItem}>
-                <Ionicons name="star-outline" size={20} color={COLORS.textMuted} />
-                <Text style={styles.lifestyleValue}>{profile.zodiac}</Text>
-              </View>
-            )}
-            {profile.movieFrequency && (
-              <View style={styles.lifestyleItem}>
-                <Ionicons name="calendar-outline" size={20} color={COLORS.textMuted} />
-                <Text style={styles.lifestyleValue}>{profile.movieFrequency}</Text>
-              </View>
-            )}
-            {profile.ottTheatre && (
-              <View style={styles.lifestyleItem}>
-                <Ionicons name="tv-outline" size={20} color={COLORS.textMuted} />
-                <Text style={styles.lifestyleValue}>{profile.ottTheatre}</Text>
-              </View>
-            )}
-            {profile.drinking && (
-              <View style={styles.lifestyleItem}>
-                <Ionicons name="wine-outline" size={20} color={COLORS.textMuted} />
-                <Text style={styles.lifestyleValue}>{profile.drinking}</Text>
-              </View>
-            )}
-          </View>
-        </View>
-
-        {/* Languages */}
-        {profile.filmLanguages && profile.filmLanguages.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Film Languages</Text>
-            <Text style={styles.languagesText}>
-              {profile.filmLanguages.join(' • ')}
-            </Text>
-          </View>
-        )}
-
-        {/* Bottom padding for scroll */}
-        <View style={{ height: 100 }} />
-      </ScrollView>
-
-      {/* Message Button - Fixed at Bottom */}
-      <View style={styles.actionBar}>
-        <TouchableOpacity style={styles.messageButton} onPress={onMessage}>
-          <LinearGradient
-            colors={[COLORS.primary, COLORS.primaryDark]}
-            style={styles.messageButtonGradient}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-          >
-            <Ionicons name="chatbubble-ellipses" size={22} color="white" />
-            <Text style={styles.messageButtonText}>Send Message</Text>
-          </LinearGradient>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
-};
-
-// Loading Skeleton - Simple Spinner with text
+// ============ LOADING STATE ============
 const LoadingState = ({ mode }: { mode: string }) => (
   <View style={styles.loadingContainer}>
     <ActivityIndicator size="large" color={mode === 'date' ? COLORS.primary : COLORS.buddy} />
@@ -384,421 +260,348 @@ const LoadingState = ({ mode }: { mode: string }) => (
   </View>
 );
 
-// Main Feed Screen
+// ============ EMPTY STATE ============
+const EmptyState = ({ mode, onRefresh }: { mode: string; onRefresh: () => void }) => (
+  <View style={styles.emptyContainer}>
+    <Ionicons 
+      name={mode === 'date' ? 'heart-outline' : 'people-outline'} 
+      size={64} 
+      color={COLORS.textMuted} 
+    />
+    <Text style={styles.emptyTitle}>No matches yet</Text>
+    <Text style={styles.emptySubtitle}>
+      Complete your profile and movie preferences to get better matches
+    </Text>
+    <TouchableOpacity 
+      style={[styles.refreshButton, { backgroundColor: mode === 'date' ? COLORS.primary : COLORS.buddy }]}
+      onPress={onRefresh}
+    >
+      <Text style={styles.refreshButtonText}>Refresh Matches</Text>
+    </TouchableOpacity>
+  </View>
+);
+
+// ============ MAIN FEED SCREEN ============
 export default function FeedScreen() {
-  const { mode, colors } = useAppMode();
+  const { mode } = useAppMode();
   const [matches, setMatches] = useState<MatchProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [showMessageModal, setShowMessageModal] = useState(false);
   const [selectedProfile, setSelectedProfile] = useState<MatchProfile | null>(null);
-  const [messageText, setMessageText] = useState('');
-  const insets = useSafeAreaInsets();
+  const [selectedProfilePhotos, setSelectedProfilePhotos] = useState<string[]>([]);
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  
+  const bottomSheetRef = useRef<BottomSheet>(null);
+  const snapPoints = useMemo(() => ['85%'], []);
 
-  const themeColor = mode === 'date' ? COLORS.primary : COLORS.buddy;
-
-  const fetchMatches = useCallback(async (showLoading = true) => {
-    if (showLoading) setLoading(true);
-
+  // Fetch matches from API
+  const fetchMatches = async (forceRefresh = false) => {
     try {
       const userId = await getUserId();
       const response = await fetch(`${API_BASE}/api/matches`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          user_id: userId || 'guest_user',
-          limit: 15,
+          user_id: userId,
+          limit: 20,
+          force_refresh: forceRefresh,
         }),
       });
 
-      if (!response.ok) throw new Error('Failed to fetch matches');
-
-      const data = await response.json();
-      
-      // Fetch pictures for each match
-      const matchesWithPictures = await Promise.all(
-        (data.matches || []).map(async (match: MatchProfile) => {
-          try {
-            const picResponse = await fetch(`${API_BASE}/api/user/pictures/${match.user_id}`);
-            const picData = await picResponse.json();
-            return { ...match, pictures: picData.pictures };
-          } catch {
-            return match;
-          }
-        })
-      );
-
-      setMatches(matchesWithPictures);
-    } catch (err) {
-      console.error('Error fetching matches:', err);
+      if (response.ok) {
+        const data = await response.json();
+        setMatches(data.matches || []);
+      }
+    } catch (error) {
+      console.error('Error fetching matches:', error);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  };
 
   useEffect(() => {
     fetchMatches();
-  }, [fetchMatches]);
+  }, []);
 
-  const handleRefresh = () => {
+  const handleRefresh = useCallback(() => {
     setRefreshing(true);
-    fetchMatches(false);
-  };
+    fetchMatches(true); // Force refresh to bypass cache
+  }, []);
 
-  const handleMessage = (profile: MatchProfile) => {
+  // Open profile in bottom sheet
+  const openProfile = async (profile: MatchProfile, index: number) => {
     setSelectedProfile(profile);
-    setShowMessageModal(true);
-  };
-
-  const sendMessage = () => {
-    if (messageText.trim() && selectedProfile) {
-      // TODO: Implement actual messaging
-      alert(`Message sent to ${selectedProfile.name}!\n\n"${messageText}"\n\nChat feature coming soon.`);
-      setMessageText('');
-      setShowMessageModal(false);
+    setSelectedIndex(index);
+    
+    // Fetch all photos for this profile
+    try {
+      const response = await fetch(`${API_BASE}/api/user/pictures/${profile.user_id}`);
+      if (response.ok) {
+        const data = await response.json();
+        const pics = data.pictures || {};
+        const photoArray = [pics.picture_1, pics.picture_2, pics.picture_3, pics.picture_4, pics.picture_5]
+          .filter(Boolean);
+        setSelectedProfilePhotos(photoArray);
+      } else {
+        setSelectedProfilePhotos([]);
+      }
+    } catch (error) {
+      setSelectedProfilePhotos([]);
     }
+    
+    bottomSheetRef.current?.expand();
   };
 
-  const renderProfile = ({ item, index }: { item: MatchProfile; index: number }) => (
-    <ProfileCard
-      profile={item}
-      onMessage={() => handleMessage(item)}
-      isExpanded={false}
-      onToggleExpand={() => {}}
-    />
+  const closeProfile = () => {
+    bottomSheetRef.current?.close();
+    setSelectedProfile(null);
+  };
+
+  const handleMessage = () => {
+    // TODO: Navigate to chat
+    console.log('Message:', selectedProfile?.name);
+    closeProfile();
+  };
+
+  // Render backdrop
+  const renderBackdrop = useCallback(
+    (props: any) => (
+      <BottomSheetBackdrop
+        {...props}
+        disappearsOnIndex={-1}
+        appearsOnIndex={0}
+        opacity={0.7}
+      />
+    ),
+    []
   );
 
+  // Loading state
   if (loading) {
     return (
-      <SafeAreaView style={styles.container} edges={['top']}>
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>
-            {mode === 'date' ? 'Matches' : 'Movie Buddies'}
-          </Text>
-          <Text style={styles.headerSubtitle}>Finding compatible profiles...</Text>
-        </View>
-        <LoadingState mode={mode} />
-      </SafeAreaView>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <SafeAreaView style={styles.container} edges={['top']}>
+          <View style={styles.header}>
+            <Text style={styles.headerTitle}>
+              {mode === 'date' ? 'Matches' : 'Movie Buddies'}
+            </Text>
+            <Text style={styles.headerSubtitle}>Finding compatible profiles...</Text>
+          </View>
+          <LoadingState mode={mode} />
+        </SafeAreaView>
+      </GestureHandlerRootView>
     );
   }
 
-  if (matches.length === 0) {
-    return (
-      <SafeAreaView style={styles.container} edges={['top']}>
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>
-            {mode === 'date' ? 'Matches' : 'Movie Buddies'}
-          </Text>
-        </View>
-        <View style={styles.emptyState}>
-          <View style={[styles.emptyIcon, { backgroundColor: themeColor + '20' }]}>
-            <Ionicons name="heart-outline" size={60} color={themeColor} />
-          </View>
-          <Text style={styles.emptyTitle}>No Matches Yet</Text>
-          <Text style={styles.emptySubtitle}>
-            Keep swiping movies in Discover to improve your taste profile and find better matches!
-          </Text>
-          <TouchableOpacity 
-            style={[styles.refreshButton, { backgroundColor: themeColor }]}
-            onPress={() => fetchMatches()}
-          >
-            <Ionicons name="refresh" size={20} color="white" />
-            <Text style={styles.refreshButtonText}>Refresh</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
-  }
+  const avatarColor = selectedProfile ? AVATAR_COLORS[selectedIndex % AVATAR_COLORS.length] : COLORS.primary;
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Header */}
-      <View style={styles.header}>
-        <View>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaView style={styles.container} edges={['top']}>
+        {/* Header */}
+        <View style={styles.header}>
           <Text style={styles.headerTitle}>
             {mode === 'date' ? 'Matches' : 'Movie Buddies'}
           </Text>
           <Text style={styles.headerSubtitle}>
-            {matches.length} compatible {mode === 'date' ? 'dates' : 'buddies'}
+            {matches.length > 0 
+              ? `${matches.length} compatible ${mode === 'date' ? 'dates' : 'buddies'}`
+              : 'Discover your matches'
+            }
           </Text>
         </View>
-        <TouchableOpacity onPress={handleRefresh} style={styles.refreshIcon}>
-          <Ionicons name="refresh" size={24} color={COLORS.text} />
-        </TouchableOpacity>
-      </View>
 
-      {/* Profile Cards - Vertical Scroll */}
-      <FlatList
-        data={matches}
-        renderItem={renderProfile}
-        keyExtractor={(item) => item.user_id}
-        pagingEnabled
-        showsVerticalScrollIndicator={false}
-        snapToInterval={SCREEN_HEIGHT - 150}
-        decelerationRate="fast"
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={handleRefresh}
-            tintColor={themeColor}
-          />
-        }
-        contentContainerStyle={{ paddingBottom: insets.bottom + 80 }}
-      />
-
-      {/* Message Modal */}
-      <Modal visible={showMessageModal} animationType="slide" transparent>
-        <KeyboardAvoidingView 
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.modalOverlay}
-        >
-          <View style={styles.messageModal}>
-            <View style={styles.messageModalHeader}>
-              <Text style={styles.messageModalTitle}>
-                Message {selectedProfile?.name}
-              </Text>
-              <TouchableOpacity onPress={() => setShowMessageModal(false)}>
-                <Ionicons name="close" size={24} color={COLORS.text} />
-              </TouchableOpacity>
+        {/* Grid of profile tiles */}
+        {matches.length === 0 ? (
+          <EmptyState mode={mode} onRefresh={handleRefresh} />
+        ) : (
+          <ScrollView
+            contentContainerStyle={styles.gridContainer}
+            showsVerticalScrollIndicator={false}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={handleRefresh}
+                tintColor={mode === 'date' ? COLORS.primary : COLORS.buddy}
+              />
+            }
+          >
+            <View style={styles.gridWrapper}>
+              {matches.map((item, index) => (
+                <ProfileTile
+                  key={item.user_id}
+                  profile={item}
+                  index={index}
+                  mode={mode}
+                  onPress={() => openProfile(item, index)}
+                />
+              ))}
             </View>
-            
-            <Text style={styles.messageModalHint}>
-              Start with something about your shared movie taste!
-            </Text>
-            
-            <TextInput
-              style={styles.messageInput}
-              placeholder="Type your message..."
-              placeholderTextColor={COLORS.textMuted}
-              value={messageText}
-              onChangeText={setMessageText}
-              multiline
-              maxLength={500}
-            />
-            
-            <TouchableOpacity 
-              style={[
-                styles.sendButton, 
-                !messageText.trim() && styles.sendButtonDisabled
-              ]}
-              onPress={sendMessage}
-              disabled={!messageText.trim()}
-            >
-              <Text style={styles.sendButtonText}>Send Message</Text>
-              <Ionicons name="send" size={18} color="white" />
-            </TouchableOpacity>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
-    </SafeAreaView>
+          </ScrollView>
+        )}
+
+        {/* Bottom Sheet for expanded profile */}
+        <BottomSheet
+          ref={bottomSheetRef}
+          index={-1}
+          snapPoints={snapPoints}
+          enablePanDownToClose
+          backdropComponent={renderBackdrop}
+          backgroundStyle={styles.bottomSheetBackground}
+          handleIndicatorStyle={styles.bottomSheetHandle}
+          onChange={(index) => {
+            if (index === -1) {
+              setSelectedProfile(null);
+            }
+          }}
+        >
+          {selectedProfile && (
+            <BottomSheetScrollView style={styles.sheetContent} showsVerticalScrollIndicator={false}>
+              {/* Photo Carousel */}
+              <ExpandedPhotoCarousel
+                photos={selectedProfilePhotos}
+                name={selectedProfile.name}
+                avatarColor={avatarColor}
+              />
+
+              {/* Profile Info */}
+              <View style={styles.profileInfo}>
+                {/* Name & Basic Info */}
+                <View style={styles.nameSection}>
+                  <View style={styles.nameRow}>
+                    <Text style={styles.profileName}>{selectedProfile.name}</Text>
+                    <Text style={styles.profileAge}>, {selectedProfile.age}</Text>
+                    {selectedProfile.workProfile && (
+                      <Ionicons name="checkmark-circle" size={20} color={COLORS.buddy} style={{ marginLeft: 6 }} />
+                    )}
+                  </View>
+                  <View style={styles.locationRow}>
+                    <Ionicons name="location" size={14} color={COLORS.textSecondary} />
+                    <Text style={styles.locationText}>{selectedProfile.location}</Text>
+                    {selectedProfile.workProfile && (
+                      <>
+                        <Text style={styles.dotSeparator}>•</Text>
+                        <Ionicons name="briefcase-outline" size={14} color={COLORS.textSecondary} />
+                        <Text style={styles.locationText}>{selectedProfile.workProfile}</Text>
+                      </>
+                    )}
+                  </View>
+                </View>
+
+                {/* Match Badge */}
+                <View style={styles.matchSection}>
+                  <MatchBadge level={selectedProfile.match_level} score={selectedProfile.compatibility_score} />
+                  <Text style={styles.matchScore}>{selectedProfile.compatibility_score}% Match</Text>
+                </View>
+
+                {/* Bio */}
+                {selectedProfile.bio && (
+                  <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>About</Text>
+                    <Text style={styles.bioText}>{selectedProfile.bio}</Text>
+                  </View>
+                )}
+
+                {/* AI Match Explanation */}
+                {selectedProfile.explanation && (
+                  <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Why You Match</Text>
+                    <View style={styles.explanationCard}>
+                      <Ionicons name="sparkles" size={16} color={COLORS.gold} />
+                      <Text style={styles.explanationText}>{selectedProfile.explanation}</Text>
+                    </View>
+                  </View>
+                )}
+
+                {/* Shared Interests */}
+                {selectedProfile.shared_interests && selectedProfile.shared_interests.length > 0 && (
+                  <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Shared Interests</Text>
+                    <View style={styles.tagsContainer}>
+                      {selectedProfile.shared_interests.map((interest, idx) => (
+                        <View key={idx} style={styles.tag}>
+                          <Ionicons name="heart" size={12} color={COLORS.primary} />
+                          <Text style={styles.tagText}>{interest}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                )}
+
+                {/* Movie Preferences */}
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>Movie Taste</Text>
+                  <View style={styles.tagsContainer}>
+                    {selectedProfile.genres?.slice(0, 5).map((genre, idx) => (
+                      <View key={idx} style={styles.genreTag}>
+                        <Text style={styles.genreTagText}>{genre}</Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+
+                {/* Top Movies */}
+                {selectedProfile.topMovies && selectedProfile.topMovies.length > 0 && (
+                  <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Favorite Movies</Text>
+                    {selectedProfile.topMovies.slice(0, 3).map((movie, idx) => (
+                      <View key={idx} style={styles.movieItem}>
+                        <Ionicons name="film-outline" size={16} color={COLORS.textSecondary} />
+                        <Text style={styles.movieTitle}>{movie.title}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
+                {/* Message Button */}
+                <TouchableOpacity
+                  style={[styles.messageButton, { backgroundColor: mode === 'date' ? COLORS.primary : COLORS.buddy }]}
+                  onPress={handleMessage}
+                >
+                  <Ionicons name="chatbubble" size={20} color="#FFF" />
+                  <Text style={styles.messageButtonText}>Send Message</Text>
+                </TouchableOpacity>
+
+                {/* Bottom spacing */}
+                <View style={{ height: 40 }} />
+              </View>
+            </BottomSheetScrollView>
+          )}
+        </BottomSheet>
+      </SafeAreaView>
+    </GestureHandlerRootView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.bg },
+  container: {
+    flex: 1,
+    backgroundColor: COLORS.bg,
+  },
   
   // Header
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
   },
-  headerTitle: { fontSize: 28, fontWeight: 'bold', color: COLORS.text },
-  headerSubtitle: { fontSize: 14, color: COLORS.textSecondary, marginTop: 2 },
-  refreshIcon: { padding: 8 },
-  
-  // Card Container
-  cardContainer: {
-    width: SCREEN_WIDTH,
-    minHeight: SCREEN_HEIGHT - 150,
-  },
-  
-  // Photo Section wrapper
-  photoSection: {
-    width: SCREEN_WIDTH,
-    height: CARD_HEIGHT,
-    position: 'relative',
-  },
-  
-  // Photo Container (inside PhotoCarousel)
-  photoContainer: {
-    width: SCREEN_WIDTH,
-    height: CARD_HEIGHT,
-    position: 'relative',
-  },
-  photo: {
-    width: SCREEN_WIDTH,
-    height: CARD_HEIGHT,
-  },
-  avatarPlaceholder: {
-    width: SCREEN_WIDTH,
-    height: CARD_HEIGHT,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  avatarName: {
-    position: 'absolute',
-    fontSize: 80,
+  headerTitle: {
+    fontSize: 28,
     fontWeight: 'bold',
-    color: 'rgba(255,255,255,0.3)',
+    color: COLORS.text,
   },
-  photoGradient: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: CARD_HEIGHT * 0.5,
+  headerSubtitle: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    marginTop: 4,
   },
-  photoIndicators: {
-    position: 'absolute',
-    top: 12,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 6,
-  },
-  photoIndicator: {
-    width: 40,
-    height: 4,
-    backgroundColor: 'rgba(255,255,255,0.4)',
-    borderRadius: 2,
-  },
-  photoIndicatorActive: {
-    backgroundColor: 'white',
-  },
-  
-  // Profile Overlay (on photo)
-  profileOverlay: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    padding: 20,
-    zIndex: 10,
-  },
-  basicInfo: { marginBottom: 12 },
-  nameRow: { flexDirection: 'row', alignItems: 'baseline' },
-  profileName: { fontSize: 32, fontWeight: 'bold', color: 'white' },
-  profileAge: { fontSize: 28, color: 'white', fontWeight: '300' },
-  verifiedBadge: { marginLeft: 8 },
-  locationRow: { flexDirection: 'row', alignItems: 'center', marginTop: 6, flexWrap: 'wrap' },
-  locationText: { fontSize: 15, color: COLORS.textSecondary, marginLeft: 4 },
-  dotSeparator: { color: COLORS.textMuted, marginHorizontal: 8 },
-  
-  // Match Badge
-  matchBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    gap: 6,
-  },
-  matchBadgeText: { color: 'white', fontWeight: '700', fontSize: 14 },
-  
-  // Details Section
-  detailsScroll: { flex: 1 },
-  detailsContent: { padding: 20 },
-  
-  // Match Reason Card
-  matchReasonCard: {
-    backgroundColor: COLORS.bgCard,
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 20,
-    borderLeftWidth: 4,
-    borderLeftColor: COLORS.primary,
-  },
-  matchReasonHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 10, gap: 8 },
-  matchReasonTitle: { fontSize: 16, fontWeight: '700', color: COLORS.primary },
-  matchReasonText: { fontSize: 15, color: COLORS.textSecondary, lineHeight: 22 },
-  sharedInterests: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 12, gap: 8 },
-  interestChip: {
-    backgroundColor: 'rgba(229,9,20,0.15)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-  },
-  interestChipText: { color: COLORS.primary, fontSize: 13, fontWeight: '500' },
-  
-  // Sections
-  section: { marginBottom: 24 },
-  sectionTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: COLORS.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    marginBottom: 12,
-  },
-  bioText: { fontSize: 16, color: COLORS.text, lineHeight: 24 },
-  
-  // Tags
-  tagsContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  genreTag: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(229,9,20,0.12)',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-    gap: 6,
-  },
-  genreTagText: { color: COLORS.text, fontSize: 14 },
-  directorTag: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(33,150,243,0.12)',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-    gap: 6,
-  },
-  directorTagText: { color: COLORS.text, fontSize: 14 },
-  
-  // Favorite Movies
-  favMovies: { marginTop: 12 },
-  favMoviesLabel: { fontSize: 13, color: COLORS.textMuted, marginBottom: 4 },
-  favMoviesText: { fontSize: 15, color: COLORS.text, fontStyle: 'italic' },
-  
-  // Lifestyle Grid
-  lifestyleGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 16 },
-  lifestyleItem: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  lifestyleValue: { fontSize: 14, color: COLORS.text },
-  
-  // Languages
-  languagesText: { fontSize: 15, color: COLORS.textSecondary },
-  
-  // Action Bar
-  actionBar: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    padding: 16,
-    paddingBottom: 24,
-    backgroundColor: COLORS.bg,
-  },
-  messageButton: { borderRadius: 28, overflow: 'hidden' },
-  messageButtonGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
-    gap: 10,
-  },
-  messageButtonText: { color: 'white', fontSize: 18, fontWeight: '700' },
-  
+
   // Loading State
-  loadingContainer: { 
-    flex: 1, 
-    justifyContent: 'center', 
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
     padding: 40,
   },
@@ -813,66 +616,323 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     marginTop: 8,
   },
-  
+
   // Empty State
-  emptyState: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 },
-  emptyIcon: { 
-    width: 120, 
-    height: 120, 
-    borderRadius: 60, 
-    justifyContent: 'center', 
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 24,
+    padding: 40,
   },
-  emptyTitle: { fontSize: 24, fontWeight: 'bold', color: COLORS.text, marginBottom: 12 },
-  emptySubtitle: { fontSize: 15, color: COLORS.textSecondary, textAlign: 'center', lineHeight: 22 },
+  emptyTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: COLORS.text,
+    marginTop: 16,
+  },
+  emptySubtitle: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    marginTop: 8,
+    lineHeight: 20,
+  },
   refreshButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 14,
-    borderRadius: 28,
     marginTop: 24,
-    gap: 8,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 24,
   },
-  refreshButtonText: { color: 'white', fontSize: 16, fontWeight: '600' },
-  
-  // Message Modal
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'flex-end' },
-  messageModal: {
-    backgroundColor: COLORS.bgCard,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 24,
-    paddingBottom: 40,
+  refreshButtonText: {
+    color: '#FFF',
+    fontWeight: '600',
+    fontSize: 16,
   },
-  messageModalHeader: {
+
+  // Grid Layout
+  gridContainer: {
+    padding: 16,
+    paddingBottom: 100, // Extra padding for bottom nav
+  },
+  gridWrapper: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    gap: TILE_GAP,
+  },
+  gridRow: {
+    justifyContent: 'space-between',
     marginBottom: 16,
   },
-  messageModalTitle: { fontSize: 20, fontWeight: 'bold', color: COLORS.text },
-  messageModalHint: { fontSize: 14, color: COLORS.textMuted, marginBottom: 16 },
-  messageInput: {
-    backgroundColor: COLORS.bg,
+
+  // Profile Tile
+  tile: {
+    width: '48%', // Use percentage for better web compatibility
+    aspectRatio: 0.75, // This creates a nice portrait ratio
     borderRadius: 16,
-    padding: 16,
-    fontSize: 16,
-    color: COLORS.text,
-    minHeight: 120,
-    textAlignVertical: 'top',
+    overflow: 'hidden',
+    backgroundColor: COLORS.bgCard,
+    marginBottom: 12,
   },
-  sendButton: {
+  tilePhotoContainer: {
+    flex: 1,
+    position: 'relative',
+  },
+  tilePhoto: {
+    width: '100%',
+    height: '100%',
+  },
+  tileAvatar: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  tileAvatarText: {
+    fontSize: 48,
+    fontWeight: 'bold',
+    color: '#FFF',
+  },
+  tileGradient: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: '50%',
+  },
+  tileBadgeContainer: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+  },
+  tileInfo: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    padding: 12,
+  },
+  tileName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: COLORS.text,
+  },
+  tileLocationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  tileLocation: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    marginLeft: 4,
+  },
+
+  // Match Badge
+  matchBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 4,
+  },
+  matchBadgeText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#FFF',
+  },
+
+  // Bottom Sheet
+  bottomSheetBackground: {
+    backgroundColor: COLORS.bgSheet,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+  },
+  bottomSheetHandle: {
+    backgroundColor: COLORS.textMuted,
+    width: 40,
+  },
+  sheetContent: {
+    flex: 1,
+  },
+
+  // Expanded Photo Carousel
+  expandedPhotoContainer: {
+    width: SCREEN_WIDTH,
+    position: 'relative',
+  },
+  expandedPhoto: {
+    backgroundColor: COLORS.bgCard,
+  },
+  expandedAvatarPlaceholder: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  expandedAvatarText: {
+    fontSize: 80,
+    fontWeight: 'bold',
+    color: '#FFF',
+  },
+  photoIndicators: {
+    position: 'absolute',
+    bottom: 16,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  photoIndicator: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255,255,255,0.4)',
+  },
+  photoIndicatorActive: {
+    backgroundColor: '#FFF',
+    width: 24,
+  },
+
+  // Profile Info
+  profileInfo: {
+    padding: 20,
+  },
+  nameSection: {
+    marginBottom: 16,
+  },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+  },
+  profileName: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: COLORS.text,
+  },
+  profileAge: {
+    fontSize: 24,
+    color: COLORS.textSecondary,
+    fontWeight: '300',
+  },
+  locationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 6,
+    gap: 4,
+  },
+  locationText: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+  },
+  dotSeparator: {
+    color: COLORS.textMuted,
+    marginHorizontal: 4,
+  },
+
+  // Match Section
+  matchSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+    gap: 12,
+  },
+  matchScore: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.success,
+  },
+
+  // Sections
+  section: {
+    marginBottom: 20,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.text,
+    marginBottom: 10,
+  },
+  bioText: {
+    fontSize: 15,
+    color: COLORS.textSecondary,
+    lineHeight: 22,
+  },
+
+  // Explanation Card
+  explanationCard: {
+    backgroundColor: 'rgba(255, 215, 0, 0.1)',
+    borderRadius: 12,
+    padding: 14,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  explanationText: {
+    flex: 1,
+    fontSize: 14,
+    color: COLORS.text,
+    lineHeight: 20,
+  },
+
+  // Tags
+  tagsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  tag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(229, 9, 20, 0.15)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    gap: 6,
+  },
+  tagText: {
+    fontSize: 13,
+    color: COLORS.text,
+  },
+  genreTag: {
+    backgroundColor: COLORS.bgCard,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  genreTagText: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+  },
+
+  // Movie Item
+  movieItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    gap: 10,
+  },
+  movieTitle: {
+    fontSize: 14,
+    color: COLORS.text,
+  },
+
+  // Message Button
+  messageButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: COLORS.primary,
-    borderRadius: 28,
     paddingVertical: 16,
-    marginTop: 16,
-    gap: 8,
+    borderRadius: 28,
+    marginTop: 20,
+    gap: 10,
   },
-  sendButtonDisabled: { backgroundColor: COLORS.textMuted },
-  sendButtonText: { color: 'white', fontSize: 17, fontWeight: '600' },
+  messageButtonText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#FFF',
+  },
 });
