@@ -867,6 +867,80 @@ def generate_profile_hash(profile: Dict) -> str:
 
 # ============== FILTERING SERVICE ==============
 
+def check_filter_match(
+    candidate_value: any,
+    filter_config: Dict,
+    filter_type: str = "selection"
+) -> tuple[bool, bool]:
+    """
+    Check if a candidate matches a filter criteria.
+    
+    Returns:
+        (matches_strictly, matches_expanded)
+        - matches_strictly: True if candidate passes strict filter
+        - matches_expanded: True if candidate could pass with expanded criteria
+    """
+    if not filter_config:
+        return (True, True)
+    
+    selected = filter_config.get("selected", [])
+    exclusive = filter_config.get("exclusive", False)
+    expand_if_run_out = filter_config.get("expandIfRunOut", True)
+    
+    # If no selection made, pass everyone
+    if not selected:
+        return (True, True)
+    
+    # Handle different value types
+    if isinstance(candidate_value, list):
+        # Check if any of candidate's values match selected
+        has_match = any(v in selected for v in candidate_value)
+    else:
+        has_match = candidate_value in selected
+    
+    if has_match:
+        return (True, True)
+    
+    # No match - check if we should exclude
+    if exclusive and not expand_if_run_out:
+        # Strict filter, no expansion allowed - hard reject
+        return (False, False)
+    elif exclusive and expand_if_run_out:
+        # Strict but can expand - reject for strict, allow for expanded
+        return (False, True)
+    else:
+        # Not exclusive - allow
+        return (True, True)
+
+
+def check_age_filter(candidate_age: int, age_filter: Dict) -> tuple[bool, bool]:
+    """Check age filter with strict/expand logic."""
+    if not age_filter:
+        return (True, True)
+    
+    min_age = age_filter.get("min", 18)
+    max_age = age_filter.get("max", 100)
+    exclusive = age_filter.get("exclusive", False)
+    expand_if_run_out = age_filter.get("expandIfRunOut", True)
+    
+    in_range = min_age <= candidate_age <= max_age
+    
+    if in_range:
+        return (True, True)
+    
+    # Out of range - check strictness
+    if exclusive and not expand_if_run_out:
+        return (False, False)
+    elif exclusive and expand_if_run_out:
+        # Allow 5-year buffer for expansion
+        expanded_min = max(18, min_age - 5)
+        expanded_max = max_age + 5
+        in_expanded = expanded_min <= candidate_age <= expanded_max
+        return (False, in_expanded)
+    else:
+        return (True, True)
+
+
 def apply_hard_filters(
     current_user: Dict,
     candidates: List[Dict],
@@ -875,20 +949,41 @@ def apply_hard_filters(
     """
     Apply hard filters to narrow down candidates before AI matching.
     
+    Respects user preferences with strict (exclusive) mode:
+    - If exclusive=True and expandIfRunOut=False: STRICT - must match exactly
+    - If exclusive=True and expandIfRunOut=True: Prefer matches, but expand if needed
+    - If exclusive=False: Soft preference, include all
+    
     Filters applied:
-    - Gender preference match
-    - Age range
-    - Languages (at least one common spoken language)
-    - Relationship intent overlap
+    - Gender preference (always strict - mutual matching required)
+    - Age range (with exclusive/expand options)
+    - Languages spoken (with exclusive/expand options)
+    - Relationship intent (with exclusive/expand options)
+    - Genres (with exclusive/expand options)
+    - Film languages (with exclusive/expand options)
+    - OTT/Theatre preference (with exclusive/expand options)
+    - Lifestyle filters (smoking, drinking, etc.)
     """
-    filtered = []
+    strict_matches = []
+    expanded_matches = []
+    
+    # Extract filter configs with defaults
+    age_filter = filters.get("age", {"min": 18, "max": 100, "exclusive": False, "expandIfRunOut": True})
+    languages_filter = filters.get("languages", {})
+    genres_filter = filters.get("genres", {})
+    intent_filter = filters.get("intent", {})
+    film_languages_filter = filters.get("filmLanguages", {})
+    ott_theatre_filter = filters.get("ottTheatre", {})
+    smoking_filter = filters.get("smoking", {})
+    drinking_filter = filters.get("drinking", {})
+    religion_filter = filters.get("religion", {})
     
     for candidate in candidates:
         # Skip self
         if candidate["user_id"] == current_user.get("user_id"):
             continue
         
-        # Gender preference check
+        # ========== GENDER PREFERENCE (Always Strict - Mutual Match Required) ==========
         user_looking_for = current_user.get("partnerPreference", "Anyone")
         candidate_gender = candidate.get("gender", "")
         
@@ -908,33 +1003,123 @@ def apply_hard_filters(
             if candidate_looking_for == "Women" and user_gender != "Female":
                 continue
         
-        # Age range filter
+        # Track if this candidate passes all strict filters
+        passes_strict = True
+        passes_expanded = True
+        
+        # ========== AGE FILTER ==========
         candidate_age = candidate.get("age", 0)
-        age_min = filters.get("age_min", 18)
-        age_max = filters.get("age_max", 100)
+        strict_age, expanded_age = check_age_filter(candidate_age, age_filter)
+        if not expanded_age:
+            continue  # Hard reject
+        if not strict_age:
+            passes_strict = False
         
-        if candidate_age < age_min or candidate_age > age_max:
-            continue
-        
-        # Language filter - at least one common spoken language
-        user_languages = set(current_user.get("languagesSpoken", []))
-        candidate_languages = set(candidate.get("languagesSpoken", []))
-        
-        if user_languages and candidate_languages:
-            if not user_languages.intersection(candidate_languages):
+        # ========== LANGUAGES SPOKEN FILTER ==========
+        if languages_filter.get("selected"):
+            candidate_languages = candidate.get("languagesSpoken", [])
+            strict_lang, expanded_lang = check_filter_match(
+                candidate_languages, languages_filter, "selection"
+            )
+            if not expanded_lang:
                 continue
+            if not strict_lang:
+                passes_strict = False
         
-        # Relationship intent overlap
-        user_intents = set(current_user.get("relationshipIntent", []))
-        candidate_intents = set(candidate.get("relationshipIntent", []))
-        
-        if user_intents and candidate_intents:
-            if not user_intents.intersection(candidate_intents):
+        # ========== RELATIONSHIP INTENT FILTER ==========
+        if intent_filter.get("selected"):
+            candidate_intents = candidate.get("relationshipIntent", [])
+            strict_intent, expanded_intent = check_filter_match(
+                candidate_intents, intent_filter, "selection"
+            )
+            if not expanded_intent:
                 continue
+            if not strict_intent:
+                passes_strict = False
         
-        filtered.append(candidate)
+        # ========== GENRES FILTER ==========
+        if genres_filter.get("selected"):
+            candidate_genres = candidate.get("genres", [])
+            strict_genre, expanded_genre = check_filter_match(
+                candidate_genres, genres_filter, "selection"
+            )
+            if not expanded_genre:
+                continue
+            if not strict_genre:
+                passes_strict = False
+        
+        # ========== FILM LANGUAGES FILTER ==========
+        if film_languages_filter.get("selected"):
+            candidate_film_langs = candidate.get("filmLanguages", [])
+            strict_fl, expanded_fl = check_filter_match(
+                candidate_film_langs, film_languages_filter, "selection"
+            )
+            if not expanded_fl:
+                continue
+            if not strict_fl:
+                passes_strict = False
+        
+        # ========== OTT/THEATRE FILTER ==========
+        if ott_theatre_filter.get("selected"):
+            candidate_ott = candidate.get("ottTheatre", "")
+            strict_ott, expanded_ott = check_filter_match(
+                candidate_ott, ott_theatre_filter, "selection"
+            )
+            if not expanded_ott:
+                continue
+            if not strict_ott:
+                passes_strict = False
+        
+        # ========== SMOKING FILTER ==========
+        if smoking_filter.get("selected"):
+            candidate_smoking = candidate.get("smoking", "")
+            strict_smoke, expanded_smoke = check_filter_match(
+                candidate_smoking, smoking_filter, "selection"
+            )
+            if not expanded_smoke:
+                continue
+            if not strict_smoke:
+                passes_strict = False
+        
+        # ========== DRINKING FILTER ==========
+        if drinking_filter.get("selected"):
+            candidate_drinking = candidate.get("drinking", "")
+            strict_drink, expanded_drink = check_filter_match(
+                candidate_drinking, drinking_filter, "selection"
+            )
+            if not expanded_drink:
+                continue
+            if not strict_drink:
+                passes_strict = False
+        
+        # ========== RELIGION FILTER ==========
+        if religion_filter.get("selected"):
+            candidate_religion = candidate.get("religion", "")
+            strict_rel, expanded_rel = check_filter_match(
+                candidate_religion, religion_filter, "selection"
+            )
+            if not expanded_rel:
+                continue
+            if not strict_rel:
+                passes_strict = False
+        
+        # Add to appropriate list
+        if passes_strict:
+            strict_matches.append(candidate)
+        elif passes_expanded:
+            expanded_matches.append(candidate)
     
-    return filtered
+    # Return strict matches first, then expanded if needed
+    # Only include expanded matches if we don't have enough strict ones
+    MIN_MATCHES_BEFORE_EXPAND = 5
+    
+    if len(strict_matches) >= MIN_MATCHES_BEFORE_EXPAND:
+        print(f"Returning {len(strict_matches)} strict matches (no expansion needed)")
+        return strict_matches
+    else:
+        combined = strict_matches + expanded_matches
+        print(f"Returning {len(strict_matches)} strict + {len(expanded_matches)} expanded = {len(combined)} total matches")
+        return combined
 
 
 # ============== AI MATCHING SERVICE ==============
