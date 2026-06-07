@@ -449,8 +449,14 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: 15, color: COLORS.textSecondary, marginBottom: SPACING.l },
   label: { fontSize: 14, fontWeight: '600', color: COLORS.textSecondary, marginBottom: SPACING.s, marginTop: SPACING.m },
   input: {
-    backgroundColor: COLORS.bgInput, borderRadius: BORDER_RADIUS.m, paddingHorizontal: SPACING.m,
-    paddingVertical: 14, color: COLORS.text, fontSize: 16,
+    backgroundColor: COLORS.bgInput, 
+    borderRadius: BORDER_RADIUS.m, 
+    paddingHorizontal: SPACING.m,
+    paddingVertical: 14, 
+    color: COLORS.text, 
+    fontSize: 16,
+    textAlign: 'left',
+    textAlignVertical: 'center',
   },
   charCount: { fontSize: 11, color: COLORS.textMuted, textAlign: 'right', marginTop: 4 },
   dropdown: {
