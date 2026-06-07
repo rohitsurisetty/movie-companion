@@ -305,6 +305,7 @@ export default function FeedScreen() {
           user_id: userId,
           limit: 20,
           force_refresh: forceRefresh,
+          mode: mode, // Send current mode (buddy/date)
         }),
       });
 
@@ -322,7 +323,7 @@ export default function FeedScreen() {
 
   useEffect(() => {
     fetchMatches();
-  }, []);
+  }, [mode]); // Re-fetch when mode changes
 
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
@@ -410,9 +411,7 @@ export default function FeedScreen() {
       <GestureHandlerRootView style={{ flex: 1 }}>
         <SafeAreaView style={styles.container} edges={['top']}>
           <View style={styles.header}>
-            <Text style={styles.headerTitle}>
-              {mode === 'date' ? 'Matches' : 'Movie Buddies'}
-            </Text>
+            <Text style={styles.headerTitle}>Matches</Text>
             <Text style={styles.headerSubtitle}>Finding compatible profiles...</Text>
           </View>
           <LoadingState mode={mode} />
@@ -428,12 +427,10 @@ export default function FeedScreen() {
       <SafeAreaView style={styles.container} edges={['top']}>
         {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>
-            {mode === 'date' ? 'Matches' : 'Movie Buddies'}
-          </Text>
+          <Text style={styles.headerTitle}>Matches</Text>
           <Text style={styles.headerSubtitle}>
             {matches.length > 0 
-              ? `${matches.length} compatible ${mode === 'date' ? 'dates' : 'buddies'}`
+              ? `${matches.length} compatible matches`
               : 'Discover your matches'
             }
           </Text>
@@ -485,13 +482,50 @@ export default function FeedScreen() {
         >
           {selectedProfile && (
             <BottomSheetScrollView style={styles.sheetContent} showsVerticalScrollIndicator={false}>
-              {/* Back Button Header */}
+              {/* Header with Mode Toggle (top left) and Back Button */}
               <View style={styles.sheetHeader}>
+                {/* Mode Toggle - Top Left */}
+                <View style={styles.modeToggleContainer}>
+                  <TouchableOpacity
+                    style={[
+                      styles.modeToggleButton,
+                      mode === 'buddy' && styles.modeToggleButtonActive,
+                    ]}
+                    onPress={() => {/* Mode is controlled by shared header */}}
+                  >
+                    <Ionicons 
+                      name="people" 
+                      size={14} 
+                      color={mode === 'buddy' ? '#FFF' : COLORS.textSecondary} 
+                    />
+                    <Text style={[
+                      styles.modeToggleText,
+                      mode === 'buddy' && styles.modeToggleTextActive,
+                    ]}>Buddy</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.modeToggleButton,
+                      mode === 'date' && styles.modeToggleButtonActiveDate,
+                    ]}
+                    onPress={() => {/* Mode is controlled by shared header */}}
+                  >
+                    <Ionicons 
+                      name="heart" 
+                      size={14} 
+                      color={mode === 'date' ? '#FFF' : COLORS.textSecondary} 
+                    />
+                    <Text style={[
+                      styles.modeToggleText,
+                      mode === 'date' && styles.modeToggleTextActive,
+                    ]}>Date</Text>
+                  </TouchableOpacity>
+                </View>
+                
+                {/* Back Button - Top Right */}
                 <TouchableOpacity style={styles.backButton} onPress={closeProfile}>
-                  <Ionicons name="chevron-down" size={28} color={COLORS.text} />
+                  <Ionicons name="close" size={24} color={COLORS.text} />
                 </TouchableOpacity>
-                <Text style={styles.sheetHeaderTitle}>Profile</Text>
-                <View style={styles.backButtonPlaceholder} />
               </View>
 
               {/* Photo Carousel */}
@@ -802,10 +836,38 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
   },
+  modeToggleContainer: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.bgCard,
+    borderRadius: 20,
+    padding: 4,
+  },
+  modeToggleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    gap: 4,
+  },
+  modeToggleButtonActive: {
+    backgroundColor: COLORS.buddy,
+  },
+  modeToggleButtonActiveDate: {
+    backgroundColor: COLORS.primary,
+  },
+  modeToggleText: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    fontWeight: '500',
+  },
+  modeToggleTextActive: {
+    color: '#FFF',
+  },
   backButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: 'rgba(255,255,255,0.1)',
     justifyContent: 'center',
     alignItems: 'center',

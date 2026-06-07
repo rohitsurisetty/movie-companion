@@ -738,8 +738,27 @@ MOCK_USERS = [
 
 
 def get_all_mock_users() -> List[Dict]:
-    """Return all mock users for testing"""
-    return MOCK_USERS
+    """Return all mock users for testing - with mode fields added"""
+    # Add movieBuddyMode and movieDateMode to all mock users
+    users_with_modes = []
+    for user in MOCK_USERS:
+        user_copy = user.copy()
+        # Assign modes based on user index for variety
+        user_idx = int(user["user_id"].split("_")[-1])
+        if user_idx % 3 == 0:
+            # Both modes enabled
+            user_copy["movieBuddyMode"] = True
+            user_copy["movieDateMode"] = True
+        elif user_idx % 3 == 1:
+            # Date mode only
+            user_copy["movieBuddyMode"] = False
+            user_copy["movieDateMode"] = True
+        else:
+            # Buddy mode only
+            user_copy["movieBuddyMode"] = True
+            user_copy["movieDateMode"] = False
+        users_with_modes.append(user_copy)
+    return users_with_modes
 
 
 def get_mock_user_by_id(user_id: str) -> Optional[Dict]:
@@ -867,6 +886,42 @@ def generate_profile_hash(profile: Dict) -> str:
 
 # ============== FILTERING SERVICE ==============
 
+def check_mode_compatibility(user_mode: str, user_profile: Dict, candidate: Dict) -> bool:
+    """
+    Check if the candidate's mode is compatible with the user's current mode.
+    
+    Rules:
+    - Buddy mode user can ONLY see candidates who have buddy mode enabled
+    - Date mode user can ONLY see candidates who have date mode enabled
+    - Users with BOTH modes enabled can be shown to either
+    
+    Args:
+        user_mode: Current user's active mode ('buddy' or 'date')
+        user_profile: Current user's profile
+        candidate: Candidate profile to check
+    
+    Returns:
+        True if modes are compatible, False otherwise
+    """
+    # Get candidate's mode settings
+    candidate_buddy_mode = candidate.get("movieBuddyMode", False)
+    candidate_date_mode = candidate.get("movieDateMode", False)
+    
+    # If candidate has no modes set, skip them
+    if not candidate_buddy_mode and not candidate_date_mode:
+        return False
+    
+    if user_mode == "buddy":
+        # Buddy mode user can only see candidates with buddy mode enabled
+        return candidate_buddy_mode
+    elif user_mode == "date":
+        # Date mode user can only see candidates with date mode enabled
+        return candidate_date_mode
+    else:
+        # Default to date mode if not specified
+        return candidate_date_mode
+
+
 def check_filter_match(
     candidate_value: any,
     filter_config: Dict,
@@ -944,7 +999,8 @@ def check_age_filter(candidate_age: int, age_filter: Dict) -> tuple[bool, bool]:
 def apply_hard_filters(
     current_user: Dict,
     candidates: List[Dict],
-    filters: Dict
+    filters: Dict,
+    user_mode: str = "date"
 ) -> List[Dict]:
     """
     Apply hard filters to narrow down candidates before AI matching.
@@ -955,6 +1011,7 @@ def apply_hard_filters(
     - If exclusive=False: Soft preference, include all
     
     Filters applied:
+    - MODE COMPATIBILITY (always strict - buddy only sees buddy, date only sees date)
     - Gender preference (always strict - mutual matching required)
     - Age range (with exclusive/expand options)
     - Languages spoken (with exclusive/expand options)
@@ -981,6 +1038,12 @@ def apply_hard_filters(
     for candidate in candidates:
         # Skip self
         if candidate["user_id"] == current_user.get("user_id"):
+            continue
+        
+        # ========== MODE COMPATIBILITY (Always Strict) ==========
+        # Buddy mode users can ONLY see candidates with buddy mode enabled
+        # Date mode users can ONLY see candidates with date mode enabled
+        if not check_mode_compatibility(user_mode, current_user, candidate):
             continue
         
         # ========== GENDER PREFERENCE (Always Strict - Mutual Match Required) ==========
@@ -1336,7 +1399,8 @@ async def get_matches_for_user(
     user_profile: Optional[Dict] = None,
     filters: Optional[Dict] = None,
     use_mock_data: bool = True,
-    force_refresh: bool = False
+    force_refresh: bool = False,
+    mode: str = "date"
 ) -> List[Dict]:
     """
     Main function to get matches for a user.
@@ -1352,6 +1416,7 @@ async def get_matches_for_user(
         filters: Optional filter dict with age_min, age_max etc.
         use_mock_data: Whether to use mock users
         force_refresh: If True, bypass cache and regenerate matches
+        mode: 'buddy' or 'date' - determines which mode users to match with
     """
     # Get current user profile
     if user_profile is None and use_mock_data:
@@ -1373,6 +1438,8 @@ async def get_matches_for_user(
             ],
             "movieFrequency": "Weekly",
             "ottTheatre": "Both",
+            "movieBuddyMode": True,
+            "movieDateMode": True,
             "swipe_history": {
                 "liked_genres": ["Sci-Fi", "Thriller", "Drama"],
                 "liked_actors": ["Leonardo DiCaprio", "Christian Bale"],
@@ -1380,12 +1447,15 @@ async def get_matches_for_user(
             }
         }
     
+    # Include mode in cache key to separate buddy/date caches
+    cache_key = f"{user_id}_{mode}"
+    
     # Generate profile hash for cache validation
     profile_hash = generate_profile_hash(user_profile) if user_profile else ""
     
     # Step 0: Check cache (unless force refresh requested)
     if not force_refresh:
-        cached = await get_cached_matches(user_id)
+        cached = await get_cached_matches(cache_key)
         if cached:
             # Verify profile hasn't changed significantly
             cached_hash = cached.get("profile_hash", "")
@@ -1403,20 +1473,17 @@ async def get_matches_for_user(
     
     # Apply default filters if none provided
     if filters is None:
-        filters = {
-            "age_min": 18,
-            "age_max": 45,
-        }
+        filters = {}
     
-    # Step 1: Apply hard filters
-    filtered_candidates = apply_hard_filters(user_profile, candidates, filters)
+    # Step 1: Apply hard filters (including mode filtering)
+    filtered_candidates = apply_hard_filters(user_profile, candidates, filters, user_mode=mode)
     
-    print(f"Filtered {len(candidates)} candidates down to {len(filtered_candidates)} after applying preferences")
+    print(f"Filtered {len(candidates)} candidates down to {len(filtered_candidates)} after applying preferences (mode={mode})")
     
     # Step 2: Get AI compatibility scores
     matches = await get_ai_compatibility_scores(user_profile, filtered_candidates, top_n=15)
     
-    # Step 3: Save to cache
-    await save_matches_to_cache(user_id, matches, profile_hash)
+    # Step 3: Save to cache (with mode-specific key)
+    await save_matches_to_cache(cache_key, matches, profile_hash)
     
     return matches

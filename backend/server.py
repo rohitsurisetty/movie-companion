@@ -2197,6 +2197,7 @@ class MatchRequest(BaseModel):
     filters: Optional[Dict] = None
     limit: int = 15
     force_refresh: bool = False  # If True, bypass cache and regenerate matches
+    mode: str = "date"  # 'buddy' or 'date' - determines which mode users to match with
 
 
 @api_router.post("/matches")
@@ -2248,6 +2249,8 @@ async def get_matches(req: MatchRequest):
             "movieFrequency": user_profile.get("movieFrequency", "Weekly") if has_profile else "Weekly",
             "ottTheatre": user_profile.get("ottTheatre", "Both") if has_profile else "Both",
             "bio": user_profile.get("bio", "") if has_profile else "Looking for movie companions!",
+            "movieBuddyMode": user_profile.get("movieBuddyMode", False) if has_profile else True,
+            "movieDateMode": user_profile.get("movieDateMode", True) if has_profile else True,
             "swipe_history": {
                 "liked_genres": list(liked_genres) if liked_genres else ["Drama", "Sci-Fi", "Thriller"],
                 "disliked_genres": list(disliked_genres),
@@ -2262,10 +2265,11 @@ async def get_matches(req: MatchRequest):
             user_profile=profile_for_matching,
             filters=req.filters,
             use_mock_data=True,  # Using mock users for now
-            force_refresh=req.force_refresh  # Pass cache bypass option
+            force_refresh=req.force_refresh,  # Pass cache bypass option
+            mode=req.mode  # Pass the user's current mode (buddy/date)
         )
         
-        logger.info(f"Found {len(matches)} matches for user {req.user_id} (force_refresh={req.force_refresh})")
+        logger.info(f"Found {len(matches)} matches for user {req.user_id} (mode={req.mode}, force_refresh={req.force_refresh})")
         
         return {
             "success": True,
