@@ -425,15 +425,56 @@ export default function FeedScreen() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaView style={styles.container} edges={['top']}>
-        {/* Header */}
+        {/* Header with Mode Toggle */}
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>Matches</Text>
-          <Text style={styles.headerSubtitle}>
-            {matches.length > 0 
-              ? `${matches.length} compatible matches`
-              : 'Discover your matches'
-            }
-          </Text>
+          {/* Mode Toggle - Top Left */}
+          <View style={styles.headerModeToggle}>
+            <TouchableOpacity
+              style={[
+                styles.headerModeButton,
+                mode === 'buddy' && styles.headerModeButtonActiveBuddy,
+              ]}
+              onPress={() => {/* Mode controlled by shared header */}}
+            >
+              <Ionicons 
+                name="people" 
+                size={14} 
+                color={mode === 'buddy' ? '#FFF' : COLORS.textSecondary} 
+              />
+              <Text style={[
+                styles.headerModeText,
+                mode === 'buddy' && styles.headerModeTextActive,
+              ]}>Buddy</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.headerModeButton,
+                mode === 'date' && styles.headerModeButtonActiveDate,
+              ]}
+              onPress={() => {/* Mode controlled by shared header */}}
+            >
+              <Ionicons 
+                name="heart" 
+                size={14} 
+                color={mode === 'date' ? '#FFF' : COLORS.textSecondary} 
+              />
+              <Text style={[
+                styles.headerModeText,
+                mode === 'date' && styles.headerModeTextActive,
+              ]}>Date</Text>
+            </TouchableOpacity>
+          </View>
+          
+          {/* Title and Subtitle */}
+          <View style={styles.headerTitleSection}>
+            <Text style={styles.headerTitle}>Matches</Text>
+            <Text style={styles.headerSubtitle}>
+              {matches.length > 0 
+                ? `${matches.length} compatible ${mode === 'date' ? 'dates' : 'buddies'}`
+                : 'Discover your matches'
+              }
+            </Text>
+          </View>
         </View>
 
         {/* Grid of profile tiles */}
@@ -655,6 +696,39 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
+  },
+  headerModeToggle: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.bgCard,
+    borderRadius: 20,
+    padding: 4,
+    alignSelf: 'flex-start',
+    marginBottom: 12,
+  },
+  headerModeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 16,
+    gap: 6,
+  },
+  headerModeButtonActiveBuddy: {
+    backgroundColor: COLORS.buddy,
+  },
+  headerModeButtonActiveDate: {
+    backgroundColor: COLORS.primary,
+  },
+  headerModeText: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    fontWeight: '600',
+  },
+  headerModeTextActive: {
+    color: '#FFF',
+  },
+  headerTitleSection: {
+    marginTop: 4,
   },
   headerTitle: {
     fontSize: 28,
