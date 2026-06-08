@@ -179,9 +179,66 @@ async def get_user_info(user_id: str) -> Dict:
     # Check if it's a mock user
     if user_id.startswith("mock_user_"):
         mock_profiles = {
-            "mock_user_001": {"user_id": "mock_user_001", "name": "Priya Sharma", "avatar": "av2", "location": "Mumbai"},
-            "mock_user_002": {"user_id": "mock_user_002", "name": "Rahul Kapoor", "avatar": "av1", "location": "Delhi"},
-            "mock_user_003": {"user_id": "mock_user_003", "name": "Ananya Reddy", "avatar": "av3", "location": "Bangalore"},
+            "mock_user_001": {
+                "user_id": "mock_user_001",
+                "name": "Priya Sharma",
+                "avatar": "https://images.unsplash.com/photo-1622207691293-5cd80466dab3?w=100&h=100&fit=crop",
+                "location": "Mumbai"
+            },
+            "mock_user_002": {
+                "user_id": "mock_user_002",
+                "name": "Arjun Mehta",
+                "avatar": None,
+                "location": "Delhi"
+            },
+            "mock_user_003": {
+                "user_id": "mock_user_003",
+                "name": "Ananya Reddy",
+                "avatar": "https://images.unsplash.com/photo-1463335361701-e90f4c5045d0?w=100&h=100&fit=crop",
+                "location": "Bangalore"
+            },
+            "mock_user_005": {
+                "user_id": "mock_user_005",
+                "name": "Neha Gupta",
+                "avatar": "https://images.unsplash.com/photo-1524502397800-2eeaad7c3fe5?w=100&h=100&fit=crop",
+                "location": "Pune"
+            },
+            "mock_user_007": {
+                "user_id": "mock_user_007",
+                "name": "Sanjana Iyer",
+                "avatar": "https://images.unsplash.com/flagged/photo-1551854716-8b811be39e7e?w=100&h=100&fit=crop",
+                "location": "Hyderabad"
+            },
+            "mock_user_009": {
+                "user_id": "mock_user_009",
+                "name": "Meera Nair",
+                "avatar": "https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?w=100&h=100&fit=crop",
+                "location": "Kochi"
+            },
+            "mock_user_011": {
+                "user_id": "mock_user_011",
+                "name": "Riya Patel",
+                "avatar": "https://images.unsplash.com/photo-1729101143873-d80050bae219?w=100&h=100&fit=crop",
+                "location": "Ahmedabad"
+            },
+            "mock_user_015": {
+                "user_id": "mock_user_015",
+                "name": "Ishita Das",
+                "avatar": "https://images.unsplash.com/photo-1706943262117-b35de4ba50b4?w=100&h=100&fit=crop",
+                "location": "Kolkata"
+            },
+            "mock_user_017": {
+                "user_id": "mock_user_017",
+                "name": "Kavya Menon",
+                "avatar": "https://images.pexels.com/photos/34061448/pexels-photo-34061448.jpeg?auto=compress&w=100&h=100&fit=crop",
+                "location": "Chennai"
+            },
+            "mock_user_019": {
+                "user_id": "mock_user_019",
+                "name": "Sneha Krishnan",
+                "avatar": "https://images.pexels.com/photos/37145167/pexels-photo-37145167.jpeg?auto=compress&w=100&h=100&fit=crop",
+                "location": "Hyderabad"
+            },
         }
         return mock_profiles.get(user_id, {"user_id": user_id, "name": "Unknown", "avatar": None, "location": "Unknown"})
     

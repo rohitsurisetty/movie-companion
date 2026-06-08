@@ -2511,6 +2511,21 @@ async def upload_pictures_batch(req: PicturesUpdateRequest):
 async def get_pictures(user_id: str):
     """Get all pictures for a user"""
     try:
+        # First check for mock user with profile_picture
+        mock_user = get_mock_user_by_id(user_id)
+        if mock_user and mock_user.get("profile_picture"):
+            pictures_list = mock_user.get("pictures", [mock_user.get("profile_picture")])
+            # Convert list to picture_1, picture_2, etc. format
+            picture_dict = {
+                f"picture_{i+1}": pictures_list[i] if i < len(pictures_list) else None
+                for i in range(5)
+            }
+            return {
+                "success": True,
+                "pictures": picture_dict,
+                "count": len(pictures_list)
+            }
+        
         pictures = await get_user_pictures(user_id)
         
         if not pictures:

@@ -41,6 +41,11 @@ MOCK_USERS = [
         "gender": "Female",
         "location": "Mumbai",
         "avatar": "av2",
+        "profile_picture": "https://images.unsplash.com/photo-1622207691293-5cd80466dab3?w=400&h=600&fit=crop",
+        "pictures": [
+            "https://images.unsplash.com/photo-1622207691293-5cd80466dab3?w=400&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1552113125-81af17f36b57?w=400&h=600&fit=crop"
+        ],
         "bio": "Film enthusiast who believes a good movie is the best first date. Looking for someone who appreciates storytelling as much as I do.",
         "partnerPreference": "Men",
         "relationshipIntent": ["Long-term relationship"],
@@ -111,6 +116,11 @@ MOCK_USERS = [
         "gender": "Female",
         "location": "Bangalore",
         "avatar": "av3",
+        "profile_picture": "https://images.unsplash.com/photo-1463335361701-e90f4c5045d0?w=400&h=600&fit=crop",
+        "pictures": [
+            "https://images.unsplash.com/photo-1463335361701-e90f4c5045d0?w=400&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1516239482977-b550ba7253f2?w=400&h=600&fit=crop"
+        ],
         "bio": "Indie film lover. Give me a slow-burn drama over a blockbuster any day. Currently obsessed with A24 films.",
         "partnerPreference": "Men",
         "relationshipIntent": ["Long-term relationship", "Something casual"],
@@ -181,6 +191,11 @@ MOCK_USERS = [
         "gender": "Female",
         "location": "Pune",
         "avatar": "av5",
+        "profile_picture": "https://images.unsplash.com/photo-1524502397800-2eeaad7c3fe5?w=400&h=600&fit=crop",
+        "pictures": [
+            "https://images.unsplash.com/photo-1524502397800-2eeaad7c3fe5?w=400&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1622782045716-a05bcc4f5ae8?w=400&h=600&fit=crop"
+        ],
         "bio": "Horror movie addict who watches scary films alone at midnight. Need a movie buddy who won't judge my screaming!",
         "partnerPreference": "Men",
         "relationshipIntent": ["Something casual", "New friends"],
@@ -251,6 +266,11 @@ MOCK_USERS = [
         "gender": "Female",
         "location": "Hyderabad",
         "avatar": "av2",
+        "profile_picture": "https://images.unsplash.com/flagged/photo-1551854716-8b811be39e7e?w=400&h=600&fit=crop",
+        "pictures": [
+            "https://images.unsplash.com/flagged/photo-1551854716-8b811be39e7e?w=400&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1580489944761-15a19d654956?w=400&h=600&fit=crop"
+        ],
         "bio": "K-drama convert who still loves Tollywood. Weekends are for binge-watching. Looking for someone to share popcorn and theories with!",
         "partnerPreference": "Men",
         "relationshipIntent": ["Long-term relationship", "Something casual"],
@@ -321,6 +341,11 @@ MOCK_USERS = [
         "gender": "Female",
         "location": "Kochi",
         "avatar": "av3",
+        "profile_picture": "https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?w=400&h=600&fit=crop",
+        "pictures": [
+            "https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?w=400&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1706943262459-3ef6ce03305c?w=400&h=600&fit=crop"
+        ],
         "bio": "Malayalam cinema fan who also loves French New Wave. Yes, I watch films with subtitles by choice. Cinephile looking for fellow film buff.",
         "partnerPreference": "Men",
         "relationshipIntent": ["Long-term relationship"],
@@ -391,6 +416,11 @@ MOCK_USERS = [
         "gender": "Female",
         "location": "Ahmedabad",
         "avatar": "av5",
+        "profile_picture": "https://images.unsplash.com/photo-1729101143873-d80050bae219?w=400&h=600&fit=crop",
+        "pictures": [
+            "https://images.unsplash.com/photo-1729101143873-d80050bae219?w=400&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1659293554631-d7a38642c5e3?w=400&h=600&fit=crop"
+        ],
         "bio": "90s kid who grew up on FRIENDS and Bollywood. Love feel-good movies and romantic comedies. Looking for my lobster!",
         "partnerPreference": "Men",
         "relationshipIntent": ["Long-term relationship"],
@@ -531,6 +561,10 @@ MOCK_USERS = [
         "gender": "Female",
         "location": "Kolkata",
         "avatar": "av3",
+        "profile_picture": "https://images.unsplash.com/photo-1706943262117-b35de4ba50b4?w=400&h=600&fit=crop",
+        "pictures": [
+            "https://images.unsplash.com/photo-1706943262117-b35de4ba50b4?w=400&h=600&fit=crop"
+        ],
         "bio": "Bengali cinema runs in my blood. Also love international dramas. Looking for someone who appreciates slow cinema and meaningful stories.",
         "partnerPreference": "Men",
         "relationshipIntent": ["Long-term relationship"],
@@ -601,6 +635,10 @@ MOCK_USERS = [
         "gender": "Female",
         "location": "Chennai",
         "avatar": "av5",
+        "profile_picture": "https://images.pexels.com/photos/34061448/pexels-photo-34061448.jpeg?auto=compress&w=400&h=600&fit=crop",
+        "pictures": [
+            "https://images.pexels.com/photos/34061448/pexels-photo-34061448.jpeg?auto=compress&w=400&h=600&fit=crop"
+        ],
         "bio": "Music-lover who judges films by their soundtrack. AR Rahman fan. Love musicals and films with great background scores.",
         "partnerPreference": "Men",
         "relationshipIntent": ["Long-term relationship"],
@@ -671,6 +709,10 @@ MOCK_USERS = [
         "gender": "Female",
         "location": "Hyderabad",
         "avatar": "av2",
+        "profile_picture": "https://images.pexels.com/photos/37145167/pexels-photo-37145167.jpeg?auto=compress&w=400&h=600&fit=crop",
+        "pictures": [
+            "https://images.pexels.com/photos/37145167/pexels-photo-37145167.jpeg?auto=compress&w=400&h=600&fit=crop"
+        ],
         "bio": "Fantasy and adventure lover. Harry Potter shaped my childhood. Now into GoT-style epics. Looking for my adventure partner!",
         "partnerPreference": "Men",
         "relationshipIntent": ["Long-term relationship"],
