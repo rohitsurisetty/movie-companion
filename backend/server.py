@@ -2343,6 +2343,40 @@ async def get_mock_users():
 # Profile Pictures API Endpoints
 # =============================================
 
+@api_router.get("/user/profile/{user_id}")
+async def get_user_profile_by_id(user_id: str):
+    """Get user profile by ID (supports mock users for testing)"""
+    # First check mock users
+    mock_user = get_mock_user_by_id(user_id)
+    if mock_user:
+        return {
+            "success": True,
+            "profile": mock_user
+        }
+    
+    # Then check real users in database
+    user_profile = await db.user_profiles.find_one({"user_id": user_id}, {"_id": 0})
+    if user_profile:
+        return {
+            "success": True,
+            "profile": user_profile
+        }
+    
+    # Check basic user info
+    user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    if user:
+        return {
+            "success": True, 
+            "profile": {
+                "user_id": user_id,
+                "name": user.get("name", "Unknown"),
+                "email": user.get("email"),
+            }
+        }
+    
+    raise HTTPException(status_code=404, detail="User not found")
+
+
 class PictureUploadRequest(BaseModel):
     """Request to upload a profile picture"""
     user_id: str
