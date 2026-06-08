@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Backend Test Suite for Film Companion Chat Service MongoDB Persistence
-Tests all chat endpoints with MongoDB persistence verification
+Backend API Testing for Film Companion App
+Tests all backend APIs as per review request
 """
 
 import requests
@@ -33,25 +33,189 @@ def print_error(message: str):
 def print_info(message: str):
     print(f"{Colors.YELLOW}ℹ {message}{Colors.RESET}")
 
-def test_1_init_mock_conversations():
-    """Test 1: Create test user and initialize mock conversations"""
-    print_test("Test 1: Initialize Mock Conversations")
+def test_1_send_email_otp():
+    """Test 1: Send Email OTP"""
+    print_test("Test 1: Send Email OTP")
     
     try:
-        url = f"{BACKEND_URL}/chat/init-mock/persistence_test_user"
-        print_info(f"POST {url}")
+        url = f"{BACKEND_URL}/auth/send-email-otp"
+        payload = {"email": "newuser@test.com"}
         
-        response = requests.post(url, timeout=10)
+        print_info(f"POST {url}")
+        print_info(f"Payload: {json.dumps(payload, indent=2)}")
+        
+        response = requests.post(url, json=payload, timeout=10)
         print_info(f"Status Code: {response.status_code}")
         print_info(f"Response: {response.text}")
         
         if response.status_code == 200:
             data = response.json()
-            if data.get("success"):
-                print_success("Mock conversations initialized successfully")
+            if data.get("success") and data.get("otp"):
+                print_success(f"OTP sent successfully: {data.get('otp')}")
+                print_success(f"Is new user: {data.get('is_new_user')}")
+                return True, data.get("otp")
+            else:
+                print_error(f"API returned unexpected response: {data}")
+                return False, None
+        else:
+            print_error(f"Failed with status {response.status_code}")
+            return False, None
+            
+    except Exception as e:
+        print_error(f"Exception: {str(e)}")
+        return False, None
+
+def test_2_verify_otp(otp: str):
+    """Test 2: Verify OTP"""
+    print_test("Test 2: Verify OTP")
+    
+    try:
+        url = f"{BACKEND_URL}/auth/verify-otp"
+        payload = {
+            "type": "email",
+            "identifier": "newuser@test.com",
+            "otp": otp,
+            "name": "Test User"
+        }
+        
+        print_info(f"POST {url}")
+        print_info(f"Payload: {json.dumps(payload, indent=2)}")
+        
+        response = requests.post(url, json=payload, timeout=10)
+        print_info(f"Status Code: {response.status_code}")
+        print_info(f"Response: {response.text}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("user_id") and data.get("session_token"):
+                print_success(f"OTP verified successfully")
+                print_success(f"User ID: {data.get('user_id')}")
+                print_success(f"Session Token: {data.get('session_token')[:20]}...")
+                print_success(f"Is new user: {data.get('is_new_user')}")
+                return True, data.get("user_id")
+            else:
+                print_error(f"API returned unexpected response: {data}")
+                return False, None
+        else:
+            print_error(f"Failed with status {response.status_code}")
+            return False, None
+            
+    except Exception as e:
+        print_error(f"Exception: {str(e)}")
+        return False, None
+
+def test_3_tina_greeting():
+    """Test 3: Tina AI Greeting"""
+    print_test("Test 3: Tina AI Greeting")
+    
+    try:
+        url = f"{BACKEND_URL}/tina/greeting/Alex"
+        
+        print_info(f"GET {url}")
+        
+        response = requests.get(url, timeout=10)
+        print_info(f"Status Code: {response.status_code}")
+        print_info(f"Response: {response.text}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            greeting = data.get("greeting", "")
+            
+            # Check if greeting starts with "Tina:" (should NOT)
+            if greeting.lower().startswith("tina:"):
+                print_error(f"❌ CRITICAL: Greeting starts with 'Tina:' prefix: {greeting}")
+                return False
+            else:
+                print_success(f"✓ Greeting does NOT start with 'Tina:' prefix")
+                print_success(f"Greeting: {greeting}")
+                return True
+        else:
+            print_error(f"Failed with status {response.status_code}")
+            return False
+            
+    except Exception as e:
+        print_error(f"Exception: {str(e)}")
+        return False
+
+def test_4_tina_chat():
+    """Test 4: Tina AI Chat"""
+    print_test("Test 4: Tina AI Chat")
+    
+    try:
+        url = f"{BACKEND_URL}/tina/chat"
+        payload = {
+            "user_id": "test123",
+            "message": "hey looking for something serious",
+            "conversation_history": [],
+            "current_profile_data": {}
+        }
+        
+        print_info(f"POST {url}")
+        print_info(f"Payload: {json.dumps(payload, indent=2)}")
+        
+        response = requests.post(url, json=payload, timeout=15)
+        print_info(f"Status Code: {response.status_code}")
+        print_info(f"Response: {response.text}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            tina_response = data.get("response", "")
+            
+            # Check if response starts with "Tina:" (should NOT)
+            if tina_response.lower().startswith("tina:"):
+                print_error(f"❌ CRITICAL: Response starts with 'Tina:' prefix: {tina_response}")
+                return False
+            else:
+                print_success(f"✓ Response does NOT start with 'Tina:' prefix")
+                print_success(f"Response: {tina_response}")
+                print_success(f"Is conversation ended: {data.get('conversation_ended')}")
+                return True
+        else:
+            print_error(f"Failed with status {response.status_code}")
+            return False
+            
+    except Exception as e:
+        print_error(f"Exception: {str(e)}")
+        return False
+
+def test_5_feed_matches():
+    """Test 5: Feed/Matchmaking API"""
+    print_test("Test 5: Feed/Matchmaking API")
+    
+    try:
+        url = f"{BACKEND_URL}/matches"
+        payload = {
+            "user_id": "test123",
+            "force_refresh": False
+        }
+        
+        print_info(f"POST {url}")
+        print_info(f"Payload: {json.dumps(payload, indent=2)}")
+        
+        response = requests.post(url, json=payload, timeout=30)
+        print_info(f"Status Code: {response.status_code}")
+        print_info(f"Response: {response.text[:500]}...")
+        
+        if response.status_code == 200:
+            data = response.json()
+            matches = data.get("matches", [])
+            
+            if len(matches) > 0:
+                print_success(f"Found {len(matches)} matches")
+                
+                # Check if matches have images
+                has_images = all(match.get("picture") for match in matches)
+                if has_images:
+                    print_success(f"✓ All matches have profile images")
+                else:
+                    print_info(f"Some matches may not have profile images (expected for mock data)")
+                
+                # Display first match
+                first_match = matches[0]
+                print_info(f"First match: {first_match.get('name')}, {first_match.get('age')}, {first_match.get('location')}")
                 return True
             else:
-                print_error(f"API returned success=false: {data}")
+                print_error("No matches returned")
                 return False
         else:
             print_error(f"Failed with status {response.status_code}")
@@ -61,103 +225,52 @@ def test_1_init_mock_conversations():
         print_error(f"Exception: {str(e)}")
         return False
 
-def test_2_get_conversations():
-    """Test 2: Get conversations (verify persistence)"""
-    print_test("Test 2: Get Conversations - Verify Persistence")
+def test_6_conversations():
+    """Test 6: Get Conversations"""
+    print_test("Test 6: Get Conversations")
     
     try:
-        url = f"{BACKEND_URL}/chat/conversations/persistence_test_user"
+        url = f"{BACKEND_URL}/chat/conversations/test123"
+        
         print_info(f"GET {url}")
         
         response = requests.get(url, timeout=10)
         print_info(f"Status Code: {response.status_code}")
+        print_info(f"Response: {response.text[:500]}...")
         
         if response.status_code == 200:
             data = response.json()
             conversations = data.get("conversations", [])
             
-            print_info(f"Response: {json.dumps(data, indent=2)}")
-            print_info(f"Found {len(conversations)} conversations")
+            print_success(f"Found {len(conversations)} conversations")
             
-            # Verify we have at least 2 conversations with mock users
-            if len(conversations) >= 2:
-                print_success(f"Found {len(conversations)} conversations (expected 2+)")
-                
-                # Check for mock users
-                mock_users = ["mock_user_001", "mock_user_002", "mock_user_003"]
-                found_mock_users = []
-                for conv in conversations:
-                    other_user_id = conv.get("other_user_id")
-                    if other_user_id in mock_users:
-                        found_mock_users.append(other_user_id)
-                        print_success(f"  - Conversation with {other_user_id}: {conv.get('last_message', 'No message')[:50]}")
-                
-                if len(found_mock_users) >= 2:
-                    print_success(f"Verified conversations with mock users: {', '.join(found_mock_users)}")
-                    return True
-                else:
-                    print_error(f"Expected conversations with mock users, found: {found_mock_users}")
-                    return False
-            else:
-                print_error(f"Expected at least 2 conversations, found {len(conversations)}")
-                return False
-        else:
-            print_error(f"Failed with status {response.status_code}: {response.text}")
-            return False
-            
-    except Exception as e:
-        print_error(f"Exception: {str(e)}")
-        return False
-
-def test_3_get_messages():
-    """Test 3: Get messages for a conversation"""
-    print_test("Test 3: Get Messages for Conversation")
-    
-    try:
-        conversation_id = "mock_user_001_persistence_test_user"
-        url = f"{BACKEND_URL}/chat/messages/{conversation_id}"
-        print_info(f"GET {url}")
-        
-        response = requests.get(url, timeout=10)
-        print_info(f"Status Code: {response.status_code}")
-        
-        if response.status_code == 200:
-            data = response.json()
-            messages = data.get("messages", [])
-            
-            print_info(f"Found {len(messages)} messages")
-            
-            if len(messages) > 0:
-                print_success(f"Retrieved {len(messages)} messages from conversation")
-                
-                # Display first few messages
-                for i, msg in enumerate(messages[:3]):
-                    sender = msg.get("sender_id", "unknown")
-                    content = msg.get("content", "")[:50]
-                    print_info(f"  Message {i+1}: {sender} -> {content}")
-                
+            if len(conversations) > 0:
+                # Display first conversation
+                first_conv = conversations[0]
+                print_info(f"First conversation: {first_conv.get('other_user_name')}")
+                print_info(f"Last message: {first_conv.get('last_message', '')[:50]}")
                 return True
             else:
-                print_error("No messages found in conversation")
-                return False
+                print_info("No conversations found (expected for new user)")
+                return True
         else:
-            print_error(f"Failed with status {response.status_code}: {response.text}")
+            print_error(f"Failed with status {response.status_code}")
             return False
             
     except Exception as e:
         print_error(f"Exception: {str(e)}")
         return False
 
-def test_4_send_message():
-    """Test 4: Send a message"""
-    print_test("Test 4: Send Message")
+def test_7_send_chat_message():
+    """Test 7: Send Chat Message"""
+    print_test("Test 7: Send Chat Message")
     
     try:
         url = f"{BACKEND_URL}/chat/send"
         payload = {
-            "sender_id": "persistence_test_user",
+            "sender_id": "test123",
             "receiver_id": "mock_user_001",
-            "content": "Testing MongoDB persistence!",
+            "content": "Hey! What's your favorite movie?",
             "message_type": "text"
         }
         
@@ -166,110 +279,15 @@ def test_4_send_message():
         
         response = requests.post(url, json=payload, timeout=10)
         print_info(f"Status Code: {response.status_code}")
-        
-        if response.status_code == 200:
-            data = response.json()
-            print_info(f"Response: {json.dumps(data, indent=2)}")
-            
-            if data.get("success"):
-                message = data.get("message", {})
-                print_success(f"Message sent successfully")
-                print_success(f"  Message ID: {message.get('message_id')}")
-                print_success(f"  Content: {message.get('content')}")
-                print_success(f"  Created at: {message.get('created_at')}")
-                return True
-            else:
-                print_error(f"API returned success=false: {data}")
-                return False
-        else:
-            print_error(f"Failed with status {response.status_code}: {response.text}")
-            return False
-            
-    except Exception as e:
-        print_error(f"Exception: {str(e)}")
-        return False
-
-def test_5_ai_auto_reply():
-    """Test 5: Wait and check for AI auto-reply"""
-    print_test("Test 5: AI Auto-Reply (Wait 4 seconds)")
-    
-    try:
-        # Get message count before waiting
-        conversation_id = "mock_user_001_persistence_test_user"
-        url = f"{BACKEND_URL}/chat/messages/{conversation_id}"
-        
-        print_info("Getting initial message count...")
-        response_before = requests.get(url, timeout=10)
-        messages_before = response_before.json().get("messages", []) if response_before.status_code == 200 else []
-        count_before = len(messages_before)
-        print_info(f"Messages before: {count_before}")
-        
-        # Wait for AI auto-reply
-        print_info("Waiting 4 seconds for AI auto-reply...")
-        time.sleep(4)
-        
-        # Check for new messages
-        print_info(f"GET {url}")
-        response = requests.get(url, timeout=10)
-        print_info(f"Status Code: {response.status_code}")
-        
-        if response.status_code == 200:
-            data = response.json()
-            messages = data.get("messages", [])
-            count_after = len(messages)
-            
-            print_info(f"Messages after: {count_after}")
-            
-            if count_after > count_before:
-                # Find the new message(s)
-                new_messages = messages[:count_after - count_before]
-                
-                # Check if any new message is from mock_user_001 (AI reply)
-                ai_reply_found = False
-                for msg in new_messages:
-                    if msg.get("sender_id") == "mock_user_001":
-                        ai_reply_found = True
-                        print_success(f"AI auto-reply received from mock_user_001")
-                        print_success(f"  Content: {msg.get('content')}")
-                        print_success(f"  Created at: {msg.get('created_at')}")
-                        break
-                
-                if ai_reply_found:
-                    return True
-                else:
-                    print_error("New messages found but no AI reply from mock_user_001")
-                    return False
-            else:
-                print_error(f"No new messages received (expected AI auto-reply)")
-                print_info("Note: AI auto-reply might be disabled or LLM integration issue")
-                return False
-        else:
-            print_error(f"Failed with status {response.status_code}: {response.text}")
-            return False
-            
-    except Exception as e:
-        print_error(f"Exception: {str(e)}")
-        return False
-
-def test_6_mark_as_read():
-    """Test 6: Mark messages as read"""
-    print_test("Test 6: Mark Messages as Read")
-    
-    try:
-        conversation_id = "mock_user_001_persistence_test_user"
-        user_id = "persistence_test_user"
-        url = f"{BACKEND_URL}/chat/read/{conversation_id}?user_id={user_id}"
-        
-        print_info(f"POST {url}")
-        
-        response = requests.post(url, timeout=10)
-        print_info(f"Status Code: {response.status_code}")
         print_info(f"Response: {response.text}")
         
         if response.status_code == 200:
             data = response.json()
             if data.get("success"):
-                print_success("Messages marked as read successfully")
+                message = data.get("message", {})
+                print_success(f"Message sent successfully")
+                print_success(f"Message ID: {message.get('message_id')}")
+                print_success(f"Content: {message.get('content')}")
                 return True
             else:
                 print_error(f"API returned success=false: {data}")
@@ -282,93 +300,42 @@ def test_6_mark_as_read():
         print_error(f"Exception: {str(e)}")
         return False
 
-def test_7_ice_breakers():
-    """Test 7: Test ice breakers (LLM integration)"""
-    print_test("Test 7: Ice Breakers (LLM Integration)")
+def test_8_user_pictures():
+    """Test 8: Get User Pictures"""
+    print_test("Test 8: Get User Pictures")
     
     try:
-        url = f"{BACKEND_URL}/chat/ice-breakers"
-        payload = {
-            "user_id": "persistence_test_user",
-            "match_user_id": "mock_user_001"
-        }
+        url = f"{BACKEND_URL}/user/pictures/test123"
         
-        print_info(f"POST {url}")
-        print_info(f"Payload: {json.dumps(payload, indent=2)}")
+        print_info(f"GET {url}")
         
-        response = requests.post(url, json=payload, timeout=15)
+        response = requests.get(url, timeout=10)
         print_info(f"Status Code: {response.status_code}")
+        print_info(f"Response: {response.text}")
         
         if response.status_code == 200:
             data = response.json()
-            print_info(f"Response: {json.dumps(data, indent=2)}")
+            pictures = data.get("pictures", {})
             
-            if data.get("success"):
-                ice_breakers = data.get("ice_breakers", [])
-                if len(ice_breakers) > 0:
-                    print_success(f"Received {len(ice_breakers)} ice breakers")
-                    for i, icebreaker in enumerate(ice_breakers, 1):
-                        print_success(f"  {i}. {icebreaker}")
-                    return True
-                else:
-                    print_error("No ice breakers returned")
-                    return False
-            else:
-                print_error(f"API returned success=false: {data}")
-                return False
-        else:
-            print_error(f"Failed with status {response.status_code}: {response.text}")
-            return False
-            
-    except Exception as e:
-        print_error(f"Exception: {str(e)}")
-        return False
-
-def test_8_verify_mongodb_persistence():
-    """Test 8: Verify data persistence in MongoDB"""
-    print_test("Test 8: Verify MongoDB Persistence")
-    
-    try:
-        print_info("Verifying data persists across multiple requests...")
-        
-        # Test 1: Get conversations again
-        url = f"{BACKEND_URL}/chat/conversations/persistence_test_user"
-        response = requests.get(url, timeout=10)
-        
-        if response.status_code == 200:
-            data = response.json()
-            conversations = data.get("conversations", [])
-            print_success(f"Conversations still accessible: {len(conversations)} found")
-        else:
-            print_error("Failed to retrieve conversations")
-            return False
-        
-        # Test 2: Get messages again
-        conversation_id = "mock_user_001_persistence_test_user"
-        url = f"{BACKEND_URL}/chat/messages/{conversation_id}"
-        response = requests.get(url, timeout=10)
-        
-        if response.status_code == 200:
-            data = response.json()
-            messages = data.get("messages", [])
-            print_success(f"Messages still accessible: {len(messages)} found")
-            
-            # Verify our test message is there
-            test_message_found = False
-            for msg in messages:
-                if "Testing MongoDB persistence!" in msg.get("content", ""):
-                    test_message_found = True
-                    print_success(f"Test message found in persistence: '{msg.get('content')}'")
-                    break
-            
-            if test_message_found:
-                print_success("MongoDB persistence verified - data is stored and retrievable")
+            # Pictures is a dict with picture_1, picture_2, etc.
+            if isinstance(pictures, dict):
+                picture_count = data.get("count", 0)
+                print_success(f"Pictures endpoint working correctly")
+                print_info(f"Picture count: {picture_count}")
+                
+                # Display pictures if any
+                for key, value in pictures.items():
+                    if value:
+                        print_info(f"{key}: {value[:50]}...")
+                    else:
+                        print_info(f"{key}: None (no picture uploaded)")
+                
                 return True
             else:
-                print_error("Test message not found in persistence")
+                print_error(f"Unexpected pictures format: {type(pictures)}")
                 return False
         else:
-            print_error("Failed to retrieve messages")
+            print_error(f"Failed with status {response.status_code}")
             return False
             
     except Exception as e:
@@ -378,21 +345,43 @@ def test_8_verify_mongodb_persistence():
 def main():
     """Run all tests"""
     print(f"\n{Colors.BLUE}{'='*80}{Colors.RESET}")
-    print(f"{Colors.BLUE}FILM COMPANION - CHAT SERVICE MONGODB PERSISTENCE TESTS{Colors.RESET}")
+    print(f"{Colors.BLUE}FILM COMPANION - BACKEND API TESTING{Colors.RESET}")
     print(f"{Colors.BLUE}Backend URL: {BACKEND_URL}{Colors.RESET}")
     print(f"{Colors.BLUE}{'='*80}{Colors.RESET}")
     
     results = {}
+    otp = None
+    user_id = None
     
-    # Run all tests
-    results["Test 1: Init Mock Conversations"] = test_1_init_mock_conversations()
-    results["Test 2: Get Conversations"] = test_2_get_conversations()
-    results["Test 3: Get Messages"] = test_3_get_messages()
-    results["Test 4: Send Message"] = test_4_send_message()
-    results["Test 5: AI Auto-Reply"] = test_5_ai_auto_reply()
-    results["Test 6: Mark as Read"] = test_6_mark_as_read()
-    results["Test 7: Ice Breakers"] = test_7_ice_breakers()
-    results["Test 8: Verify MongoDB Persistence"] = test_8_verify_mongodb_persistence()
+    # Test 1: Send Email OTP
+    success, otp = test_1_send_email_otp()
+    results["Test 1: Send Email OTP"] = success
+    
+    # Test 2: Verify OTP (only if Test 1 passed)
+    if success and otp:
+        success, user_id = test_2_verify_otp(otp)
+        results["Test 2: Verify OTP"] = success
+    else:
+        results["Test 2: Verify OTP"] = False
+        print_error("Skipping Test 2 - OTP not available")
+    
+    # Test 3: Tina Greeting
+    results["Test 3: Tina AI Greeting"] = test_3_tina_greeting()
+    
+    # Test 4: Tina Chat
+    results["Test 4: Tina AI Chat"] = test_4_tina_chat()
+    
+    # Test 5: Feed Matches
+    results["Test 5: Feed/Matchmaking API"] = test_5_feed_matches()
+    
+    # Test 6: Conversations
+    results["Test 6: Get Conversations"] = test_6_conversations()
+    
+    # Test 7: Send Chat Message
+    results["Test 7: Send Chat Message"] = test_7_send_chat_message()
+    
+    # Test 8: User Pictures
+    results["Test 8: Get User Pictures"] = test_8_user_pictures()
     
     # Print summary
     print(f"\n{Colors.BLUE}{'='*80}{Colors.RESET}")
