@@ -36,6 +36,24 @@ from matchmaking_service import (
     invalidate_user_cache
 )
 
+# Import chat service
+from chat_service import (
+    get_or_create_conversation,
+    send_message,
+    get_messages,
+    get_conversations,
+    get_message_requests,
+    accept_message_request,
+    decline_message_request,
+    unmatch_user,
+    report_user,
+    set_meeting_status,
+    mark_messages_read,
+    generate_ice_breakers,
+    generate_reply_suggestions,
+    create_mock_conversations,
+)
+
 # Import picture service for profile photos
 from picture_service import (
     upload_picture_to_storage,
@@ -2518,6 +2536,251 @@ async def delete_picture(user_id: str, picture_number: int, session_id: str = ""
         raise
     except Exception as e:
         logger.error(f"Delete picture error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============== CHAT ENDPOINTS ==============
+
+class SendMessageRequest(BaseModel):
+    sender_id: str
+    receiver_id: str
+    content: str
+    message_type: str = "text"  # text, image, voice, gif
+    media_url: Optional[str] = None
+
+class AcceptDeclineRequest(BaseModel):
+    user_id: str
+    conversation_id: str
+
+class UnmatchRequest(BaseModel):
+    user_id: str
+    other_user_id: str
+    reason: Optional[str] = None
+
+class ReportRequest(BaseModel):
+    reporter_id: str
+    reported_id: str
+    reason: str
+    details: Optional[str] = None
+
+class MeetingStatusRequest(BaseModel):
+    user_id: str
+    other_user_id: str
+    did_meet: bool
+    was_same_person: Optional[bool] = None
+
+class IceBreakerRequest(BaseModel):
+    user_id: str
+    match_user_id: str
+
+class ReplySuggestionsRequest(BaseModel):
+    user_id: str
+    conversation_id: str
+
+
+@api_router.get("/chat/conversations/{user_id}")
+async def api_get_conversations(user_id: str):
+    """Get all active conversations for a user"""
+    try:
+        conversations = get_conversations(user_id)
+        
+        # Enrich with user profile data
+        for conv in conversations:
+            other_id = conv.get("other_user_id")
+            match_profile = get_mock_user_by_id(other_id)
+            if match_profile:
+                conv["other_user"] = {
+                    "user_id": other_id,
+                    "name": match_profile.get("name", "Unknown"),
+                    "avatar": match_profile.get("avatar"),
+                    "location": match_profile.get("location"),
+                }
+        
+        return {"success": True, "conversations": conversations}
+    except Exception as e:
+        logger.error(f"Get conversations error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.get("/chat/requests/{user_id}")
+async def api_get_message_requests(user_id: str):
+    """Get pending message requests for a user"""
+    try:
+        requests = get_message_requests(user_id)
+        
+        # Enrich with user profile data
+        for req in requests:
+            from_id = req.get("from_user_id")
+            match_profile = get_mock_user_by_id(from_id)
+            if match_profile:
+                req["from_user"] = {
+                    "user_id": from_id,
+                    "name": match_profile.get("name", "Unknown"),
+                    "avatar": match_profile.get("avatar"),
+                    "age": match_profile.get("age"),
+                    "location": match_profile.get("location"),
+                    "bio": match_profile.get("bio"),
+                }
+        
+        return {"success": True, "requests": requests}
+    except Exception as e:
+        logger.error(f"Get message requests error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.get("/chat/messages/{conversation_id}")
+async def api_get_messages(conversation_id: str, limit: int = 50, before: Optional[str] = None):
+    """Get messages for a conversation"""
+    try:
+        messages = get_messages(conversation_id, limit, before)
+        return {"success": True, "messages": messages}
+    except Exception as e:
+        logger.error(f"Get messages error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.post("/chat/send")
+async def api_send_message(req: SendMessageRequest):
+    """Send a message"""
+    try:
+        message = send_message(
+            sender_id=req.sender_id,
+            receiver_id=req.receiver_id,
+            content=req.content,
+            message_type=req.message_type,
+            media_url=req.media_url
+        )
+        return {"success": True, "message": message}
+    except Exception as e:
+        logger.error(f"Send message error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.post("/chat/accept")
+async def api_accept_request(req: AcceptDeclineRequest):
+    """Accept a message request"""
+    try:
+        success = accept_message_request(req.user_id, req.conversation_id)
+        return {"success": success}
+    except Exception as e:
+        logger.error(f"Accept request error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.post("/chat/decline")
+async def api_decline_request(req: AcceptDeclineRequest):
+    """Decline a message request"""
+    try:
+        success = decline_message_request(req.user_id, req.conversation_id)
+        return {"success": success}
+    except Exception as e:
+        logger.error(f"Decline request error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.post("/chat/unmatch")
+async def api_unmatch(req: UnmatchRequest):
+    """Unmatch with a user"""
+    try:
+        success = unmatch_user(req.user_id, req.other_user_id, req.reason)
+        return {"success": success}
+    except Exception as e:
+        logger.error(f"Unmatch error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.post("/chat/report")
+async def api_report_user(req: ReportRequest):
+    """Report a user"""
+    try:
+        report = report_user(
+            reporter_id=req.reporter_id,
+            reported_id=req.reported_id,
+            reason=req.reason,
+            details=req.details
+        )
+        return {"success": True, "report": report}
+    except Exception as e:
+        logger.error(f"Report user error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.post("/chat/meeting-status")
+async def api_set_meeting_status(req: MeetingStatusRequest):
+    """Set meeting verification status"""
+    try:
+        success = set_meeting_status(
+            user_id=req.user_id,
+            other_user_id=req.other_user_id,
+            did_meet=req.did_meet,
+            was_same_person=req.was_same_person
+        )
+        return {"success": success}
+    except Exception as e:
+        logger.error(f"Set meeting status error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.post("/chat/read/{conversation_id}")
+async def api_mark_read(conversation_id: str, user_id: str):
+    """Mark messages as read"""
+    try:
+        success = mark_messages_read(user_id, conversation_id)
+        return {"success": success}
+    except Exception as e:
+        logger.error(f"Mark read error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.post("/chat/ice-breakers")
+async def api_get_ice_breakers(req: IceBreakerRequest):
+    """Get AI-generated ice breaker suggestions"""
+    try:
+        # Get user profiles
+        user_profile = {"user_id": req.user_id, "name": "User", "genres": ["Drama", "Sci-Fi"]}
+        match_profile = get_mock_user_by_id(req.match_user_id)
+        
+        if not match_profile:
+            match_profile = {"name": "Match", "genres": ["Drama"], "topMovies": []}
+        
+        ice_breakers = await generate_ice_breakers(user_profile, match_profile)
+        return {"success": True, "ice_breakers": ice_breakers}
+    except Exception as e:
+        logger.error(f"Ice breakers error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.post("/chat/reply-suggestions")
+async def api_get_reply_suggestions(req: ReplySuggestionsRequest):
+    """Get AI-generated reply suggestions"""
+    try:
+        # Get messages and profiles
+        messages = get_messages(req.conversation_id, limit=10)
+        user_profile = {"user_id": req.user_id, "name": "User", "genres": ["Drama", "Sci-Fi"]}
+        
+        # Get other user from conversation
+        match_profile = {"name": "Match", "genres": ["Drama"]}
+        
+        suggestions = await generate_reply_suggestions(
+            conversation_messages=list(reversed(messages)),
+            user_profile=user_profile,
+            match_profile=match_profile
+        )
+        return {"success": True, "suggestions": suggestions}
+    except Exception as e:
+        logger.error(f"Reply suggestions error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.post("/chat/init-mock/{user_id}")
+async def api_init_mock_conversations(user_id: str):
+    """Initialize mock conversations for testing"""
+    try:
+        mock_users = get_all_mock_users()[:3]
+        create_mock_conversations(user_id, mock_users)
+        return {"success": True, "message": "Mock conversations created"}
+    except Exception as e:
+        logger.error(f"Init mock conversations error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
