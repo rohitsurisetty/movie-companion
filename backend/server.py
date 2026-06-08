@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, Request, Response, HTTPException
+from fastapi import FastAPI, APIRouter, Request, Response, HTTPException, BackgroundTasks
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -39,6 +39,7 @@ from matchmaking_service import (
 # Import chat service
 from chat_service import (
     get_or_create_conversation,
+    get_conversation_id,
     send_message,
     get_messages,
     get_conversations,
@@ -51,6 +52,8 @@ from chat_service import (
     mark_messages_read,
     generate_ice_breakers,
     generate_reply_suggestions,
+    generate_ai_auto_reply,
+    add_ai_reply_to_conversation,
     create_mock_conversations,
 )
 
@@ -2639,9 +2642,39 @@ async def api_get_messages(conversation_id: str, limit: int = 50, before: Option
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# Helper function for AI auto-reply (runs in background)
+import asyncio
+
+async def trigger_ai_auto_reply(
+    conversation_id: str,
+    user_message: str,
+    match_profile: Dict[str, Any],
+    sender_id: str,
+    receiver_id: str
+):
+    """Background task to generate and send AI auto-reply"""
+    try:
+        # Wait 1-3 seconds to simulate typing
+        await asyncio.sleep(random.uniform(1.5, 3.0))
+        
+        # Generate AI reply
+        ai_reply = await generate_ai_auto_reply(conversation_id, user_message, match_profile)
+        
+        # Add the AI reply to the conversation
+        add_ai_reply_to_conversation(
+            sender_id=receiver_id,  # The match is responding
+            receiver_id=sender_id,   # To the user
+            content=ai_reply
+        )
+        
+        logger.info(f"AI auto-reply sent in conversation {conversation_id}: {ai_reply[:50]}...")
+    except Exception as e:
+        logger.error(f"Error generating AI auto-reply: {e}")
+
+
 @api_router.post("/chat/send")
-async def api_send_message(req: SendMessageRequest):
-    """Send a message"""
+async def api_send_message(req: SendMessageRequest, background_tasks: BackgroundTasks):
+    """Send a message and optionally trigger AI auto-reply for testing"""
     try:
         message = send_message(
             sender_id=req.sender_id,
@@ -2650,6 +2683,56 @@ async def api_send_message(req: SendMessageRequest):
             message_type=req.message_type,
             media_url=req.media_url
         )
+        
+        # For testing: trigger AI auto-reply after a short delay
+        # This simulates the match replying back
+        if req.receiver_id.startswith("mock_"):
+            # Get match profile for context
+            mock_profiles = {
+                "mock_user_001": {
+                    "user_id": "mock_user_001",
+                    "name": "Priya Sharma",
+                    "age": 28,
+                    "location": "Mumbai",
+                    "genres": ["Drama", "Romance", "Thriller"],
+                    "topMovies": [{"title": "Interstellar"}, {"title": "The Dark Knight"}]
+                },
+                "mock_user_002": {
+                    "user_id": "mock_user_002",
+                    "name": "Rahul Kapoor",
+                    "age": 30,
+                    "location": "Delhi",
+                    "genres": ["Action", "Sci-Fi", "Comedy"],
+                    "topMovies": [{"title": "Inception"}, {"title": "The Matrix"}]
+                },
+                "mock_user_003": {
+                    "user_id": "mock_user_003",
+                    "name": "Ananya Reddy",
+                    "age": 26,
+                    "location": "Bangalore",
+                    "genres": ["Comedy", "Drama", "Adventure"],
+                    "topMovies": [{"title": "Oppenheimer"}, {"title": "Barbie"}]
+                }
+            }
+            match_profile = mock_profiles.get(req.receiver_id, {
+                "user_id": req.receiver_id,
+                "name": "Movie Buddy",
+                "age": 27,
+                "location": "India",
+                "genres": ["Drama", "Comedy"],
+                "topMovies": []
+            })
+            
+            # Schedule AI auto-reply in background
+            background_tasks.add_task(
+                trigger_ai_auto_reply,
+                conversation_id=get_conversation_id(req.sender_id, req.receiver_id),
+                user_message=req.content,
+                match_profile=match_profile,
+                sender_id=req.sender_id,
+                receiver_id=req.receiver_id
+            )
+        
         return {"success": True, "message": message}
     except Exception as e:
         logger.error(f"Send message error: {e}")
