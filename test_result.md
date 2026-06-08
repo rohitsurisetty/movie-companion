@@ -394,6 +394,77 @@ frontend_comprehensive_test:
 agent_communication:
   - agent: "testing"
     message: |
+      ❌ TINA AI AGENT ONBOARDING FLOW - CRITICAL BUG FOUND (June 2026)
+      
+      TESTING STATUS: BLOCKED BY AUTHENTICATION BUG
+      
+      CRITICAL ISSUE IDENTIFIED:
+      The OTP verification flow is BROKEN. Users cannot complete email OTP authentication, which blocks access to the entire Tina AI onboarding flow.
+      
+      ROOT CAUSE ANALYSIS:
+      1. Backend verify-otp endpoint requires: type, identifier, otp, name
+      2. Frontend code (index.tsx lines 220-229) correctly sends these fields
+      3. Manual API testing confirms backend works correctly when payload is correct
+      4. However, automated UI testing shows OTP verification consistently fails with 400 Bad Request
+      5. Backend logs show: "POST /api/auth/verify-otp HTTP/1.1" 400 Bad Request
+      
+      TESTING ATTEMPTED:
+      ✅ Email login button click - WORKS
+      ✅ Email input and Send OTP - WORKS  
+      ✅ OTP is generated and returned (e.g., 328282, 651084) - WORKS
+      ❌ OTP verification - FAILS (400 Bad Request)
+      ❌ Cannot proceed to onboarding screen
+      ❌ Cannot test Tina AI agent features
+      
+      MANUAL API TESTING (SUCCESSFUL):
+      ```bash
+      # Send OTP
+      POST /api/auth/send-email-otp
+      {"email": "tinatest3@test.com"}
+      Response: {"success": true, "otp": "651084", "is_new_user": true}
+      
+      # Verify OTP (with correct payload)
+      POST /api/auth/verify-otp
+      {"type": "email", "identifier": "tinatest3@test.com", "otp": "651084", "name": "Test User"}
+      Response: {"user_id": "user_8de17b6da256", "session_token": "...", "is_new_user": true}
+      ✅ WORKS CORRECTLY
+      ```
+      
+      TINA AI BACKEND VERIFICATION:
+      ✅ GET /api/tina/greeting/{name} - WORKS (returns flirty Gen-Z greeting)
+      ✅ POST /api/tina/chat - EXISTS (not tested due to auth blocker)
+      ✅ Tina service integrated with MongoDB
+      ✅ Backend implementation appears correct
+      
+      FRONTEND IMPLEMENTATION REVIEW:
+      ✅ TinaChat component exists (/app/frontend/src/components/TinaChat.tsx)
+      ✅ Onboarding flow includes "Meet Tina" screen (step 2)
+      ✅ Chat UI uses GiftedChat library with proper styling
+      ✅ Exit detection logic implemented (checks for "bye", "done")
+      ✅ Profile data extraction and completion flow implemented
+      
+      SCREENSHOTS CAPTURED:
+      - tina_auth_issue.png - Shows stuck on OTP verification screen
+      - tina_current_screen.png - Confirms cannot proceed past auth
+      - tina_error_final.png - Final error state
+      
+      IMPACT:
+      🚨 HIGH PRIORITY - Authentication is completely broken for email OTP flow
+      🚨 Blocks all new user signups via email
+      🚨 Blocks testing of Tina AI agent features
+      🚨 Blocks testing of entire onboarding flow
+      
+      RECOMMENDATION:
+      1. Debug why frontend OTP verification request fails (check network payload in browser)
+      2. Verify authMode state is correctly set to 'email-otp' before verification
+      3. Check if there's a timing issue or state management problem
+      4. Add better error logging to identify exact failure point
+      5. Consider adding data-testid to OTP input and Create Account button for better testing
+      
+      CANNOT PROCEED WITH TINA AI TESTING UNTIL AUTH BUG IS FIXED.
+  
+  - agent: "testing"
+    message: |
       ✅ CHAT IMPROVEMENTS TESTING COMPLETE (June 2026)
       
       TESTED FEATURES:
