@@ -275,10 +275,9 @@ export default function Onboarding() {
       case 10:
         return (
           <TopMoviesStep
-            topMovies={profile.topMovies}
-            onUpdate={(movies) => handleUpdate('topMovies', movies)}
+            data={profile}
+            onUpdate={(field, value) => handleUpdate(field as keyof ProfileData, value)}
             onNext={handleNext}
-            onBack={handleBack}
           />
         );
       
@@ -294,8 +293,8 @@ export default function Onboarding() {
       case 12:
         return (
           <ProfilePreviewStep
-            profile={profile}
-            onBack={handleBack}
+            data={profile}
+            onUpdate={(field, value) => handleUpdate(field as keyof ProfileData, value)}
             onNext={handleNext}
           />
         );
@@ -303,9 +302,9 @@ export default function Onboarding() {
       case 13:
         return (
           <PublicProfilePreviewStep
-            profile={profile}
-            onBack={handleBack}
-            onNext={handleNext}
+            data={profile}
+            onEdit={handleBack}
+            onContinue={handleNext}
           />
         );
       
