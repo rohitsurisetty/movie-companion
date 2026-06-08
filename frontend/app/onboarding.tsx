@@ -248,12 +248,8 @@ export default function Onboarding() {
       case 0:
         return (
           <BasicInfoStep
-            name={profile.name || ''}
-            dateOfBirth={profile.dateOfBirth || ''}
-            location={profile.location || ''}
-            onNameChange={(v) => handleUpdate('name', v)}
-            onDateOfBirthChange={(v) => handleUpdate('dateOfBirth', v)}
-            onLocationChange={(v) => handleUpdate('location', v)}
+            data={profile}
+            onUpdate={(field, value) => handleUpdate(field as keyof ProfileData, value)}
             onNext={handleNext}
           />
         );
