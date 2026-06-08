@@ -8,14 +8,19 @@ Handles:
 - Unmatch & Report
 - Meeting verification
 - AI ice breakers & reply suggestions
+
+Now with MongoDB persistence for production use.
 """
 
 import os
+import logging
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Any
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 # Import emergent integrations for LLM
 try:
@@ -25,10 +30,14 @@ except ImportError:
 
 EMERGENT_LLM_KEY = os.getenv("EMERGENT_LLM_KEY")
 
-# In-memory storage (would be MongoDB in production)
-_conversations = {}  # conversation_id -> conversation data
-_messages = {}  # conversation_id -> list of messages
-_message_requests = {}  # user_id -> list of pending requests
+# MongoDB database reference (will be set by server.py)
+_db = None
+
+def set_chat_db(db):
+    """Set the MongoDB database reference"""
+    global _db
+    _db = db
+    logger.info("Chat service connected to MongoDB")
 
 
 def get_conversation_id(user1_id: str, user2_id: str) -> str:
@@ -36,28 +45,36 @@ def get_conversation_id(user1_id: str, user2_id: str) -> str:
     return "_".join(sorted([user1_id, user2_id]))
 
 
-def get_or_create_conversation(user1_id: str, user2_id: str) -> Dict:
+async def get_or_create_conversation(user1_id: str, user2_id: str) -> Dict:
     """Get existing conversation or create a new one"""
     conv_id = get_conversation_id(user1_id, user2_id)
     
-    if conv_id not in _conversations:
-        _conversations[conv_id] = {
-            "conversation_id": conv_id,
-            "participants": [user1_id, user2_id],
-            "created_at": datetime.utcnow().isoformat(),
-            "status": "pending",  # pending, active, unmatched
-            "last_message": None,
-            "last_message_at": None,
-            "unread_count": {user1_id: 0, user2_id: 0},
-            "meeting_status": None,  # None, "asked", "confirmed", "reported"
-            "verification_status": None,  # None, "same_person", "different_person"
-        }
-        _messages[conv_id] = []
+    # Try to find existing conversation
+    existing = await _db.chat_conversations.find_one({"conversation_id": conv_id})
     
-    return _conversations[conv_id]
+    if existing:
+        # Remove MongoDB _id field
+        existing.pop("_id", None)
+        return existing
+    
+    # Create new conversation
+    new_conv = {
+        "conversation_id": conv_id,
+        "participants": [user1_id, user2_id],
+        "created_at": datetime.utcnow().isoformat(),
+        "status": "pending",  # pending, active, unmatched, declined
+        "last_message": None,
+        "last_message_at": None,
+        "unread_count": {user1_id: 0, user2_id: 0},
+        "meeting_status": None,  # None, "asked", "confirmed", "reported"
+        "verification_status": None,  # None, "same_person", "different_person"
+    }
+    
+    await _db.chat_conversations.insert_one(new_conv.copy())
+    return new_conv
 
 
-def send_message(
+async def send_message(
     sender_id: str,
     receiver_id: str,
     content: str,
@@ -66,7 +83,7 @@ def send_message(
     auto_reply: bool = True  # Enable AI auto-reply for testing
 ) -> Dict:
     """Send a message to another user"""
-    conv = get_or_create_conversation(sender_id, receiver_id)
+    conv = await get_or_create_conversation(sender_id, receiver_id)
     conv_id = conv["conversation_id"]
     
     message = {
@@ -82,102 +99,173 @@ def send_message(
         "delivered": True,
     }
     
-    _messages[conv_id].append(message)
+    # Insert message to MongoDB
+    await _db.chat_messages.insert_one(message.copy())
+    
+    # Count messages in conversation to check if first message
+    message_count = await _db.chat_messages.count_documents({"conversation_id": conv_id})
     
     # Update conversation
-    conv["last_message"] = content[:50] + "..." if len(content) > 50 else content
-    conv["last_message_at"] = message["created_at"]
-    conv["unread_count"][receiver_id] = conv["unread_count"].get(receiver_id, 0) + 1
+    update_data = {
+        "last_message": content[:50] + "..." if len(content) > 50 else content,
+        "last_message_at": message["created_at"],
+        f"unread_count.{receiver_id}": conv["unread_count"].get(receiver_id, 0) + 1
+    }
+    
+    await _db.chat_conversations.update_one(
+        {"conversation_id": conv_id},
+        {"$set": update_data}
+    )
     
     # If this is first message, add to message requests
-    if conv["status"] == "pending" and len(_messages[conv_id]) == 1:
-        if receiver_id not in _message_requests:
-            _message_requests[receiver_id] = []
-        _message_requests[receiver_id].append({
+    if conv["status"] == "pending" and message_count == 1:
+        request = {
             "conversation_id": conv_id,
             "from_user_id": sender_id,
+            "to_user_id": receiver_id,
             "preview": content[:100],
             "created_at": message["created_at"],
-        })
+        }
+        await _db.chat_requests.insert_one(request)
     
     return message
 
 
-def get_messages(conversation_id: str, limit: int = 50, before: Optional[str] = None) -> List[Dict]:
+async def get_messages(conversation_id: str, limit: int = 50, before: Optional[str] = None) -> List[Dict]:
     """Get messages for a conversation"""
-    messages = _messages.get(conversation_id, [])
+    query = {"conversation_id": conversation_id}
     
     if before:
-        messages = [m for m in messages if m["created_at"] < before]
+        query["created_at"] = {"$lt": before}
     
-    return sorted(messages, key=lambda x: x["created_at"], reverse=True)[:limit]
+    cursor = _db.chat_messages.find(query, {"_id": 0}).sort("created_at", -1).limit(limit)
+    messages = await cursor.to_list(length=limit)
+    
+    return messages
 
 
-def get_conversations(user_id: str) -> List[Dict]:
+async def get_conversations(user_id: str) -> List[Dict]:
     """Get all active conversations for a user"""
-    user_convs = []
+    cursor = _db.chat_conversations.find(
+        {
+            "participants": user_id,
+            "status": "active"
+        },
+        {"_id": 0}
+    ).sort("last_message_at", -1)
     
-    for conv_id, conv in _conversations.items():
-        if user_id in conv["participants"] and conv["status"] == "active":
-            other_user_id = [p for p in conv["participants"] if p != user_id][0]
-            user_convs.append({
-                **conv,
-                "other_user_id": other_user_id,
-                "unread": conv["unread_count"].get(user_id, 0),
-            })
+    conversations = await cursor.to_list(length=100)
     
-    return sorted(user_convs, key=lambda x: x["last_message_at"] or "", reverse=True)
+    # Enrich with other_user info
+    result = []
+    for conv in conversations:
+        other_user_id = [p for p in conv["participants"] if p != user_id][0]
+        
+        # Get other user's basic info from mock profiles or users collection
+        other_user = await get_user_info(other_user_id)
+        
+        result.append({
+            **conv,
+            "other_user_id": other_user_id,
+            "unread": conv.get("unread_count", {}).get(user_id, 0),
+            "other_user": other_user
+        })
+    
+    return result
 
 
-def get_message_requests(user_id: str) -> List[Dict]:
+async def get_user_info(user_id: str) -> Dict:
+    """Get basic user info for chat display"""
+    # Check if it's a mock user
+    if user_id.startswith("mock_user_"):
+        mock_profiles = {
+            "mock_user_001": {"user_id": "mock_user_001", "name": "Priya Sharma", "avatar": "av2", "location": "Mumbai"},
+            "mock_user_002": {"user_id": "mock_user_002", "name": "Rahul Kapoor", "avatar": "av1", "location": "Delhi"},
+            "mock_user_003": {"user_id": "mock_user_003", "name": "Ananya Reddy", "avatar": "av3", "location": "Bangalore"},
+        }
+        return mock_profiles.get(user_id, {"user_id": user_id, "name": "Unknown", "avatar": None, "location": "Unknown"})
+    
+    # Try to find in users collection
+    user = await _db.users.find_one({"user_id": user_id}, {"_id": 0, "user_id": 1, "name": 1, "picture": 1})
+    if user:
+        return {
+            "user_id": user.get("user_id"),
+            "name": user.get("name", "Unknown"),
+            "avatar": user.get("picture"),
+            "location": None
+        }
+    
+    return {"user_id": user_id, "name": "Unknown", "avatar": None, "location": None}
+
+
+async def get_message_requests(user_id: str) -> List[Dict]:
     """Get pending message requests for a user"""
-    return _message_requests.get(user_id, [])
+    cursor = _db.chat_requests.find(
+        {"to_user_id": user_id},
+        {"_id": 0}
+    ).sort("created_at", -1)
+    
+    requests = await cursor.to_list(length=50)
+    
+    # Enrich with sender info
+    for req in requests:
+        req["from_user"] = await get_user_info(req["from_user_id"])
+    
+    return requests
 
 
-def accept_message_request(user_id: str, conversation_id: str) -> bool:
+async def accept_message_request(user_id: str, conversation_id: str) -> bool:
     """Accept a message request"""
-    if conversation_id in _conversations:
-        _conversations[conversation_id]["status"] = "active"
-        
+    result = await _db.chat_conversations.update_one(
+        {"conversation_id": conversation_id},
+        {"$set": {"status": "active"}}
+    )
+    
+    if result.modified_count > 0:
         # Remove from requests
-        if user_id in _message_requests:
-            _message_requests[user_id] = [
-                r for r in _message_requests[user_id] 
-                if r["conversation_id"] != conversation_id
-            ]
+        await _db.chat_requests.delete_one({
+            "conversation_id": conversation_id,
+            "to_user_id": user_id
+        })
         return True
     return False
 
 
-def decline_message_request(user_id: str, conversation_id: str) -> bool:
+async def decline_message_request(user_id: str, conversation_id: str) -> bool:
     """Decline a message request"""
-    if conversation_id in _conversations:
-        _conversations[conversation_id]["status"] = "declined"
-        
+    result = await _db.chat_conversations.update_one(
+        {"conversation_id": conversation_id},
+        {"$set": {"status": "declined"}}
+    )
+    
+    if result.modified_count > 0:
         # Remove from requests
-        if user_id in _message_requests:
-            _message_requests[user_id] = [
-                r for r in _message_requests[user_id] 
-                if r["conversation_id"] != conversation_id
-            ]
+        await _db.chat_requests.delete_one({
+            "conversation_id": conversation_id,
+            "to_user_id": user_id
+        })
         return True
     return False
 
 
-def unmatch_user(user_id: str, other_user_id: str, reason: Optional[str] = None) -> bool:
+async def unmatch_user(user_id: str, other_user_id: str, reason: Optional[str] = None) -> bool:
     """Unmatch with a user"""
     conv_id = get_conversation_id(user_id, other_user_id)
     
-    if conv_id in _conversations:
-        _conversations[conv_id]["status"] = "unmatched"
-        _conversations[conv_id]["unmatched_by"] = user_id
-        _conversations[conv_id]["unmatch_reason"] = reason
-        _conversations[conv_id]["unmatched_at"] = datetime.utcnow().isoformat()
-        return True
-    return False
+    result = await _db.chat_conversations.update_one(
+        {"conversation_id": conv_id},
+        {"$set": {
+            "status": "unmatched",
+            "unmatched_by": user_id,
+            "unmatch_reason": reason,
+            "unmatched_at": datetime.utcnow().isoformat()
+        }}
+    )
+    
+    return result.modified_count > 0
 
 
-def report_user(
+async def report_user(
     reporter_id: str,
     reported_id: str,
     reason: str,
@@ -194,13 +282,13 @@ def report_user(
         "status": "pending",
     }
     
-    # In production, save to database
-    print(f"Report created: {report}")
+    await _db.chat_reports.insert_one(report.copy())
+    logger.info(f"Report created: {report['report_id']}")
     
     return report
 
 
-def set_meeting_status(
+async def set_meeting_status(
     user_id: str,
     other_user_id: str,
     did_meet: bool,
@@ -209,24 +297,35 @@ def set_meeting_status(
     """Set meeting verification status"""
     conv_id = get_conversation_id(user_id, other_user_id)
     
-    if conv_id in _conversations:
-        _conversations[conv_id]["meeting_status"] = "confirmed" if did_meet else "not_met"
-        if was_same_person is not None:
-            _conversations[conv_id]["verification_status"] = "same_person" if was_same_person else "different_person"
-        return True
-    return False
+    update_data = {
+        "meeting_status": "confirmed" if did_meet else "not_met"
+    }
+    if was_same_person is not None:
+        update_data["verification_status"] = "same_person" if was_same_person else "different_person"
+    
+    result = await _db.chat_conversations.update_one(
+        {"conversation_id": conv_id},
+        {"$set": update_data}
+    )
+    
+    return result.modified_count > 0
 
 
-def mark_messages_read(user_id: str, conversation_id: str) -> bool:
+async def mark_messages_read(user_id: str, conversation_id: str) -> bool:
     """Mark all messages in a conversation as read"""
-    if conversation_id in _conversations:
-        _conversations[conversation_id]["unread_count"][user_id] = 0
-        
-        for msg in _messages.get(conversation_id, []):
-            if msg["receiver_id"] == user_id:
-                msg["read"] = True
-        return True
-    return False
+    # Reset unread count
+    await _db.chat_conversations.update_one(
+        {"conversation_id": conversation_id},
+        {"$set": {f"unread_count.{user_id}": 0}}
+    )
+    
+    # Mark messages as read
+    await _db.chat_messages.update_many(
+        {"conversation_id": conversation_id, "receiver_id": user_id},
+        {"$set": {"read": True}}
+    )
+    
+    return True
 
 
 # ============== AI FEATURES ==============
@@ -247,7 +346,6 @@ async def generate_ice_breakers(user_profile: Dict, match_profile: Dict) -> List
             session_id=f"icebreaker_{match_profile.get('user_id', 'unknown')}",
             system_message="You are a friendly dating app assistant that generates ice breaker messages."
         ).with_model("openai", "gpt-4o")
-        
         
         user_genres = ", ".join(user_profile.get("genres", [])[:3])
         match_genres = ", ".join(match_profile.get("genres", [])[:3])
@@ -376,10 +474,10 @@ async def generate_ai_auto_reply(
     
     try:
         # Get conversation history for context
-        messages = _messages.get(conversation_id, [])[-5:]
+        messages = await get_messages(conversation_id, limit=5)
         conversation_text = "\n".join([
             f"User: {m['content']}" if m['sender_id'] != match_profile.get('user_id') else f"Me: {m['content']}"
-            for m in messages
+            for m in reversed(messages)
         ])
         
         chat = LlmChat(
@@ -416,13 +514,13 @@ Reply as {match_profile.get('name', 'yourself')} naturally. Keep it short (under
         return random.choice(replies)
 
 
-def add_ai_reply_to_conversation(
+async def add_ai_reply_to_conversation(
     sender_id: str,
     receiver_id: str,
     content: str
 ) -> Dict:
     """Add an AI-generated reply message to the conversation"""
-    conv = get_or_create_conversation(sender_id, receiver_id)
+    conv = await get_or_create_conversation(sender_id, receiver_id)
     conv_id = conv["conversation_id"]
     
     message = {
@@ -438,40 +536,65 @@ def add_ai_reply_to_conversation(
         "delivered": True,
     }
     
-    _messages[conv_id].append(message)
+    # Insert message to MongoDB
+    await _db.chat_messages.insert_one(message.copy())
     
     # Update conversation
-    conv["last_message"] = content[:50] + "..." if len(content) > 50 else content
-    conv["last_message_at"] = message["created_at"]
-    conv["unread_count"][receiver_id] = conv["unread_count"].get(receiver_id, 0) + 1
+    await _db.chat_conversations.update_one(
+        {"conversation_id": conv_id},
+        {"$set": {
+            "last_message": content[:50] + "..." if len(content) > 50 else content,
+            "last_message_at": message["created_at"],
+        },
+        "$inc": {f"unread_count.{receiver_id}": 1}}
+    )
     
     return message
 
 
 # ============== MOCK DATA FOR TESTING ==============
 
-def create_mock_conversations(user_id: str, match_profiles: List[Dict]):
+async def create_mock_conversations(user_id: str, match_profiles: List[Dict] = None):
     """Create mock conversations for testing"""
+    # Use default mock profiles if none provided
+    if not match_profiles:
+        match_profiles = [
+            {"user_id": "mock_user_001", "name": "Priya Sharma"},
+            {"user_id": "mock_user_002", "name": "Rahul Kapoor"},
+            {"user_id": "mock_user_003", "name": "Ananya Reddy"},
+        ]
+    
     for i, match in enumerate(match_profiles[:3]):
-        match_id = match.get("user_id", f"mock_user_{i}")
-        conv = get_or_create_conversation(user_id, match_id)
+        match_id = match.get("user_id", f"mock_user_{i:03d}")
+        
+        # Check if conversation already exists
+        conv_id = get_conversation_id(user_id, match_id)
+        existing = await _db.chat_conversations.find_one({"conversation_id": conv_id})
+        
+        if existing:
+            continue  # Skip if already exists
+        
+        conv = await get_or_create_conversation(user_id, match_id)
         
         if i == 0:
             # Active conversation with messages
-            conv["status"] = "active"
-            send_message(match_id, user_id, "Hey! I saw you love Christopher Nolan films too!", "text")
-            send_message(user_id, match_id, "Yes! Interstellar is my all-time favorite", "text")
-            send_message(match_id, user_id, "Same here! The docking scene gives me chills every time", "text")
-            conv["status"] = "active"
+            await _db.chat_conversations.update_one(
+                {"conversation_id": conv_id},
+                {"$set": {"status": "active"}}
+            )
+            await send_message(match_id, user_id, "Hey! I saw you love Christopher Nolan films too!", "text")
+            await send_message(user_id, match_id, "Yes! Interstellar is my all-time favorite", "text")
+            await send_message(match_id, user_id, "Same here! The docking scene gives me chills every time", "text")
             
         elif i == 1:
             # Message request (pending)
-            conv["status"] = "pending"
-            send_message(match_id, user_id, "Hi! Your movie taste is incredible. Would love to chat!", "text")
+            await send_message(match_id, user_id, "Hi! Your movie taste is incredible. Would love to chat!", "text")
             
         elif i == 2:
             # Another active conversation
-            conv["status"] = "active"
-            send_message(match_id, user_id, "What did you think of Oppenheimer?", "text")
-            send_message(user_id, match_id, "Absolutely mind-blowing! Saw it in IMAX", "text")
-            conv["status"] = "active"
+            await _db.chat_conversations.update_one(
+                {"conversation_id": conv_id},
+                {"$set": {"status": "active"}}
+            )
+            await send_message(match_id, user_id, "What did you think of Oppenheimer?", "text")
+            await send_message(user_id, match_id, "Absolutely mind-blowing! Saw it in IMAX", "text")

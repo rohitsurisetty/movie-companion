@@ -55,6 +55,7 @@ from chat_service import (
     generate_ai_auto_reply,
     add_ai_reply_to_conversation,
     create_mock_conversations,
+    set_chat_db,
 )
 
 # Import picture service for profile photos
@@ -2585,20 +2586,7 @@ class ReplySuggestionsRequest(BaseModel):
 async def api_get_conversations(user_id: str):
     """Get all active conversations for a user"""
     try:
-        conversations = get_conversations(user_id)
-        
-        # Enrich with user profile data
-        for conv in conversations:
-            other_id = conv.get("other_user_id")
-            match_profile = get_mock_user_by_id(other_id)
-            if match_profile:
-                conv["other_user"] = {
-                    "user_id": other_id,
-                    "name": match_profile.get("name", "Unknown"),
-                    "avatar": match_profile.get("avatar"),
-                    "location": match_profile.get("location"),
-                }
-        
+        conversations = await get_conversations(user_id)
         return {"success": True, "conversations": conversations}
     except Exception as e:
         logger.error(f"Get conversations error: {e}")
@@ -2609,22 +2597,7 @@ async def api_get_conversations(user_id: str):
 async def api_get_message_requests(user_id: str):
     """Get pending message requests for a user"""
     try:
-        requests = get_message_requests(user_id)
-        
-        # Enrich with user profile data
-        for req in requests:
-            from_id = req.get("from_user_id")
-            match_profile = get_mock_user_by_id(from_id)
-            if match_profile:
-                req["from_user"] = {
-                    "user_id": from_id,
-                    "name": match_profile.get("name", "Unknown"),
-                    "avatar": match_profile.get("avatar"),
-                    "age": match_profile.get("age"),
-                    "location": match_profile.get("location"),
-                    "bio": match_profile.get("bio"),
-                }
-        
+        requests = await get_message_requests(user_id)
         return {"success": True, "requests": requests}
     except Exception as e:
         logger.error(f"Get message requests error: {e}")
@@ -2635,7 +2608,7 @@ async def api_get_message_requests(user_id: str):
 async def api_get_messages(conversation_id: str, limit: int = 50, before: Optional[str] = None):
     """Get messages for a conversation"""
     try:
-        messages = get_messages(conversation_id, limit, before)
+        messages = await get_messages(conversation_id, limit, before)
         return {"success": True, "messages": messages}
     except Exception as e:
         logger.error(f"Get messages error: {e}")
@@ -2661,7 +2634,7 @@ async def trigger_ai_auto_reply(
         ai_reply = await generate_ai_auto_reply(conversation_id, user_message, match_profile)
         
         # Add the AI reply to the conversation
-        add_ai_reply_to_conversation(
+        await add_ai_reply_to_conversation(
             sender_id=receiver_id,  # The match is responding
             receiver_id=sender_id,   # To the user
             content=ai_reply
@@ -2676,7 +2649,7 @@ async def trigger_ai_auto_reply(
 async def api_send_message(req: SendMessageRequest, background_tasks: BackgroundTasks):
     """Send a message and optionally trigger AI auto-reply for testing"""
     try:
-        message = send_message(
+        message = await send_message(
             sender_id=req.sender_id,
             receiver_id=req.receiver_id,
             content=req.content,
@@ -2743,7 +2716,7 @@ async def api_send_message(req: SendMessageRequest, background_tasks: Background
 async def api_accept_request(req: AcceptDeclineRequest):
     """Accept a message request"""
     try:
-        success = accept_message_request(req.user_id, req.conversation_id)
+        success = await accept_message_request(req.user_id, req.conversation_id)
         return {"success": success}
     except Exception as e:
         logger.error(f"Accept request error: {e}")
@@ -2754,7 +2727,7 @@ async def api_accept_request(req: AcceptDeclineRequest):
 async def api_decline_request(req: AcceptDeclineRequest):
     """Decline a message request"""
     try:
-        success = decline_message_request(req.user_id, req.conversation_id)
+        success = await decline_message_request(req.user_id, req.conversation_id)
         return {"success": success}
     except Exception as e:
         logger.error(f"Decline request error: {e}")
@@ -2765,7 +2738,7 @@ async def api_decline_request(req: AcceptDeclineRequest):
 async def api_unmatch(req: UnmatchRequest):
     """Unmatch with a user"""
     try:
-        success = unmatch_user(req.user_id, req.other_user_id, req.reason)
+        success = await unmatch_user(req.user_id, req.other_user_id, req.reason)
         return {"success": success}
     except Exception as e:
         logger.error(f"Unmatch error: {e}")
@@ -2776,7 +2749,7 @@ async def api_unmatch(req: UnmatchRequest):
 async def api_report_user(req: ReportRequest):
     """Report a user"""
     try:
-        report = report_user(
+        report = await report_user(
             reporter_id=req.reporter_id,
             reported_id=req.reported_id,
             reason=req.reason,
@@ -2792,7 +2765,7 @@ async def api_report_user(req: ReportRequest):
 async def api_set_meeting_status(req: MeetingStatusRequest):
     """Set meeting verification status"""
     try:
-        success = set_meeting_status(
+        success = await set_meeting_status(
             user_id=req.user_id,
             other_user_id=req.other_user_id,
             did_meet=req.did_meet,
@@ -2808,7 +2781,7 @@ async def api_set_meeting_status(req: MeetingStatusRequest):
 async def api_mark_read(conversation_id: str, user_id: str):
     """Mark messages as read"""
     try:
-        success = mark_messages_read(user_id, conversation_id)
+        success = await mark_messages_read(user_id, conversation_id)
         return {"success": success}
     except Exception as e:
         logger.error(f"Mark read error: {e}")
@@ -2838,7 +2811,7 @@ async def api_get_reply_suggestions(req: ReplySuggestionsRequest):
     """Get AI-generated reply suggestions"""
     try:
         # Get messages and profiles
-        messages = get_messages(req.conversation_id, limit=10)
+        messages = await get_messages(req.conversation_id, limit=10)
         user_profile = {"user_id": req.user_id, "name": "User", "genres": ["Drama", "Sci-Fi"]}
         
         # Get other user from conversation
@@ -2860,7 +2833,7 @@ async def api_init_mock_conversations(user_id: str):
     """Initialize mock conversations for testing"""
     try:
         mock_users = get_all_mock_users()[:3]
-        create_mock_conversations(user_id, mock_users)
+        await create_mock_conversations(user_id, mock_users)
         return {"success": True, "message": "Mock conversations created"}
     except Exception as e:
         logger.error(f"Init mock conversations error: {e}")
@@ -2897,6 +2870,10 @@ async def startup_event():
     # Pass MongoDB db to matchmaking service for caching
     set_matchmaking_db(db)
     logger.info("Matchmaking service cache connected to MongoDB")
+    
+    # Pass MongoDB db to chat service for message persistence
+    set_chat_db(db)
+    logger.info("Chat service connected to MongoDB")
 
 
 @app.on_event("shutdown")
