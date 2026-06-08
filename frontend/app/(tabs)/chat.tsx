@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Image, TextInput,
   FlatList, ScrollView, Modal, KeyboardAvoidingView, Platform,
-  ActivityIndicator, Keyboard, Alert, Dimensions,
+  ActivityIndicator, Keyboard, Alert, Dimensions, Animated, PanResponder,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -11,7 +11,7 @@ import { useRouter } from 'expo-router';
 import { useAppMode } from '../../src/components/SharedHeader';
 import { getUserId } from '../../src/store';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 const COLORS = {
@@ -27,6 +27,7 @@ const COLORS = {
   success: '#00D26A',
   warning: '#FFB800',
   online: '#00D26A',
+  reply: '#1E3A5F',
 };
 
 interface Conversation {
@@ -67,15 +68,228 @@ interface Message {
   message_type: string;
   created_at: string;
   read: boolean;
+  reply_to?: {
+    message_id: string;
+    content: string;
+    sender_id: string;
+  };
+}
+
+interface UserProfile {
+  user_id: string;
+  name: string;
+  age?: number;
+  location?: string;
+  bio?: string;
+  genres?: string[];
+  topMovies?: { title: string; poster_path?: string }[];
+  pictures?: string[];
 }
 
 // ============ AVATAR COMPONENT ============
-const Avatar = ({ name, size = 50, color }: { name: string; size?: number; color?: string }) => {
+const Avatar = ({ name, size = 50, color, imageUrl }: { name: string; size?: number; color?: string; imageUrl?: string }) => {
   const bgColor = color || COLORS.primary;
+  
+  if (imageUrl) {
+    return (
+      <Image 
+        source={{ uri: imageUrl }} 
+        style={{ width: size, height: size, borderRadius: size / 2 }}
+      />
+    );
+  }
+  
   return (
     <LinearGradient colors={[bgColor, `${bgColor}88`]} style={[styles.avatar, { width: size, height: size, borderRadius: size / 2 }]}>
       <Text style={[styles.avatarText, { fontSize: size * 0.4 }]}>{name?.charAt(0).toUpperCase() || '?'}</Text>
     </LinearGradient>
+  );
+};
+
+// ============ PROFILE VIEW MODAL ============
+const ProfileViewModal = ({ 
+  visible, 
+  onClose, 
+  userId,
+  userName,
+}: { 
+  visible: boolean; 
+  onClose: () => void;
+  userId: string;
+  userName: string;
+}) => {
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [pictures, setPictures] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [currentPicIndex, setCurrentPicIndex] = useState(0);
+
+  useEffect(() => {
+    if (visible && userId) {
+      fetchProfile();
+    }
+  }, [visible, userId]);
+
+  const fetchProfile = async () => {
+    setLoading(true);
+    try {
+      // Fetch user profile
+      const profileRes = await fetch(`${API_BASE}/api/user/profile/${userId}`);
+      if (profileRes.ok) {
+        const data = await profileRes.json();
+        setProfile(data.profile || data);
+      }
+      
+      // Fetch user pictures
+      const picsRes = await fetch(`${API_BASE}/api/user/pictures/${userId}`);
+      if (picsRes.ok) {
+        const data = await picsRes.json();
+        setPictures(data.pictures || []);
+      }
+    } catch (error) {
+      console.error('Error fetching profile:', error);
+      // Set mock profile for mock users
+      if (userId.startsWith('mock_')) {
+        const mockProfiles: Record<string, UserProfile> = {
+          'mock_user_001': {
+            user_id: 'mock_user_001',
+            name: 'Priya Sharma',
+            age: 28,
+            location: 'Mumbai, India',
+            bio: 'Film enthusiast who believes every movie tells a story worth experiencing. Christopher Nolan fan!',
+            genres: ['Drama', 'Romance', 'Thriller', 'Sci-Fi'],
+            topMovies: [
+              { title: 'Interstellar' },
+              { title: 'The Dark Knight' },
+              { title: 'Inception' },
+            ],
+          },
+          'mock_user_002': {
+            user_id: 'mock_user_002',
+            name: 'Rahul Kapoor',
+            age: 30,
+            location: 'Delhi, India',
+            bio: 'Action movie buff and sci-fi geek. Always looking for the next mind-bending film!',
+            genres: ['Action', 'Sci-Fi', 'Comedy', 'Adventure'],
+            topMovies: [
+              { title: 'Inception' },
+              { title: 'The Matrix' },
+              { title: 'Avengers: Endgame' },
+            ],
+          },
+          'mock_user_003': {
+            user_id: 'mock_user_003',
+            name: 'Ananya Reddy',
+            age: 26,
+            location: 'Bangalore, India',
+            bio: 'Love feel-good movies and thought-provoking dramas. Weekend movie marathons are my thing!',
+            genres: ['Comedy', 'Drama', 'Adventure', 'Romance'],
+            topMovies: [
+              { title: 'Oppenheimer' },
+              { title: 'Barbie' },
+              { title: 'Everything Everywhere All at Once' },
+            ],
+          },
+        };
+        setProfile(mockProfiles[userId] || { user_id: userId, name: userName });
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      <SafeAreaView style={styles.profileModalContainer}>
+        {/* Header */}
+        <View style={styles.profileModalHeader}>
+          <TouchableOpacity onPress={onClose} style={styles.profileCloseBtn}>
+            <Ionicons name="close" size={28} color={COLORS.text} />
+          </TouchableOpacity>
+          <Text style={styles.profileModalTitle}>Profile</Text>
+          <View style={{ width: 44 }} />
+        </View>
+
+        {loading ? (
+          <View style={styles.profileLoading}>
+            <ActivityIndicator size="large" color={COLORS.primary} />
+          </View>
+        ) : (
+          <ScrollView style={styles.profileContent} showsVerticalScrollIndicator={false}>
+            {/* Profile Picture */}
+            <View style={styles.profilePictureSection}>
+              {pictures.length > 0 ? (
+                <View>
+                  <Image 
+                    source={{ uri: pictures[currentPicIndex] }} 
+                    style={styles.profileMainPicture}
+                  />
+                  {pictures.length > 1 && (
+                    <View style={styles.pictureDots}>
+                      {pictures.map((_, idx) => (
+                        <TouchableOpacity 
+                          key={idx} 
+                          onPress={() => setCurrentPicIndex(idx)}
+                          style={[styles.pictureDot, idx === currentPicIndex && styles.pictureDotActive]}
+                        />
+                      ))}
+                    </View>
+                  )}
+                </View>
+              ) : (
+                <View style={styles.profilePlaceholderPicture}>
+                  <Avatar name={profile?.name || userName} size={120} />
+                </View>
+              )}
+            </View>
+
+            {/* Basic Info */}
+            <View style={styles.profileInfoSection}>
+              <Text style={styles.profileName}>
+                {profile?.name || userName}{profile?.age ? `, ${profile.age}` : ''}
+              </Text>
+              {profile?.location && (
+                <View style={styles.profileLocationRow}>
+                  <Ionicons name="location-outline" size={16} color={COLORS.textSecondary} />
+                  <Text style={styles.profileLocation}>{profile.location}</Text>
+                </View>
+              )}
+              {profile?.bio && (
+                <Text style={styles.profileBio}>{profile.bio}</Text>
+              )}
+            </View>
+
+            {/* Genres */}
+            {profile?.genres && profile.genres.length > 0 && (
+              <View style={styles.profileSection}>
+                <Text style={styles.profileSectionTitle}>Favorite Genres</Text>
+                <View style={styles.genreChips}>
+                  {profile.genres.map((genre, idx) => (
+                    <View key={idx} style={styles.genreChip}>
+                      <Text style={styles.genreChipText}>{genre}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            )}
+
+            {/* Top Movies */}
+            {profile?.topMovies && profile.topMovies.length > 0 && (
+              <View style={styles.profileSection}>
+                <Text style={styles.profileSectionTitle}>Top Movies</Text>
+                {profile.topMovies.map((movie, idx) => (
+                  <View key={idx} style={styles.movieItem}>
+                    <Ionicons name="film-outline" size={18} color={COLORS.primary} />
+                    <Text style={styles.movieTitle}>{movie.title}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            <View style={{ height: 40 }} />
+          </ScrollView>
+        )}
+      </SafeAreaView>
+    </Modal>
   );
 };
 
@@ -150,19 +364,120 @@ const ConversationItem = ({
   );
 };
 
+// ============ SWIPEABLE MESSAGE BUBBLE ============
+const SwipeableMessage = ({ 
+  item, 
+  isMe, 
+  onReply, 
+  onLongPress,
+  replyTo,
+  otherUserName,
+}: { 
+  item: Message; 
+  isMe: boolean; 
+  onReply: (msg: Message) => void;
+  onLongPress: (msg: Message) => void;
+  replyTo?: { content: string; sender_id: string };
+  otherUserName: string;
+}) => {
+  const translateX = useRef(new Animated.Value(0)).current;
+  const replyOpacity = useRef(new Animated.Value(0)).current;
+  const SWIPE_THRESHOLD = 60;
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        // Only respond to horizontal swipes to the right
+        return gestureState.dx > 10 && Math.abs(gestureState.dy) < 20;
+      },
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dx > 0 && gestureState.dx < 100) {
+          translateX.setValue(gestureState.dx);
+          replyOpacity.setValue(Math.min(gestureState.dx / SWIPE_THRESHOLD, 1));
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dx >= SWIPE_THRESHOLD) {
+          // Trigger reply
+          onReply(item);
+        }
+        // Animate back
+        Animated.parallel([
+          Animated.spring(translateX, {
+            toValue: 0,
+            useNativeDriver: true,
+            friction: 8,
+          }),
+          Animated.timing(replyOpacity, {
+            toValue: 0,
+            duration: 200,
+            useNativeDriver: true,
+          }),
+        ]).start();
+      },
+    })
+  ).current;
+
+  return (
+    <View style={[styles.messageRowWrapper]}>
+      {/* Reply indicator */}
+      <Animated.View style={[
+        styles.replyIndicator,
+        { opacity: replyOpacity },
+        isMe ? { right: undefined, left: 10 } : { left: undefined, right: 10 },
+      ]}>
+        <Ionicons name="arrow-undo" size={20} color={COLORS.primary} />
+      </Animated.View>
+      
+      <Animated.View 
+        {...panResponder.panHandlers}
+        style={[
+          styles.messageRow, 
+          isMe ? styles.messageRowMe : styles.messageRowOther,
+          { transform: [{ translateX }] }
+        ]}
+      >
+        <TouchableOpacity 
+          activeOpacity={0.8}
+          onLongPress={() => onLongPress(item)}
+          delayLongPress={300}
+          style={[styles.messageBubble, isMe ? styles.messageBubbleMe : styles.messageBubbleOther]}
+        >
+          {/* Reply preview if this message is a reply */}
+          {replyTo && (
+            <View style={styles.replyPreview}>
+              <View style={styles.replyBar} />
+              <View style={styles.replyContent}>
+                <Text style={styles.replyAuthor}>
+                  {replyTo.sender_id === item.sender_id ? 'You' : otherUserName}
+                </Text>
+                <Text style={styles.replyText} numberOfLines={1}>{replyTo.content}</Text>
+              </View>
+            </View>
+          )}
+          <Text style={[styles.messageText, isMe ? styles.messageTextMe : styles.messageTextOther]}>
+            {item.content}
+          </Text>
+          <Text style={[styles.messageTime, isMe ? styles.messageTimeMe : styles.messageTimeOther]}>
+            {formatMessageTime(item.created_at)}
+          </Text>
+        </TouchableOpacity>
+      </Animated.View>
+    </View>
+  );
+};
+
 // ============ CHAT SCREEN ============
 const ChatScreen = ({ 
   conversation, 
   userId,
   onBack,
-  onViewProfile,
   onUnmatch,
   onReport,
 }: {
   conversation: Conversation;
   userId: string;
   onBack: () => void;
-  onViewProfile: () => void;
   onUnmatch: () => void;
   onReport: () => void;
 }) => {
@@ -171,9 +486,13 @@ const ChatScreen = ({
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
   const [iceBreakers, setIceBreakers] = useState<string[]>([]);
   const [suggestions, setSuggestions] = useState<string[]>([]);
-  const [showVoiceRecorder, setShowVoiceRecorder] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+  const [showMessageMenu, setShowMessageMenu] = useState(false);
+  const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
   const flatListRef = useRef<FlatList>(null);
   
   const otherUser = conversation.other_user;
@@ -183,6 +502,18 @@ const ChatScreen = ({
     fetchMessages();
     fetchIceBreakers();
   }, [conversation.conversation_id]);
+
+  // Determine if suggestions should show based on who sent the last message
+  useEffect(() => {
+    if (messages.length > 0) {
+      const lastMessage = messages[0]; // Messages are inverted, so first item is the latest
+      // Only show suggestions if the OTHER person sent the last message
+      const otherPersonSentLast = lastMessage.sender_id !== userId;
+      setShowSuggestions(otherPersonSentLast && suggestions.length > 0);
+    } else {
+      setShowSuggestions(false);
+    }
+  }, [messages, suggestions, userId]);
 
   const fetchMessages = async () => {
     try {
@@ -249,29 +580,73 @@ const ChatScreen = ({
     
     setSending(true);
     try {
+      const messageData: any = {
+        sender_id: userId,
+        receiver_id: conversation.other_user_id,
+        content: content.trim(),
+        message_type: type,
+      };
+      
+      // Include reply reference if replying
+      if (replyingTo) {
+        messageData.reply_to = {
+          message_id: replyingTo.message_id,
+          content: replyingTo.content,
+          sender_id: replyingTo.sender_id,
+        };
+      }
+      
       const response = await fetch(`${API_BASE}/api/chat/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sender_id: userId,
-          receiver_id: conversation.other_user_id,
-          content: content.trim(),
-          message_type: type,
-        }),
+        body: JSON.stringify(messageData),
       });
       
       if (response.ok) {
         const data = await response.json();
-        setMessages(prev => [data.message, ...prev]);
+        // Add reply_to to the message for local display
+        const newMessage = {
+          ...data.message,
+          reply_to: replyingTo ? {
+            message_id: replyingTo.message_id,
+            content: replyingTo.content,
+            sender_id: replyingTo.sender_id,
+          } : undefined,
+        };
+        setMessages(prev => [newMessage, ...prev]);
         setInputText('');
+        setReplyingTo(null);
         Keyboard.dismiss();
-        fetchReplySuggestions();
+        
+        // Clear suggestions after sending (user already replied)
+        setShowSuggestions(false);
+        setSuggestions([]);
+        
+        // Fetch new suggestions after AI replies (with delay)
+        setTimeout(() => {
+          fetchMessages();
+        }, 4000);
       }
     } catch (error) {
       console.error('Error sending message:', error);
     } finally {
       setSending(false);
     }
+  };
+
+  const handleReply = (msg: Message) => {
+    setReplyingTo(msg);
+  };
+
+  const handleMessageLongPress = (msg: Message) => {
+    setSelectedMessage(msg);
+    setShowMessageMenu(true);
+  };
+
+  const copyMessage = () => {
+    // In a real app, you'd use Clipboard API
+    Alert.alert('Copied', 'Message copied to clipboard');
+    setShowMessageMenu(false);
   };
 
   const handleVoiceNote = () => {
@@ -294,16 +669,14 @@ const ChatScreen = ({
     const isMe = item.sender_id === userId;
     
     return (
-      <View style={[styles.messageRow, isMe ? styles.messageRowMe : styles.messageRowOther]}>
-        <View style={[styles.messageBubble, isMe ? styles.messageBubbleMe : styles.messageBubbleOther]}>
-          <Text style={[styles.messageText, isMe ? styles.messageTextMe : styles.messageTextOther]}>
-            {item.content}
-          </Text>
-          <Text style={[styles.messageTime, isMe ? styles.messageTimeMe : styles.messageTimeOther]}>
-            {formatMessageTime(item.created_at)}
-          </Text>
-        </View>
-      </View>
+      <SwipeableMessage
+        item={item}
+        isMe={isMe}
+        onReply={handleReply}
+        onLongPress={handleMessageLongPress}
+        replyTo={item.reply_to}
+        otherUserName={otherUser?.name || 'Unknown'}
+      />
     );
   };
 
@@ -314,7 +687,7 @@ const ChatScreen = ({
         <TouchableOpacity onPress={onBack} style={styles.backBtn}>
           <Ionicons name="chevron-back" size={28} color={COLORS.text} />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.chatHeaderProfile} onPress={onViewProfile}>
+        <TouchableOpacity style={styles.chatHeaderProfile} onPress={() => setShowProfile(true)}>
           <Avatar name={otherUser?.name || 'U'} size={40} />
           <View style={styles.chatHeaderInfo}>
             <Text style={styles.chatHeaderName}>{otherUser?.name || 'Unknown'}</Text>
@@ -367,8 +740,8 @@ const ChatScreen = ({
         />
       )}
 
-      {/* AI Suggestions */}
-      {suggestions.length > 0 && messages.length > 0 ? (
+      {/* AI Suggestions - Only show when other person sent last message */}
+      {showSuggestions && suggestions.length > 0 ? (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.suggestionsScroll} contentContainerStyle={styles.suggestionsContainer}>
           {suggestions.map((suggestion, idx) => (
             <TouchableOpacity key={idx} style={styles.suggestionChip} onPress={() => sendMessage(suggestion)}>
@@ -377,6 +750,24 @@ const ChatScreen = ({
           ))}
         </ScrollView>
       ) : null}
+
+      {/* Reply Preview */}
+      {replyingTo && (
+        <View style={styles.replyingToBar}>
+          <View style={styles.replyingToContent}>
+            <View style={styles.replyingToIndicator} />
+            <View style={styles.replyingToText}>
+              <Text style={styles.replyingToLabel}>
+                Replying to {replyingTo.sender_id === userId ? 'yourself' : otherUser?.name || 'Unknown'}
+              </Text>
+              <Text style={styles.replyingToMessage} numberOfLines={1}>{replyingTo.content}</Text>
+            </View>
+          </View>
+          <TouchableOpacity onPress={() => setReplyingTo(null)} style={styles.replyingToClose}>
+            <Ionicons name="close" size={22} color={COLORS.textSecondary} />
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Input Area */}
       <View style={styles.inputArea}>
@@ -413,7 +804,7 @@ const ChatScreen = ({
       <Modal visible={showMenu} transparent animationType="fade" onRequestClose={() => setShowMenu(false)}>
         <TouchableOpacity style={styles.menuOverlay} activeOpacity={1} onPress={() => setShowMenu(false)}>
           <View style={styles.menuContainer}>
-            <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); onViewProfile(); }}>
+            <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); setShowProfile(true); }}>
               <Ionicons name="person-outline" size={22} color={COLORS.text} />
               <Text style={styles.menuItemText}>View Profile</Text>
             </TouchableOpacity>
@@ -433,6 +824,34 @@ const ChatScreen = ({
           </View>
         </TouchableOpacity>
       </Modal>
+
+      {/* Message Context Menu */}
+      <Modal visible={showMessageMenu} transparent animationType="fade" onRequestClose={() => setShowMessageMenu(false)}>
+        <TouchableOpacity style={styles.menuOverlay} activeOpacity={1} onPress={() => setShowMessageMenu(false)}>
+          <View style={styles.messageMenuContainer}>
+            <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMessageMenu(false); selectedMessage && handleReply(selectedMessage); }}>
+              <Ionicons name="arrow-undo-outline" size={22} color={COLORS.text} />
+              <Text style={styles.menuItemText}>Reply</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.menuItem} onPress={copyMessage}>
+              <Ionicons name="copy-outline" size={22} color={COLORS.text} />
+              <Text style={styles.menuItemText}>Copy</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.menuItem} onPress={() => setShowMessageMenu(false)}>
+              <Ionicons name="arrow-forward-outline" size={22} color={COLORS.text} />
+              <Text style={styles.menuItemText}>Forward</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Profile View Modal */}
+      <ProfileViewModal
+        visible={showProfile}
+        onClose={() => setShowProfile(false)}
+        userId={conversation.other_user_id}
+        userName={otherUser?.name || 'Unknown'}
+      />
     </KeyboardAvoidingView>
   );
 };
@@ -583,7 +1002,6 @@ export default function ChatTab() {
             setSelectedConversation(null);
             fetchConversations(userId);
           }}
-          onViewProfile={() => Alert.alert('Profile', 'Profile view coming soon!')}
           onUnmatch={handleUnmatch}
           onReport={handleReport}
         />
@@ -755,7 +1173,8 @@ const styles = StyleSheet.create({
   
   // Messages
   messagesList: { padding: 16, paddingTop: 8 },
-  messageRow: { marginBottom: 8 },
+  messageRowWrapper: { position: 'relative', marginBottom: 8 },
+  messageRow: { },
   messageRowMe: { alignItems: 'flex-end' },
   messageRowOther: { alignItems: 'flex-start' },
   messageBubble: { maxWidth: '80%', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 18 },
@@ -767,6 +1186,25 @@ const styles = StyleSheet.create({
   messageTime: { fontSize: 10, marginTop: 4 },
   messageTimeMe: { color: 'rgba(255,255,255,0.7)', textAlign: 'right' },
   messageTimeOther: { color: COLORS.textMuted },
+  
+  // Reply indicator (swipe)
+  replyIndicator: { position: 'absolute', top: '50%', marginTop: -10, zIndex: -1 },
+  
+  // Reply preview inside message
+  replyPreview: { flexDirection: 'row', marginBottom: 6, paddingBottom: 6, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.2)' },
+  replyBar: { width: 3, backgroundColor: COLORS.primary, borderRadius: 2, marginRight: 8 },
+  replyContent: { flex: 1 },
+  replyAuthor: { fontSize: 11, fontWeight: '600', color: COLORS.primary, marginBottom: 2 },
+  replyText: { fontSize: 12, color: COLORS.textSecondary },
+  
+  // Replying to bar
+  replyingToBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, backgroundColor: COLORS.bgCard, borderTopWidth: 1, borderTopColor: COLORS.border },
+  replyingToContent: { flex: 1, flexDirection: 'row' },
+  replyingToIndicator: { width: 4, backgroundColor: COLORS.primary, borderRadius: 2, marginRight: 10 },
+  replyingToText: { flex: 1 },
+  replyingToLabel: { fontSize: 12, fontWeight: '600', color: COLORS.primary },
+  replyingToMessage: { fontSize: 13, color: COLORS.textSecondary, marginTop: 2 },
+  replyingToClose: { padding: 4 },
   
   // Empty Chat
   emptyChat: { alignItems: 'center', paddingTop: 40, transform: [{ scaleY: -1 }] },
@@ -796,4 +1234,33 @@ const styles = StyleSheet.create({
   menuItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 16, gap: 14 },
   menuItemText: { fontSize: 16, color: COLORS.text },
   menuDivider: { height: 1, backgroundColor: COLORS.border, marginVertical: 8 },
+  
+  // Message Context Menu
+  messageMenuContainer: { backgroundColor: COLORS.bgCard, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 16 },
+  
+  // Profile Modal
+  profileModalContainer: { flex: 1, backgroundColor: COLORS.bg },
+  profileModalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  profileCloseBtn: { padding: 8 },
+  profileModalTitle: { fontSize: 18, fontWeight: '600', color: COLORS.text },
+  profileLoading: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  profileContent: { flex: 1 },
+  profilePictureSection: { width: '100%', aspectRatio: 1, backgroundColor: COLORS.bgCard },
+  profileMainPicture: { width: '100%', height: '100%', resizeMode: 'cover' },
+  pictureDots: { position: 'absolute', bottom: 16, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', gap: 6 },
+  pictureDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.4)' },
+  pictureDotActive: { backgroundColor: '#FFF', width: 24 },
+  profilePlaceholderPicture: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  profileInfoSection: { padding: 20 },
+  profileName: { fontSize: 28, fontWeight: 'bold', color: COLORS.text },
+  profileLocationRow: { flexDirection: 'row', alignItems: 'center', marginTop: 8, gap: 4 },
+  profileLocation: { fontSize: 14, color: COLORS.textSecondary },
+  profileBio: { fontSize: 15, color: COLORS.textSecondary, lineHeight: 22, marginTop: 16 },
+  profileSection: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 },
+  profileSectionTitle: { fontSize: 16, fontWeight: '600', color: COLORS.text, marginBottom: 12 },
+  genreChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  genreChip: { backgroundColor: COLORS.bgCard, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: COLORS.border },
+  genreChipText: { fontSize: 13, color: COLORS.text },
+  movieItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  movieTitle: { fontSize: 15, color: COLORS.text },
 });

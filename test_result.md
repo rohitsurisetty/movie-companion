@@ -392,6 +392,66 @@ frontend_comprehensive_test:
         comment: "✅ CODE REVIEW VERIFIED: Discover tab swipe functionality is complete: 1) Tinder-style swipe cards with gesture detection (lines 836-945), 2) Right swipe modal with rating and reasons (lines 424-541), 3) Left swipe modal with skip reasons (lines 310-422), 4) Undo swipe functionality with toast notification (lines 1267-1289, 1509-1515), 5) Movie details bottom sheet with cast/crew (lines 36-252), 6) Backend integration with recommendation API. Cannot test UI due to auth blocker but implementation is correct."
 
 agent_communication:
+  - agent: "testing"
+    message: |
+      ✅ CHAT IMPROVEMENTS TESTING COMPLETE (June 2026)
+      
+      TESTED FEATURES:
+      1. Profile View from Chat Header ✅ WORKING (with data issue)
+      2. AI Reply Suggestions Logic ✅ WORKING
+      3. WhatsApp-style Message Interactions ⚠️ PARTIALLY WORKING
+      4. Menu Options ⚠️ NOT FULLY TESTED
+      
+      DETAILED FINDINGS:
+      
+      1. PROFILE VIEW FROM CHAT HEADER ✅
+         - Profile modal DOES open when clicking name/avatar in chat header
+         - Modal shows "Profile" title, close button, avatar, and name
+         - ⚠️ ISSUE: Profile modal only shows name, missing other details:
+           * Age not displayed (should show ", 26")
+           * Location not displayed (should show "Bangalore, India")
+           * Bio not displayed (should show "Love feel-good movies...")
+           * Genres section not displayed (should show Comedy, Drama, Adventure, Romance)
+           * Top Movies section not displayed (should show Oppenheimer, Barbie, etc.)
+         - Root Cause: API returns 404 for /api/user/profile/mock_user_003
+         - Fallback to mock data may not be working correctly
+         - The modal structure is correct, just needs proper data population
+      
+      2. AI REPLY SUGGESTIONS LOGIC ✅
+         - AI suggestions ARE visible in the chat interface
+         - Detected suggestion phrases in page content
+         - Suggestions appear when appropriate
+         - ⚠️ Could not fully verify disappear/reappear logic due to timing
+      
+      3. WHATSAPP-STYLE MESSAGE INTERACTIONS ⚠️
+         - Swipe right to reply: NOT TESTED (gesture detection difficult in automation)
+         - Long press for context menu: ❌ FAILED
+           * Long press gesture performed on message
+           * Context menu did NOT appear
+           * Expected: Reply, Copy, Forward options
+           * Actual: No menu appeared
+         - Reply preview bar: NOT VERIFIED (couldn't trigger reply mode)
+      
+      4. MENU OPTIONS ⚠️
+         - Could not locate 3-dots menu button in automated test
+         - Visual inspection of screenshots shows menu icon IS present in header
+         - Menu options (View Profile, Did you meet?, Unmatch, Report) not verified
+      
+      SCREENSHOTS CAPTURED:
+      - Chat list with conversations ✅
+      - Conversation view with messages ✅
+      - Profile modal (showing minimal data) ✅
+      - AI suggestions visible in chat ✅
+      
+      CRITICAL ISSUES:
+      1. Profile modal data not loading - API returns 404, fallback not working
+      2. Long press context menu not appearing - gesture or event handling issue
+      
+      RECOMMENDATION:
+      - Fix profile data loading for mock users (API or fallback logic)
+      - Debug long press gesture handler for message context menu
+      - Verify menu options functionality manually or with better selectors
+  
   - agent: "main"
     message: |
       ✅ BOTTOM TAB NAVIGATION ARCHITECTURE COMPLETE
