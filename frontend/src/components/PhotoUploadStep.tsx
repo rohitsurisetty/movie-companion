@@ -11,7 +11,9 @@ import { getAuth } from '../store';
 const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 interface PhotoUploadStepProps {
-  onNext: (pictures: string[]) => void;
+  userId?: string;
+  onNext: (pictures?: string[]) => void;
+  onBack?: () => void;
 }
 
 interface PictureSlot {
@@ -21,8 +23,8 @@ interface PictureSlot {
   uploaded: boolean;
 }
 
-export default function PhotoUploadStep({ onNext }: PhotoUploadStepProps) {
-  const [userId, setUserId] = useState<string>('');
+export default function PhotoUploadStep({ userId: propUserId, onNext, onBack }: PhotoUploadStepProps) {
+  const [userId, setUserId] = useState<string>(propUserId || '');
   const [sessionId, setSessionId] = useState<string>('');
   const [pictures, setPictures] = useState<PictureSlot[]>([
     { index: 1, uri: null, uploading: false, uploaded: false },
@@ -36,8 +38,13 @@ export default function PhotoUploadStep({ onNext }: PhotoUploadStepProps) {
   const canContinue = uploadedCount >= 1;
 
   useEffect(() => {
-    initAuth();
-  }, []);
+    if (!propUserId) {
+      initAuth();
+    } else {
+      setUserId(propUserId);
+      setSessionId(`session_${Date.now()}`);
+    }
+  }, [propUserId]);
 
   const initAuth = async () => {
     const auth = await getAuth();
