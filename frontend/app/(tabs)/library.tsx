@@ -384,7 +384,10 @@ export default function LibraryScreen() {
     const isRated = ratedMovies.some(m => m.id === item.id);
     const ratedInfo = ratedMovies.find(m => m.id === item.id);
     const posterUri = item.poster_path ? `${TMDB_IMAGE_BASE}${item.poster_path}` : null;
-    return (<TouchableOpacity onPress={() => handleMoviePress(item)} activeOpacity={0.7}><View style={styles.posterContainer}>{posterUri ? (<Image source={{ uri: posterUri }} style={styles.moviePoster} resizeMode="cover" />) : (<View style={[styles.moviePoster, styles.noPoster]}><Ionicons name="film-outline" size={28} color={COLORS.textMuted} /></View>)}{isRated && (<View style={[styles.ratedBadge, ratedInfo?.isLike ? styles.ratedBadgeLike : styles.ratedBadgeDislike]}><Ionicons name={ratedInfo?.isLike ? 'heart' : 'heart-dislike'} size={14} color="#FFF" /></View>)}{item.vote_average && item.vote_average > 0 && (<View style={styles.tmdbRating}><Ionicons name="star" size={10} color="#FFD700" /><Text style={styles.tmdbRatingText}>{item.vote_average.toFixed(1)}</Text></View>)}</View><Text style={styles.movieTitle} numberOfLines={2}>{item.title}</Text>{item.release_date && (<Text style={styles.movieYear}>{item.release_date.slice(0, 4)}</Text>)}</TouchableOpacity>);
+    
+    return (
+      <TouchableOpacity onPress={() => handleMoviePress(item)} activeOpacity={0.7}><View style={styles.posterContainer}>{posterUri ? (<Image source={{ uri: posterUri }} style={styles.moviePoster} resizeMode="cover" />) : (<View style={[styles.moviePoster, styles.noPoster]}><Ionicons name="film-outline" size={28} color={COLORS.textMuted} /></View>)}{isRated && (<View style={[styles.ratedBadge, ratedInfo?.isLike ? styles.ratedBadgeLike : styles.ratedBadgeDislike]}><Ionicons name={ratedInfo?.isLike ? 'heart' : 'heart-dislike'} size={14} color="#FFF" /></View>)}{item.vote_average && item.vote_average > 0 && (<View style={styles.tmdbRating}><Ionicons name="star" size={10} color="#FFD700" /><Text style={styles.tmdbRatingText}>{item.vote_average.toFixed(1)}</Text></View>)}</View><Text style={styles.movieTitle} numberOfLines={2}>{item.title}</Text>{item.release_date ? (<Text style={styles.movieYear}>{item.release_date.slice(0, 4)}</Text>) : null}</TouchableOpacity>
+    );
   };
 
   if (isLoading) {
