@@ -591,6 +591,9 @@ export default function ChatTab() {
     );
   }
 
+  // Calculate total unread messages
+  const totalUnread = conversations.reduce((sum, conv) => sum + (conv.unread || 0), 0);
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
@@ -598,8 +601,16 @@ export default function ChatTab() {
         <Text style={styles.headerTitle}>Messages</Text>
       </View>
 
-      {/* Tabs */}
+      {/* Tabs - Chats on LEFT, Requests on RIGHT */}
       <View style={styles.tabs}>
+        <TouchableOpacity
+          style={[styles.tab, activeTab === 'chats' && styles.tabActive]}
+          onPress={() => setActiveTab('chats')}
+        >
+          <Text style={[styles.tabText, activeTab === 'chats' && styles.tabTextActive]}>
+            Chats {totalUnread > 0 ? `(${totalUnread})` : ''}
+          </Text>
+        </TouchableOpacity>
         <TouchableOpacity
           style={[styles.tab, activeTab === 'requests' && styles.tabActive]}
           onPress={() => setActiveTab('requests')}
@@ -607,12 +618,6 @@ export default function ChatTab() {
           <Text style={[styles.tabText, activeTab === 'requests' && styles.tabTextActive]}>
             Requests {requests.length > 0 ? `(${requests.length})` : ''}
           </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'chats' && styles.tabActive]}
-          onPress={() => setActiveTab('chats')}
-        >
-          <Text style={[styles.tabText, activeTab === 'chats' && styles.tabTextActive]}>Chats</Text>
         </TouchableOpacity>
       </View>
 
@@ -622,7 +627,24 @@ export default function ChatTab() {
           <ActivityIndicator size="large" color={COLORS.primary} />
           <Text style={styles.loadingText}>Loading messages...</Text>
         </View>
-      ) : activeTab === 'requests' ? (
+      ) : activeTab === 'chats' ? (
+        <FlatList
+          data={conversations}
+          keyExtractor={(item) => item.conversation_id}
+          renderItem={({ item }) => (
+            <ConversationItem conversation={item} onPress={() => setSelectedConversation(item)} />
+          )}
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+          ListEmptyComponent={
+            <View style={styles.emptyState}>
+              <Ionicons name="chatbubbles-outline" size={48} color={COLORS.textMuted} />
+              <Text style={styles.emptyTitle}>No conversations yet</Text>
+              <Text style={styles.emptySubtitle}>Match with someone and start chatting!</Text>
+            </View>
+          }
+        />
+      ) : (
         <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
           {requests.length === 0 ? (
             <View style={styles.emptyState}>
@@ -641,23 +663,6 @@ export default function ChatTab() {
             ))
           )}
         </ScrollView>
-      ) : (
-        <FlatList
-          data={conversations}
-          keyExtractor={(item) => item.conversation_id}
-          renderItem={({ item }) => (
-            <ConversationItem conversation={item} onPress={() => setSelectedConversation(item)} />
-          )}
-          contentContainerStyle={styles.content}
-          showsVerticalScrollIndicator={false}
-          ListEmptyComponent={
-            <View style={styles.emptyState}>
-              <Ionicons name="chatbubbles-outline" size={48} color={COLORS.textMuted} />
-              <Text style={styles.emptyTitle}>No conversations yet</Text>
-              <Text style={styles.emptySubtitle}>Match with someone and start chatting!</Text>
-            </View>
-          }
-        />
       )}
     </SafeAreaView>
   );

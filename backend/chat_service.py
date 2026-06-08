@@ -62,7 +62,8 @@ def send_message(
     receiver_id: str,
     content: str,
     message_type: str = "text",  # text, image, voice, gif
-    media_url: Optional[str] = None
+    media_url: Optional[str] = None,
+    auto_reply: bool = True  # Enable AI auto-reply for testing
 ) -> Dict:
     """Send a message to another user"""
     conv = get_or_create_conversation(sender_id, receiver_id)
@@ -243,8 +244,10 @@ async def generate_ice_breakers(user_profile: Dict, match_profile: Dict) -> List
     try:
         chat = LlmChat(
             api_key=EMERGENT_LLM_KEY,
-            model="gpt-4o",
-        )
+            session_id=f"icebreaker_{match_profile.get('user_id', 'unknown')}",
+            system_message="You are a friendly dating app assistant that generates ice breaker messages."
+        ).with_model("openai", "gpt-4o")
+        
         
         user_genres = ", ".join(user_profile.get("genres", [])[:3])
         match_genres = ", ".join(match_profile.get("genres", [])[:3])
@@ -270,7 +273,9 @@ Return ONLY 3 messages, one per line, no numbering or bullets."""
 
         response = await chat.send_message(UserMessage(text=prompt))
         
-        lines = [line.strip() for line in response.text.strip().split("\n") if line.strip()]
+        # send_message returns string directly
+        response_text = response if isinstance(response, str) else str(response)
+        lines = [line.strip() for line in response_text.strip().split("\n") if line.strip()]
         return lines[:3] if len(lines) >= 3 else lines + [
             f"Hey! Love your movie taste!",
             f"Hi {match_profile.get('name', 'there')}! What are you watching?",
@@ -301,8 +306,9 @@ async def generate_reply_suggestions(
     try:
         chat = LlmChat(
             api_key=EMERGENT_LLM_KEY,
-            model="gpt-4o",
-        )
+            session_id=f"reply_{user_profile.get('user_id', 'unknown')}",
+            system_message="You are a friendly dating app assistant that generates reply suggestions."
+        ).with_model("openai", "gpt-4o")
         
         # Get last few messages for context
         recent_messages = conversation_messages[-5:]
@@ -330,7 +336,9 @@ Return ONLY 3 replies, one per line, no numbering."""
 
         response = await chat.send_message(UserMessage(text=prompt))
         
-        lines = [line.strip() for line in response.text.strip().split("\n") if line.strip()]
+        # send_message returns string directly
+        response_text = response if isinstance(response, str) else str(response)
+        lines = [line.strip() for line in response_text.strip().split("\n") if line.strip()]
         return lines[:3] if len(lines) >= 3 else [
             "That's so cool!",
             "Tell me more!",
@@ -344,6 +352,100 @@ Return ONLY 3 replies, one per line, no numbering."""
             "I feel the same way",
             "What else do you enjoy?",
         ]
+
+
+async def generate_ai_auto_reply(
+    conversation_id: str,
+    user_message: str,
+    match_profile: Dict
+) -> str:
+    """Generate an AI auto-reply from the match for testing purposes"""
+    if not EMERGENT_LLM_KEY:
+        # Fallback replies
+        import random
+        replies = [
+            "That's so interesting! Tell me more about that.",
+            "I totally agree! Movies are such a great way to connect.",
+            "Haha, I love your perspective on that!",
+            "That reminds me of one of my favorite films.",
+            "What else do you enjoy watching?",
+            "I've been meaning to watch that! Is it worth it?",
+            "Great taste! Have you seen any good ones lately?",
+        ]
+        return random.choice(replies)
+    
+    try:
+        # Get conversation history for context
+        messages = _messages.get(conversation_id, [])[-5:]
+        conversation_text = "\n".join([
+            f"User: {m['content']}" if m['sender_id'] != match_profile.get('user_id') else f"Me: {m['content']}"
+            for m in messages
+        ])
+        
+        chat = LlmChat(
+            api_key=EMERGENT_LLM_KEY,
+            session_id=f"autoreply_{conversation_id}",
+            system_message=f"""You are {match_profile.get('name', 'a friendly person')} on a movie dating app. 
+You are {match_profile.get('age', 28)} years old from {match_profile.get('location', 'India')}.
+You love movies, especially {', '.join(match_profile.get('genres', ['Drama', 'Comedy'])[:3])}.
+Your favorite movies include {', '.join([m.get('title', '') for m in match_profile.get('topMovies', [])[:2]])}.
+Reply naturally and friendly to continue the conversation. Keep it under 100 characters."""
+        ).with_model("openai", "gpt-4o")
+        
+        prompt = f"""Previous conversation:
+{conversation_text}
+
+User just said: "{user_message}"
+
+Reply as {match_profile.get('name', 'yourself')} naturally. Keep it short (under 100 characters) and friendly."""
+
+        response = await chat.send_message(UserMessage(text=prompt))
+        # send_message returns string directly
+        response_text = response if isinstance(response, str) else str(response)
+        return response_text.strip()[:200]
+        
+    except Exception as e:
+        print(f"Error generating auto-reply: {e}")
+        import random
+        replies = [
+            "That's really cool! What else do you like?",
+            "I love that! Tell me more!",
+            "Haha, we have so much in common!",
+            "That's a great point!",
+        ]
+        return random.choice(replies)
+
+
+def add_ai_reply_to_conversation(
+    sender_id: str,
+    receiver_id: str,
+    content: str
+) -> Dict:
+    """Add an AI-generated reply message to the conversation"""
+    conv = get_or_create_conversation(sender_id, receiver_id)
+    conv_id = conv["conversation_id"]
+    
+    message = {
+        "message_id": f"msg_{datetime.utcnow().timestamp()}_{sender_id[:8]}_ai",
+        "conversation_id": conv_id,
+        "sender_id": sender_id,
+        "receiver_id": receiver_id,
+        "content": content,
+        "message_type": "text",
+        "media_url": None,
+        "created_at": datetime.utcnow().isoformat(),
+        "read": False,
+        "delivered": True,
+    }
+    
+    _messages[conv_id].append(message)
+    
+    # Update conversation
+    conv["last_message"] = content[:50] + "..." if len(content) > 50 else content
+    conv["last_message_at"] = message["created_at"]
+    conv["unread_count"][receiver_id] = conv["unread_count"].get(receiver_id, 0) + 1
+    
+    return message
 
 
 # ============== MOCK DATA FOR TESTING ==============

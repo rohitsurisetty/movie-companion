@@ -2,10 +2,12 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import {
   View, Text, StyleSheet, TouchableOpacity, Image, ScrollView,
   Dimensions, ActivityIndicator, RefreshControl, FlatList, Pressable,
+  Modal, TextInput, KeyboardAvoidingView, Platform, Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useRouter } from 'expo-router';
 import { useAppMode } from '../../src/components/SharedHeader';
 import { getUserId } from '../../src/store';
 import BottomSheet, { BottomSheetScrollView, BottomSheetBackdrop } from '@gorhom/bottom-sheet';
@@ -284,6 +286,7 @@ const EmptyState = ({ mode, onRefresh }: { mode: string; onRefresh: () => void }
 // ============ MAIN FEED SCREEN ============
 export default function FeedScreen() {
   const { mode } = useAppMode();
+  const router = useRouter();
   const [matches, setMatches] = useState<MatchProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -386,10 +389,44 @@ export default function FeedScreen() {
     setSelectedProfile(null);
   };
 
+  const [showMessageInput, setShowMessageInput] = useState(false);
+  const [messageText, setMessageText] = useState('');
+  const [sendingMessage, setSendingMessage] = useState(false);
+
   const handleMessage = () => {
-    // TODO: Navigate to chat
-    console.log('Message:', selectedProfile?.name);
-    closeProfile();
+    // Show message input modal
+    setShowMessageInput(true);
+  };
+
+  const sendFirstMessage = async () => {
+    if (!messageText.trim() || !selectedProfile) return;
+    
+    setSendingMessage(true);
+    try {
+      const userId = await getUserId();
+      const response = await fetch(`${API_BASE}/api/chat/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sender_id: userId,
+          receiver_id: selectedProfile.user_id,
+          content: messageText.trim(),
+          message_type: 'text',
+        }),
+      });
+      
+      if (response.ok) {
+        setMessageText('');
+        setShowMessageInput(false);
+        closeProfile();
+        // Navigate to chat tab
+        router.push('/(tabs)/chat');
+      }
+    } catch (error) {
+      console.error('Error sending message:', error);
+    } finally {
+      setSendingMessage(false);
+    }
   };
 
   // Render backdrop
@@ -679,6 +716,45 @@ export default function FeedScreen() {
             </BottomSheetScrollView>
           )}
         </BottomSheet>
+
+        {/* Message Input Modal */}
+        <Modal visible={showMessageInput} transparent animationType="slide" onRequestClose={() => setShowMessageInput(false)}>
+          <KeyboardAvoidingView style={styles.messageModalContainer} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+            <TouchableOpacity style={styles.messageModalOverlay} activeOpacity={1} onPress={() => { Keyboard.dismiss(); setShowMessageInput(false); }} />
+            <View style={styles.messageModalContent}>
+              <View style={styles.messageModalHeader}>
+                <Text style={styles.messageModalTitle}>Send Message to {selectedProfile?.name}</Text>
+                <TouchableOpacity onPress={() => setShowMessageInput(false)}>
+                  <Ionicons name="close" size={24} color={COLORS.text} />
+                </TouchableOpacity>
+              </View>
+              <TextInput
+                style={styles.messageModalInput}
+                placeholder="Type your message..."
+                placeholderTextColor={COLORS.textMuted}
+                value={messageText}
+                onChangeText={setMessageText}
+                multiline
+                maxLength={500}
+                autoFocus
+              />
+              <TouchableOpacity
+                style={[styles.messageModalSendBtn, !messageText.trim() && styles.messageModalSendBtnDisabled]}
+                onPress={sendFirstMessage}
+                disabled={!messageText.trim() || sendingMessage}
+              >
+                {sendingMessage ? (
+                  <ActivityIndicator size="small" color="#FFF" />
+                ) : (
+                  <>
+                    <Ionicons name="send" size={18} color="#FFF" />
+                    <Text style={styles.messageModalSendBtnText}>Send</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
       </SafeAreaView>
     </GestureHandlerRootView>
   );
@@ -1124,6 +1200,62 @@ const styles = StyleSheet.create({
   },
   messageButtonText: {
     fontSize: 18,
+    fontWeight: '600',
+    color: '#FFF',
+  },
+
+  // Message Modal
+  messageModalContainer: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  messageModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  messageModalContent: {
+    backgroundColor: COLORS.bgCard,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    paddingBottom: 40,
+  },
+  messageModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  messageModalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: COLORS.text,
+  },
+  messageModalInput: {
+    backgroundColor: COLORS.bgInput,
+    borderRadius: 12,
+    padding: 16,
+    fontSize: 16,
+    color: COLORS.text,
+    minHeight: 100,
+    maxHeight: 150,
+    textAlignVertical: 'top',
+  },
+  messageModalSendBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.primary,
+    paddingVertical: 14,
+    borderRadius: 24,
+    marginTop: 16,
+    gap: 8,
+  },
+  messageModalSendBtnDisabled: {
+    opacity: 0.5,
+  },
+  messageModalSendBtnText: {
+    fontSize: 16,
     fontWeight: '600',
     color: '#FFF',
   },
