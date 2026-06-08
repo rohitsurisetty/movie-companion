@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Image, TextInput,
-  FlatList, ScrollView, Modal, KeyboardAvoidingView, Platform,
-  ActivityIndicator, Keyboard, Alert, Dimensions, Animated, PanResponder,
+  FlatList, ScrollView, Modal, Platform, ActivityIndicator, 
+  Dimensions, Alert, Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
+import { GiftedChat, Bubble, InputToolbar, Send, Composer, IMessage, MessageImage } from 'react-native-gifted-chat';
 import { useAppMode } from '../../src/components/SharedHeader';
 import { getUserId } from '../../src/store';
 
@@ -27,7 +28,7 @@ const COLORS = {
   success: '#00D26A',
   warning: '#FFB800',
   online: '#00D26A',
-  reply: '#1E3A5F',
+  suggestion: '#1E3A5F',
 };
 
 interface Conversation {
@@ -60,7 +61,7 @@ interface MessageRequest {
   created_at: string;
 }
 
-interface Message {
+interface BackendMessage {
   message_id: string;
   sender_id: string;
   receiver_id: string;
@@ -68,29 +69,11 @@ interface Message {
   message_type: string;
   created_at: string;
   read: boolean;
-  reply_to?: {
-    message_id: string;
-    content: string;
-    sender_id: string;
-  };
-}
-
-interface UserProfile {
-  user_id: string;
-  name: string;
-  age?: number;
-  location?: string;
-  bio?: string;
-  genres?: string[];
-  topMovies?: { title: string; poster_path?: string }[];
-  pictures?: string[];
 }
 
 // ============ AVATAR COMPONENT ============
-const Avatar = ({ name, size = 50, color, imageUrl }: { name: string; size?: number; color?: string; imageUrl?: string }) => {
-  const bgColor = color || COLORS.primary;
-  
-  if (imageUrl) {
+const Avatar = ({ name, size = 50, imageUrl }: { name: string; size?: number; imageUrl?: string }) => {
+  if (imageUrl && imageUrl.startsWith('http')) {
     return (
       <Image 
         source={{ uri: imageUrl }} 
@@ -100,112 +83,77 @@ const Avatar = ({ name, size = 50, color, imageUrl }: { name: string; size?: num
   }
   
   return (
-    <LinearGradient colors={[bgColor, `${bgColor}88`]} style={[styles.avatar, { width: size, height: size, borderRadius: size / 2 }]}>
-      <Text style={[styles.avatarText, { fontSize: size * 0.4 }]}>{name?.charAt(0).toUpperCase() || '?'}</Text>
+    <LinearGradient 
+      colors={[COLORS.primary, '#FF6B6B']} 
+      style={[styles.avatar, { width: size, height: size, borderRadius: size / 2 }]}
+    >
+      <Text style={[styles.avatarText, { fontSize: size * 0.4 }]}>
+        {name?.charAt(0).toUpperCase() || '?'}
+      </Text>
     </LinearGradient>
   );
 };
 
-// ============ PROFILE VIEW MODAL ============
-const ProfileViewModal = ({ 
+// ============ PROFILE BOTTOM SHEET ============
+const ProfileBottomSheet = ({ 
   visible, 
   onClose, 
-  userId,
-  userName,
+  userId, 
+  userName 
 }: { 
   visible: boolean; 
-  onClose: () => void;
-  userId: string;
+  onClose: () => void; 
+  userId: string; 
   userName: string;
 }) => {
-  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [profile, setProfile] = useState<any>(null);
   const [pictures, setPictures] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentPicIndex, setCurrentPicIndex] = useState(0);
 
   useEffect(() => {
     if (visible && userId) {
-      fetchProfile();
+      fetchProfileData();
     }
   }, [visible, userId]);
 
-  const fetchProfile = async () => {
+  const fetchProfileData = async () => {
     setLoading(true);
     try {
-      // Fetch user profile
+      // Fetch profile
       const profileRes = await fetch(`${API_BASE}/api/user/profile/${userId}`);
       if (profileRes.ok) {
         const data = await profileRes.json();
-        setProfile(data.profile || data);
+        setProfile(data.profile);
       }
-      
-      // Fetch user pictures
+
+      // Fetch pictures
       const picsRes = await fetch(`${API_BASE}/api/user/pictures/${userId}`);
       if (picsRes.ok) {
         const data = await picsRes.json();
-        setPictures(data.pictures || []);
+        const pics = data.pictures || {};
+        const photoArray = [pics.picture_1, pics.picture_2, pics.picture_3, pics.picture_4, pics.picture_5]
+          .filter(Boolean);
+        setPictures(photoArray);
       }
     } catch (error) {
       console.error('Error fetching profile:', error);
-      // Set mock profile for mock users
-      if (userId.startsWith('mock_')) {
-        const mockProfiles: Record<string, UserProfile> = {
-          'mock_user_001': {
-            user_id: 'mock_user_001',
-            name: 'Priya Sharma',
-            age: 28,
-            location: 'Mumbai, India',
-            bio: 'Film enthusiast who believes every movie tells a story worth experiencing. Christopher Nolan fan!',
-            genres: ['Drama', 'Romance', 'Thriller', 'Sci-Fi'],
-            topMovies: [
-              { title: 'Interstellar' },
-              { title: 'The Dark Knight' },
-              { title: 'Inception' },
-            ],
-          },
-          'mock_user_002': {
-            user_id: 'mock_user_002',
-            name: 'Rahul Kapoor',
-            age: 30,
-            location: 'Delhi, India',
-            bio: 'Action movie buff and sci-fi geek. Always looking for the next mind-bending film!',
-            genres: ['Action', 'Sci-Fi', 'Comedy', 'Adventure'],
-            topMovies: [
-              { title: 'Inception' },
-              { title: 'The Matrix' },
-              { title: 'Avengers: Endgame' },
-            ],
-          },
-          'mock_user_003': {
-            user_id: 'mock_user_003',
-            name: 'Ananya Reddy',
-            age: 26,
-            location: 'Bangalore, India',
-            bio: 'Love feel-good movies and thought-provoking dramas. Weekend movie marathons are my thing!',
-            genres: ['Comedy', 'Drama', 'Adventure', 'Romance'],
-            topMovies: [
-              { title: 'Oppenheimer' },
-              { title: 'Barbie' },
-              { title: 'Everything Everywhere All at Once' },
-            ],
-          },
-        };
-        setProfile(mockProfiles[userId] || { user_id: userId, name: userName });
-      }
     } finally {
       setLoading(false);
     }
   };
 
+  if (!visible) return null;
+
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
-      <SafeAreaView style={styles.profileModalContainer}>
+      <SafeAreaView style={styles.profileModal}>
         {/* Header */}
-        <View style={styles.profileModalHeader}>
+        <View style={styles.profileHeader}>
           <TouchableOpacity onPress={onClose} style={styles.profileCloseBtn}>
-            <Ionicons name="close" size={28} color={COLORS.text} />
+            <Ionicons name="chevron-down" size={28} color={COLORS.text} />
           </TouchableOpacity>
-          <Text style={styles.profileModalTitle}>Profile</Text>
+          <Text style={styles.profileHeaderTitle}>Profile</Text>
           <View style={{ width: 44 }} />
         </View>
 
@@ -215,75 +163,101 @@ const ProfileViewModal = ({
           </View>
         ) : (
           <ScrollView style={styles.profileContent} showsVerticalScrollIndicator={false}>
-            {/* Profile Picture */}
-            <View style={styles.profilePictureSection}>
+            {/* Photo Carousel */}
+            <View style={styles.photoCarousel}>
               {pictures.length > 0 ? (
-                <View>
-                  <Image 
-                    source={{ uri: pictures[currentPicIndex] }} 
-                    style={styles.profileMainPicture}
-                  />
+                <>
+                  <ScrollView
+                    horizontal
+                    pagingEnabled
+                    showsHorizontalScrollIndicator={false}
+                    onScroll={(e) => {
+                      const index = Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH);
+                      setCurrentPicIndex(index);
+                    }}
+                    scrollEventThrottle={16}
+                  >
+                    {pictures.map((pic, index) => (
+                      <Image
+                        key={index}
+                        source={{ uri: pic }}
+                        style={styles.profilePhoto}
+                        resizeMode="cover"
+                      />
+                    ))}
+                  </ScrollView>
                   {pictures.length > 1 && (
-                    <View style={styles.pictureDots}>
-                      {pictures.map((_, idx) => (
-                        <TouchableOpacity 
-                          key={idx} 
-                          onPress={() => setCurrentPicIndex(idx)}
-                          style={[styles.pictureDot, idx === currentPicIndex && styles.pictureDotActive]}
+                    <View style={styles.photoIndicators}>
+                      {pictures.map((_, index) => (
+                        <View
+                          key={index}
+                          style={[
+                            styles.photoIndicator,
+                            currentPicIndex === index && styles.photoIndicatorActive,
+                          ]}
                         />
                       ))}
                     </View>
                   )}
-                </View>
+                </>
               ) : (
-                <View style={styles.profilePlaceholderPicture}>
-                  <Avatar name={profile?.name || userName} size={120} />
+                <View style={styles.noPhotoPlaceholder}>
+                  <Avatar name={userName} size={120} />
                 </View>
               )}
             </View>
 
-            {/* Basic Info */}
-            <View style={styles.profileInfoSection}>
+            {/* Profile Info */}
+            <View style={styles.profileInfo}>
               <Text style={styles.profileName}>
                 {profile?.name || userName}{profile?.age ? `, ${profile.age}` : ''}
               </Text>
+              
               {profile?.location && (
                 <View style={styles.profileLocationRow}>
                   <Ionicons name="location-outline" size={16} color={COLORS.textSecondary} />
                   <Text style={styles.profileLocation}>{profile.location}</Text>
                 </View>
               )}
+
+              {profile?.workProfile && (
+                <View style={styles.profileLocationRow}>
+                  <Ionicons name="briefcase-outline" size={16} color={COLORS.textSecondary} />
+                  <Text style={styles.profileLocation}>{profile.workProfile}</Text>
+                </View>
+              )}
+
               {profile?.bio && (
                 <Text style={styles.profileBio}>{profile.bio}</Text>
               )}
-            </View>
 
-            {/* Genres */}
-            {profile?.genres && profile.genres.length > 0 && (
-              <View style={styles.profileSection}>
-                <Text style={styles.profileSectionTitle}>Favorite Genres</Text>
-                <View style={styles.genreChips}>
-                  {profile.genres.map((genre, idx) => (
-                    <View key={idx} style={styles.genreChip}>
-                      <Text style={styles.genreChipText}>{genre}</Text>
+              {/* Genres */}
+              {profile?.genres && profile.genres.length > 0 && (
+                <View style={styles.profileSection}>
+                  <Text style={styles.profileSectionTitle}>Movie Taste</Text>
+                  <View style={styles.tagsContainer}>
+                    {profile.genres.map((genre: string, idx: number) => (
+                      <View key={idx} style={styles.tag}>
+                        <Text style={styles.tagText}>{genre}</Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              )}
+
+              {/* Top Movies */}
+              {profile?.topMovies && profile.topMovies.length > 0 && (
+                <View style={styles.profileSection}>
+                  <Text style={styles.profileSectionTitle}>Favorite Movies</Text>
+                  {profile.topMovies.slice(0, 5).map((movie: any, idx: number) => (
+                    <View key={idx} style={styles.movieItem}>
+                      <Ionicons name="film-outline" size={18} color={COLORS.primary} />
+                      <Text style={styles.movieTitle}>{movie.title}</Text>
                     </View>
                   ))}
                 </View>
-              </View>
-            )}
-
-            {/* Top Movies */}
-            {profile?.topMovies && profile.topMovies.length > 0 && (
-              <View style={styles.profileSection}>
-                <Text style={styles.profileSectionTitle}>Top Movies</Text>
-                {profile.topMovies.map((movie, idx) => (
-                  <View key={idx} style={styles.movieItem}>
-                    <Ionicons name="film-outline" size={18} color={COLORS.primary} />
-                    <Text style={styles.movieTitle}>{movie.title}</Text>
-                  </View>
-                ))}
-              </View>
-            )}
+              )}
+            </View>
 
             <View style={{ height: 40 }} />
           </ScrollView>
@@ -308,13 +282,13 @@ const MessageRequestCard = ({
   return (
     <View style={styles.requestCard}>
       <View style={styles.requestHeader}>
-        <Avatar name={user?.name || 'U'} size={60} />
+        <Avatar name={user?.name || 'U'} size={60} imageUrl={user?.avatar} />
         <View style={styles.requestInfo}>
-          <Text style={styles.requestName}>{user?.name || 'Unknown'}, {user?.age || '?'}</Text>
+          <Text style={styles.requestName}>{user?.name || 'Unknown'}{user?.age ? `, ${user.age}` : ''}</Text>
           <Text style={styles.requestLocation}>{user?.location || 'Unknown location'}</Text>
         </View>
       </View>
-      <Text style={styles.requestPreview} numberOfLines={2}>{request.preview}</Text>
+      <Text style={styles.requestPreview} numberOfLines={2}>"{request.preview}"</Text>
       <View style={styles.requestActions}>
         <TouchableOpacity style={styles.declineBtn} onPress={onDecline}>
           <Ionicons name="close" size={20} color={COLORS.textSecondary} />
@@ -341,14 +315,16 @@ const ConversationItem = ({
   const hasUnread = conversation.unread > 0;
   
   return (
-    <TouchableOpacity style={styles.conversationItem} onPress={onPress}>
+    <TouchableOpacity style={styles.conversationItem} onPress={onPress} activeOpacity={0.7}>
       <View style={styles.conversationAvatar}>
-        <Avatar name={user?.name || 'U'} size={56} />
+        <Avatar name={user?.name || 'U'} size={56} imageUrl={user?.avatar} />
         <View style={styles.onlineDot} />
       </View>
       <View style={styles.conversationContent}>
         <View style={styles.conversationHeader}>
-          <Text style={[styles.conversationName, hasUnread && styles.unreadName]}>{user?.name || 'Unknown'}</Text>
+          <Text style={[styles.conversationName, hasUnread && styles.unreadName]} numberOfLines={1}>
+            {user?.name || 'Unknown'}
+          </Text>
           <Text style={styles.conversationTime}>{formatTime(conversation.last_message_at)}</Text>
         </View>
         <Text style={[styles.conversationPreview, hasUnread && styles.unreadPreview]} numberOfLines={1}>
@@ -364,154 +340,52 @@ const ConversationItem = ({
   );
 };
 
-// ============ SWIPEABLE MESSAGE BUBBLE ============
-const SwipeableMessage = ({ 
-  item, 
-  isMe, 
-  onReply, 
-  onLongPress,
-  replyTo,
-  otherUserName,
-}: { 
-  item: Message; 
-  isMe: boolean; 
-  onReply: (msg: Message) => void;
-  onLongPress: (msg: Message) => void;
-  replyTo?: { content: string; sender_id: string };
-  otherUserName: string;
-}) => {
-  const translateX = useRef(new Animated.Value(0)).current;
-  const replyOpacity = useRef(new Animated.Value(0)).current;
-  const SWIPE_THRESHOLD = 60;
-
-  const panResponder = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_, gestureState) => {
-        // Only respond to horizontal swipes to the right
-        return gestureState.dx > 10 && Math.abs(gestureState.dy) < 20;
-      },
-      onPanResponderMove: (_, gestureState) => {
-        if (gestureState.dx > 0 && gestureState.dx < 100) {
-          translateX.setValue(gestureState.dx);
-          replyOpacity.setValue(Math.min(gestureState.dx / SWIPE_THRESHOLD, 1));
-        }
-      },
-      onPanResponderRelease: (_, gestureState) => {
-        if (gestureState.dx >= SWIPE_THRESHOLD) {
-          // Trigger reply
-          onReply(item);
-        }
-        // Animate back
-        Animated.parallel([
-          Animated.spring(translateX, {
-            toValue: 0,
-            useNativeDriver: true,
-            friction: 8,
-          }),
-          Animated.timing(replyOpacity, {
-            toValue: 0,
-            duration: 200,
-            useNativeDriver: true,
-          }),
-        ]).start();
-      },
-    })
-  ).current;
-
-  return (
-    <View style={[styles.messageRowWrapper]}>
-      {/* Reply indicator */}
-      <Animated.View style={[
-        styles.replyIndicator,
-        { opacity: replyOpacity },
-        isMe ? { right: undefined, left: 10 } : { left: undefined, right: 10 },
-      ]}>
-        <Ionicons name="arrow-undo" size={20} color={COLORS.primary} />
-      </Animated.View>
-      
-      <Animated.View 
-        {...panResponder.panHandlers}
-        style={[
-          styles.messageRow, 
-          isMe ? styles.messageRowMe : styles.messageRowOther,
-          { transform: [{ translateX }] }
-        ]}
-      >
-        <TouchableOpacity 
-          activeOpacity={0.8}
-          onLongPress={() => onLongPress(item)}
-          delayLongPress={300}
-          style={[styles.messageBubble, isMe ? styles.messageBubbleMe : styles.messageBubbleOther]}
-        >
-          {/* Reply preview if this message is a reply */}
-          {replyTo && (
-            <View style={styles.replyPreview}>
-              <View style={styles.replyBar} />
-              <View style={styles.replyContent}>
-                <Text style={styles.replyAuthor}>
-                  {replyTo.sender_id === item.sender_id ? 'You' : otherUserName}
-                </Text>
-                <Text style={styles.replyText} numberOfLines={1}>{replyTo.content}</Text>
-              </View>
-            </View>
-          )}
-          <Text style={[styles.messageText, isMe ? styles.messageTextMe : styles.messageTextOther]}>
-            {item.content}
-          </Text>
-          <Text style={[styles.messageTime, isMe ? styles.messageTimeMe : styles.messageTimeOther]}>
-            {formatMessageTime(item.created_at)}
-          </Text>
-        </TouchableOpacity>
-      </Animated.View>
-    </View>
-  );
-};
-
-// ============ CHAT SCREEN ============
-const ChatScreen = ({ 
+// ============ GIFTED CHAT SCREEN ============
+const GiftedChatScreen = ({ 
   conversation, 
   userId,
   onBack,
-  onUnmatch,
-  onReport,
 }: {
   conversation: Conversation;
   userId: string;
   onBack: () => void;
-  onUnmatch: () => void;
-  onReport: () => void;
 }) => {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [inputText, setInputText] = useState('');
+  const [messages, setMessages] = useState<IMessage[]>([]);
   const [loading, setLoading] = useState(true);
-  const [sending, setSending] = useState(false);
-  const [showMenu, setShowMenu] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
-  const [iceBreakers, setIceBreakers] = useState<string[]>([]);
+  const [showMenu, setShowMenu] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [replyingTo, setReplyingTo] = useState<Message | null>(null);
-  const [showMessageMenu, setShowMessageMenu] = useState(false);
-  const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
-  const flatListRef = useRef<FlatList>(null);
+  const [isTyping, setIsTyping] = useState(false);
   
   const otherUser = conversation.other_user;
+  const otherUserId = conversation.other_user_id;
+
+  // Convert backend messages to GiftedChat format
+  const convertToGiftedMessages = (backendMessages: BackendMessage[]): IMessage[] => {
+    return backendMessages.map((msg) => ({
+      _id: msg.message_id,
+      text: msg.content,
+      createdAt: new Date(msg.created_at),
+      user: {
+        _id: msg.sender_id,
+        name: msg.sender_id === userId ? 'You' : otherUser?.name || 'Unknown',
+        avatar: msg.sender_id === userId ? undefined : otherUser?.avatar,
+      },
+    }));
+  };
 
   // Fetch messages
   useEffect(() => {
     fetchMessages();
-    fetchIceBreakers();
   }, [conversation.conversation_id]);
 
-  // Determine if suggestions should show based on who sent the last message
+  // Check if suggestions should show
   useEffect(() => {
     if (messages.length > 0) {
-      const lastMessage = messages[0]; // Messages are inverted, so first item is the latest
-      // Only show suggestions if the OTHER person sent the last message
-      const otherPersonSentLast = lastMessage.sender_id !== userId;
+      const lastMessage = messages[0]; // GiftedChat messages are sorted newest first
+      const otherPersonSentLast = lastMessage.user._id !== userId;
       setShowSuggestions(otherPersonSentLast && suggestions.length > 0);
-    } else {
-      setShowSuggestions(false);
     }
   }, [messages, suggestions, userId]);
 
@@ -520,14 +394,15 @@ const ChatScreen = ({
       const response = await fetch(`${API_BASE}/api/chat/messages/${conversation.conversation_id}`);
       if (response.ok) {
         const data = await response.json();
-        setMessages(data.messages || []);
+        const giftedMessages = convertToGiftedMessages(data.messages || []);
+        setMessages(giftedMessages);
         
         // Mark as read
         await fetch(`${API_BASE}/api/chat/read/${conversation.conversation_id}?user_id=${userId}`, { method: 'POST' });
         
-        // Get reply suggestions if there are messages
+        // Fetch suggestions if there are messages
         if (data.messages && data.messages.length > 0) {
-          fetchReplySuggestions();
+          fetchSuggestions();
         }
       }
     } catch (error) {
@@ -537,26 +412,7 @@ const ChatScreen = ({
     }
   };
 
-  const fetchIceBreakers = async () => {
-    try {
-      const response = await fetch(`${API_BASE}/api/chat/ice-breakers`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: userId,
-          match_user_id: conversation.other_user_id,
-        }),
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setIceBreakers(data.ice_breakers || []);
-      }
-    } catch (error) {
-      console.error('Error fetching ice breakers:', error);
-    }
-  };
-
-  const fetchReplySuggestions = async () => {
+  const fetchSuggestions = async () => {
     try {
       const response = await fetch(`${API_BASE}/api/chat/reply-suggestions`, {
         method: 'POST',
@@ -575,284 +431,268 @@ const ChatScreen = ({
     }
   };
 
-  const sendMessage = async (content: string, type: string = 'text') => {
-    if (!content.trim()) return;
+  const onSend = useCallback(async (newMessages: IMessage[] = []) => {
+    const messageText = newMessages[0]?.text;
+    if (!messageText?.trim()) return;
+
+    // Optimistically add message
+    setMessages(previousMessages => GiftedChat.append(previousMessages, newMessages));
     
-    setSending(true);
+    // Hide suggestions after sending
+    setShowSuggestions(false);
+    setSuggestions([]);
+
     try {
-      const messageData: any = {
-        sender_id: userId,
-        receiver_id: conversation.other_user_id,
-        content: content.trim(),
-        message_type: type,
-      };
-      
-      // Include reply reference if replying
-      if (replyingTo) {
-        messageData.reply_to = {
-          message_id: replyingTo.message_id,
-          content: replyingTo.content,
-          sender_id: replyingTo.sender_id,
-        };
-      }
-      
-      const response = await fetch(`${API_BASE}/api/chat/send`, {
+      await fetch(`${API_BASE}/api/chat/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(messageData),
+        body: JSON.stringify({
+          sender_id: userId,
+          receiver_id: otherUserId,
+          content: messageText.trim(),
+          message_type: 'text',
+        }),
       });
+
+      // Show typing indicator and wait for AI reply
+      setIsTyping(true);
       
-      if (response.ok) {
-        const data = await response.json();
-        // Add reply_to to the message for local display
-        const newMessage = {
-          ...data.message,
-          reply_to: replyingTo ? {
-            message_id: replyingTo.message_id,
-            content: replyingTo.content,
-            sender_id: replyingTo.sender_id,
-          } : undefined,
-        };
-        setMessages(prev => [newMessage, ...prev]);
-        setInputText('');
-        setReplyingTo(null);
-        Keyboard.dismiss();
-        
-        // Clear suggestions after sending (user already replied)
-        setShowSuggestions(false);
-        setSuggestions([]);
-        
-        // Fetch new suggestions after AI replies (with delay)
-        setTimeout(() => {
-          fetchMessages();
-        }, 4000);
-      }
+      // Poll for new messages after AI reply (4 seconds)
+      setTimeout(async () => {
+        setIsTyping(false);
+        await fetchMessages();
+      }, 4000);
+      
     } catch (error) {
       console.error('Error sending message:', error);
-    } finally {
-      setSending(false);
     }
+  }, [userId, otherUserId, conversation.conversation_id]);
+
+  const handleSuggestionPress = (suggestion: string) => {
+    const newMessage: IMessage = {
+      _id: `temp_${Date.now()}`,
+      text: suggestion,
+      createdAt: new Date(),
+      user: { _id: userId, name: 'You' },
+    };
+    onSend([newMessage]);
   };
 
-  const handleReply = (msg: Message) => {
-    setReplyingTo(msg);
-  };
-
-  const handleMessageLongPress = (msg: Message) => {
-    setSelectedMessage(msg);
-    setShowMessageMenu(true);
-  };
-
-  const copyMessage = () => {
-    // In a real app, you'd use Clipboard API
-    Alert.alert('Copied', 'Message copied to clipboard');
-    setShowMessageMenu(false);
-  };
-
-  const handleVoiceNote = () => {
-    Alert.alert('Voice Notes', 'Voice notes feature coming soon!');
-  };
-
-  const handleMediaPicker = () => {
-    Alert.alert('Media', 'Media sharing feature coming soon!');
-  };
-
-  const handleCall = (isVideo: boolean) => {
+  const handleUnmatch = () => {
     Alert.alert(
-      isVideo ? 'Video Call' : 'Voice Call',
-      'Calling feature coming soon!',
-      [{ text: 'OK' }]
+      'Unmatch',
+      `Are you sure you want to unmatch with ${otherUser?.name}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Unmatch',
+          style: 'destructive',
+          onPress: async () => {
+            await fetch(`${API_BASE}/api/chat/unmatch`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ user_id: userId, other_user_id: otherUserId }),
+            });
+            onBack();
+          },
+        },
+      ]
     );
   };
 
-  const renderMessage = ({ item }: { item: Message }) => {
-    const isMe = item.sender_id === userId;
+  const handleReport = () => {
+    Alert.alert(
+      'Report User',
+      'Why are you reporting this user?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Inappropriate', onPress: () => submitReport('inappropriate') },
+        { text: 'Harassment', onPress: () => submitReport('harassment') },
+        { text: 'Fake Profile', onPress: () => submitReport('fake_profile') },
+      ]
+    );
+  };
+
+  const submitReport = async (reason: string) => {
+    await fetch(`${API_BASE}/api/chat/report`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reporter_id: userId, reported_id: otherUserId, reason }),
+    });
+    Alert.alert('Reported', 'Thank you. We will review this report.');
+  };
+
+  // Custom bubble
+  const renderBubble = (props: any) => (
+    <Bubble
+      {...props}
+      wrapperStyle={{
+        right: { backgroundColor: COLORS.primary, marginRight: 8 },
+        left: { backgroundColor: COLORS.bgCard, marginLeft: 8 },
+      }}
+      textStyle={{
+        right: { color: '#FFF' },
+        left: { color: COLORS.text },
+      }}
+      timeTextStyle={{
+        right: { color: 'rgba(255,255,255,0.6)' },
+        left: { color: COLORS.textMuted },
+      }}
+    />
+  );
+
+  // Custom input toolbar
+  const renderInputToolbar = (props: any) => (
+    <InputToolbar
+      {...props}
+      containerStyle={styles.inputToolbar}
+      primaryStyle={styles.inputPrimary}
+    />
+  );
+
+  // Custom composer
+  const renderComposer = (props: any) => (
+    <Composer
+      {...props}
+      textInputStyle={styles.composerInput}
+      placeholderTextColor={COLORS.textMuted}
+      placeholder="Type a message..."
+    />
+  );
+
+  // Custom send button
+  const renderSend = (props: any) => (
+    <Send {...props} containerStyle={styles.sendContainer}>
+      <View style={styles.sendButton}>
+        <Ionicons name="send" size={20} color="#FFF" />
+      </View>
+    </Send>
+  );
+
+  // Custom avatar
+  const renderAvatar = (props: any) => {
+    const user = props.currentMessage?.user;
+    if (user?._id === userId) return null;
     
     return (
-      <SwipeableMessage
-        item={item}
-        isMe={isMe}
-        onReply={handleReply}
-        onLongPress={handleMessageLongPress}
-        replyTo={item.reply_to}
-        otherUserName={otherUser?.name || 'Unknown'}
-      />
+      <TouchableOpacity onPress={() => setShowProfile(true)}>
+        <Avatar name={user?.name || 'U'} size={36} imageUrl={user?.avatar} />
+      </TouchableOpacity>
     );
   };
 
   return (
-    <KeyboardAvoidingView style={styles.chatContainer} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <View style={styles.chatContainer}>
       {/* Chat Header */}
       <View style={styles.chatHeader}>
         <TouchableOpacity onPress={onBack} style={styles.backBtn}>
           <Ionicons name="chevron-back" size={28} color={COLORS.text} />
         </TouchableOpacity>
+        
         <TouchableOpacity style={styles.chatHeaderProfile} onPress={() => setShowProfile(true)}>
-          <Avatar name={otherUser?.name || 'U'} size={40} />
+          <Avatar name={otherUser?.name || 'U'} size={40} imageUrl={otherUser?.avatar} />
           <View style={styles.chatHeaderInfo}>
             <Text style={styles.chatHeaderName}>{otherUser?.name || 'Unknown'}</Text>
-            <Text style={styles.chatHeaderStatus}>Online</Text>
+            <Text style={styles.chatHeaderStatus}>
+              {isTyping ? 'typing...' : 'Online'}
+            </Text>
           </View>
         </TouchableOpacity>
+        
         <View style={styles.chatHeaderActions}>
-          <TouchableOpacity onPress={() => handleCall(false)} style={styles.headerActionBtn}>
-            <Ionicons name="call" size={22} color={COLORS.text} />
+          <TouchableOpacity style={styles.headerActionBtn} onPress={() => Alert.alert('Voice Call', 'Coming soon!')}>
+            <Ionicons name="call-outline" size={22} color={COLORS.text} />
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => handleCall(true)} style={styles.headerActionBtn}>
-            <Ionicons name="videocam" size={22} color={COLORS.text} />
+          <TouchableOpacity style={styles.headerActionBtn} onPress={() => Alert.alert('Video Call', 'Coming soon!')}>
+            <Ionicons name="videocam-outline" size={22} color={COLORS.text} />
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => setShowMenu(true)} style={styles.headerActionBtn}>
+          <TouchableOpacity style={styles.headerActionBtn} onPress={() => setShowMenu(true)}>
             <Ionicons name="ellipsis-vertical" size={22} color={COLORS.text} />
           </TouchableOpacity>
         </View>
       </View>
 
-      {/* Messages List */}
+      {/* AI Suggestions Bar */}
+      {showSuggestions && suggestions.length > 0 && (
+        <View style={styles.suggestionsBar}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.suggestionsContent}>
+            {suggestions.map((suggestion, idx) => (
+              <TouchableOpacity 
+                key={idx} 
+                style={styles.suggestionChip}
+                onPress={() => handleSuggestionPress(suggestion)}
+              >
+                <Text style={styles.suggestionText}>{suggestion}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      )}
+
+      {/* GiftedChat */}
       {loading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={COLORS.primary} />
         </View>
       ) : (
-        <FlatList
-          ref={flatListRef}
-          data={messages}
-          keyExtractor={(item) => item.message_id}
-          renderItem={renderMessage}
-          inverted
-          contentContainerStyle={styles.messagesList}
-          showsVerticalScrollIndicator={false}
-          ListEmptyComponent={
-            <View style={styles.emptyChat}>
-              <Ionicons name="chatbubbles-outline" size={48} color={COLORS.textMuted} />
-              <Text style={styles.emptyChatText}>Start the conversation!</Text>
-              {iceBreakers.length > 0 ? (
-                <View style={styles.iceBreakersContainer}>
-                  <Text style={styles.iceBreakersTitle}>Try an ice breaker:</Text>
-                  {iceBreakers.map((breaker, idx) => (
-                    <TouchableOpacity key={idx} style={styles.iceBreakerBtn} onPress={() => sendMessage(breaker)}>
-                      <Text style={styles.iceBreakerText}>{breaker}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              ) : null}
-            </View>
-          }
+        <GiftedChat
+          messages={messages}
+          onSend={onSend}
+          user={{ _id: userId, name: 'You' }}
+          renderBubble={renderBubble}
+          renderInputToolbar={renderInputToolbar}
+          renderComposer={renderComposer}
+          renderSend={renderSend}
+          renderAvatar={renderAvatar}
+          alwaysShowSend
+          scrollToBottom
+          isTyping={isTyping}
+          infiniteScroll
+          inverted={true}
+          renderUsernameOnMessage={false}
+          showUserAvatar={false}
+          showAvatarForEveryMessage={false}
+          renderAvatarOnTop
+          messagesContainerStyle={styles.messagesContainer}
+          listViewProps={{
+            style: { backgroundColor: COLORS.bg },
+          }}
         />
       )}
 
-      {/* AI Suggestions - Only show when other person sent last message */}
-      {showSuggestions && suggestions.length > 0 ? (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.suggestionsScroll} contentContainerStyle={styles.suggestionsContainer}>
-          {suggestions.map((suggestion, idx) => (
-            <TouchableOpacity key={idx} style={styles.suggestionChip} onPress={() => sendMessage(suggestion)}>
-              <Text style={styles.suggestionText}>{suggestion}</Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      ) : null}
-
-      {/* Reply Preview */}
-      {replyingTo && (
-        <View style={styles.replyingToBar}>
-          <View style={styles.replyingToContent}>
-            <View style={styles.replyingToIndicator} />
-            <View style={styles.replyingToText}>
-              <Text style={styles.replyingToLabel}>
-                Replying to {replyingTo.sender_id === userId ? 'yourself' : otherUser?.name || 'Unknown'}
-              </Text>
-              <Text style={styles.replyingToMessage} numberOfLines={1}>{replyingTo.content}</Text>
-            </View>
-          </View>
-          <TouchableOpacity onPress={() => setReplyingTo(null)} style={styles.replyingToClose}>
-            <Ionicons name="close" size={22} color={COLORS.textSecondary} />
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {/* Input Area */}
-      <View style={styles.inputArea}>
-        <TouchableOpacity onPress={handleMediaPicker} style={styles.inputActionBtn}>
-          <Ionicons name="image-outline" size={24} color={COLORS.textSecondary} />
-        </TouchableOpacity>
-        <View style={styles.inputWrapper}>
-          <TextInput
-            style={styles.textInput}
-            placeholder="Type a message..."
-            placeholderTextColor={COLORS.textMuted}
-            value={inputText}
-            onChangeText={setInputText}
-            multiline
-            maxLength={1000}
-          />
-        </View>
-        {inputText.trim() ? (
-          <TouchableOpacity onPress={() => sendMessage(inputText)} style={styles.sendBtn} disabled={sending}>
-            {sending ? (
-              <ActivityIndicator size="small" color="#FFF" />
-            ) : (
-              <Ionicons name="send" size={20} color="#FFF" />
-            )}
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity onPress={handleVoiceNote} style={styles.voiceBtn}>
-            <Ionicons name="mic" size={24} color={COLORS.textSecondary} />
-          </TouchableOpacity>
-        )}
-      </View>
-
       {/* Menu Modal */}
       <Modal visible={showMenu} transparent animationType="fade" onRequestClose={() => setShowMenu(false)}>
-        <TouchableOpacity style={styles.menuOverlay} activeOpacity={1} onPress={() => setShowMenu(false)}>
+        <Pressable style={styles.menuOverlay} onPress={() => setShowMenu(false)}>
           <View style={styles.menuContainer}>
             <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); setShowProfile(true); }}>
               <Ionicons name="person-outline" size={22} color={COLORS.text} />
               <Text style={styles.menuItemText}>View Profile</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); Alert.alert('Did you meet?', 'Meeting verification coming soon!'); }}>
+            <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); Alert.alert('Did you meet?', 'Verification coming soon!'); }}>
               <Ionicons name="cafe-outline" size={22} color={COLORS.text} />
               <Text style={styles.menuItemText}>Did you meet?</Text>
             </TouchableOpacity>
             <View style={styles.menuDivider} />
-            <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); onUnmatch(); }}>
+            <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); handleUnmatch(); }}>
               <Ionicons name="heart-dislike-outline" size={22} color={COLORS.warning} />
               <Text style={[styles.menuItemText, { color: COLORS.warning }]}>Unmatch</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); onReport(); }}>
+            <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); handleReport(); }}>
               <Ionicons name="flag-outline" size={22} color={COLORS.primary} />
               <Text style={[styles.menuItemText, { color: COLORS.primary }]}>Report</Text>
             </TouchableOpacity>
           </View>
-        </TouchableOpacity>
+        </Pressable>
       </Modal>
 
-      {/* Message Context Menu */}
-      <Modal visible={showMessageMenu} transparent animationType="fade" onRequestClose={() => setShowMessageMenu(false)}>
-        <TouchableOpacity style={styles.menuOverlay} activeOpacity={1} onPress={() => setShowMessageMenu(false)}>
-          <View style={styles.messageMenuContainer}>
-            <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMessageMenu(false); selectedMessage && handleReply(selectedMessage); }}>
-              <Ionicons name="arrow-undo-outline" size={22} color={COLORS.text} />
-              <Text style={styles.menuItemText}>Reply</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.menuItem} onPress={copyMessage}>
-              <Ionicons name="copy-outline" size={22} color={COLORS.text} />
-              <Text style={styles.menuItemText}>Copy</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.menuItem} onPress={() => setShowMessageMenu(false)}>
-              <Ionicons name="arrow-forward-outline" size={22} color={COLORS.text} />
-              <Text style={styles.menuItemText}>Forward</Text>
-            </TouchableOpacity>
-          </View>
-        </TouchableOpacity>
-      </Modal>
-
-      {/* Profile View Modal */}
-      <ProfileViewModal
+      {/* Profile Sheet */}
+      <ProfileBottomSheet
         visible={showProfile}
         onClose={() => setShowProfile(false)}
-        userId={conversation.other_user_id}
+        userId={otherUserId}
         userName={otherUser?.name || 'Unknown'}
       />
-    </KeyboardAvoidingView>
+    </View>
   );
 };
 
@@ -860,7 +700,7 @@ const ChatScreen = ({
 export default function ChatTab() {
   const { mode } = useAppMode();
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<'requests' | 'chats'>('chats');
+  const [activeTab, setActiveTab] = useState<'chats' | 'requests'>('chats');
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [requests, setRequests] = useState<MessageRequest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -875,7 +715,7 @@ export default function ChatTab() {
     const id = await getUserId();
     setUserId(id);
     
-    // Initialize mock conversations for testing
+    // Initialize mock conversations
     await fetch(`${API_BASE}/api/chat/init-mock/${id}`, { method: 'POST' });
     
     await Promise.all([fetchConversations(id), fetchRequests(id)]);
@@ -932,85 +772,23 @@ export default function ChatTab() {
     }
   };
 
-  const handleUnmatch = async () => {
-    if (!selectedConversation) return;
-    
-    Alert.alert(
-      'Unmatch',
-      `Are you sure you want to unmatch with ${selectedConversation.other_user?.name}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Unmatch',
-          style: 'destructive',
-          onPress: async () => {
-            await fetch(`${API_BASE}/api/chat/unmatch`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                user_id: userId,
-                other_user_id: selectedConversation.other_user_id,
-              }),
-            });
-            setSelectedConversation(null);
-            await fetchConversations(userId);
-          },
-        },
-      ]
-    );
-  };
-
-  const handleReport = async () => {
-    if (!selectedConversation) return;
-    
-    Alert.alert(
-      'Report User',
-      'Why are you reporting this user?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Inappropriate Content', onPress: () => submitReport('inappropriate') },
-        { text: 'Harassment', onPress: () => submitReport('harassment') },
-        { text: 'Fake Profile', onPress: () => submitReport('fake_profile') },
-      ]
-    );
-  };
-
-  const submitReport = async (reason: string) => {
-    if (!selectedConversation) return;
-    
-    await fetch(`${API_BASE}/api/chat/report`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        reporter_id: userId,
-        reported_id: selectedConversation.other_user_id,
-        reason,
-      }),
-    });
-    
-    Alert.alert('Reported', 'Thank you for your report. We will review it shortly.');
-  };
-
-  // If a conversation is selected, show chat screen
+  // If conversation selected, show chat
   if (selectedConversation) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
-        <ChatScreen
+        <GiftedChatScreen
           conversation={selectedConversation}
           userId={userId}
           onBack={() => {
             setSelectedConversation(null);
             fetchConversations(userId);
           }}
-          onUnmatch={handleUnmatch}
-          onReport={handleReport}
         />
       </SafeAreaView>
     );
   }
 
-  // Calculate total unread messages
-  const totalUnread = conversations.reduce((sum, conv) => sum + (conv.unread || 0), 0);
+  const totalUnread = conversations.reduce((sum, c) => sum + (c.unread || 0), 0);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -1019,14 +797,14 @@ export default function ChatTab() {
         <Text style={styles.headerTitle}>Messages</Text>
       </View>
 
-      {/* Tabs - Chats on LEFT, Requests on RIGHT */}
+      {/* Tabs */}
       <View style={styles.tabs}>
         <TouchableOpacity
           style={[styles.tab, activeTab === 'chats' && styles.tabActive]}
           onPress={() => setActiveTab('chats')}
         >
           <Text style={[styles.tabText, activeTab === 'chats' && styles.tabTextActive]}>
-            Chats {totalUnread > 0 ? `(${totalUnread})` : ''}
+            Chats{totalUnread > 0 ? ` (${totalUnread})` : ''}
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -1034,7 +812,7 @@ export default function ChatTab() {
           onPress={() => setActiveTab('requests')}
         >
           <Text style={[styles.tabText, activeTab === 'requests' && styles.tabTextActive]}>
-            Requests {requests.length > 0 ? `(${requests.length})` : ''}
+            Requests{requests.length > 0 ? ` (${requests.length})` : ''}
           </Text>
         </TouchableOpacity>
       </View>
@@ -1052,23 +830,23 @@ export default function ChatTab() {
           renderItem={({ item }) => (
             <ConversationItem conversation={item} onPress={() => setSelectedConversation(item)} />
           )}
-          contentContainerStyle={styles.content}
+          contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={
             <View style={styles.emptyState}>
-              <Ionicons name="chatbubbles-outline" size={48} color={COLORS.textMuted} />
+              <Ionicons name="chatbubbles-outline" size={64} color={COLORS.textMuted} />
               <Text style={styles.emptyTitle}>No conversations yet</Text>
-              <Text style={styles.emptySubtitle}>Match with someone and start chatting!</Text>
+              <Text style={styles.emptySubtitle}>Match with someone to start chatting!</Text>
             </View>
           }
         />
       ) : (
-        <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        <ScrollView style={styles.listContent} showsVerticalScrollIndicator={false}>
           {requests.length === 0 ? (
             <View style={styles.emptyState}>
-              <Ionicons name="mail-outline" size={48} color={COLORS.textMuted} />
-              <Text style={styles.emptyTitle}>No message requests</Text>
-              <Text style={styles.emptySubtitle}>When someone messages you, it will appear here</Text>
+              <Ionicons name="mail-outline" size={64} color={COLORS.textMuted} />
+              <Text style={styles.emptyTitle}>No requests</Text>
+              <Text style={styles.emptySubtitle}>New message requests will appear here</Text>
             </View>
           ) : (
             requests.map((req) => (
@@ -1086,22 +864,17 @@ export default function ChatTab() {
   );
 }
 
-// ============ HELPER FUNCTIONS ============
+// ============ HELPERS ============
 function formatTime(dateString?: string): string {
   if (!dateString) return '';
   const date = new Date(dateString);
   const now = new Date();
   const diff = now.getTime() - date.getTime();
   
-  if (diff < 60000) return 'Just now';
+  if (diff < 60000) return 'now';
   if (diff < 3600000) return `${Math.floor(diff / 60000)}m`;
   if (diff < 86400000) return `${Math.floor(diff / 3600000)}h`;
-  return date.toLocaleDateString();
-}
-
-function formatMessageTime(dateString: string): string {
-  const date = new Date(dateString);
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
 // ============ STYLES ============
@@ -1109,7 +882,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
   
   // Header
-  header: { paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  header: { paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: COLORS.border },
   headerTitle: { fontSize: 28, fontWeight: 'bold', color: COLORS.text },
   
   // Tabs
@@ -1119,148 +892,104 @@ const styles = StyleSheet.create({
   tabText: { fontSize: 15, color: COLORS.textSecondary, fontWeight: '500' },
   tabTextActive: { color: COLORS.primary, fontWeight: '600' },
   
-  // Content
-  content: { flex: 1, padding: 16 },
+  // List
+  listContent: { flex: 1, paddingHorizontal: 16 },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   loadingText: { color: COLORS.textSecondary, marginTop: 12 },
   
   // Empty State
-  emptyState: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 80 },
-  emptyTitle: { fontSize: 18, fontWeight: '600', color: COLORS.text, marginTop: 16 },
+  emptyState: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 100 },
+  emptyTitle: { fontSize: 20, fontWeight: '600', color: COLORS.text, marginTop: 16 },
   emptySubtitle: { fontSize: 14, color: COLORS.textSecondary, marginTop: 8, textAlign: 'center' },
   
   // Avatar
   avatar: { justifyContent: 'center', alignItems: 'center' },
   avatarText: { color: '#FFF', fontWeight: 'bold' },
   
-  // Message Request Card
-  requestCard: { backgroundColor: COLORS.bgCard, borderRadius: 16, padding: 16, marginBottom: 16 },
+  // Conversation Item
+  conversationItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  conversationAvatar: { position: 'relative' },
+  onlineDot: { position: 'absolute', bottom: 2, right: 2, width: 14, height: 14, borderRadius: 7, backgroundColor: COLORS.online, borderWidth: 2, borderColor: COLORS.bg },
+  conversationContent: { flex: 1, marginLeft: 14 },
+  conversationHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  conversationName: { fontSize: 16, fontWeight: '500', color: COLORS.text, flex: 1 },
+  unreadName: { fontWeight: '700' },
+  conversationTime: { fontSize: 12, color: COLORS.textMuted },
+  conversationPreview: { fontSize: 14, color: COLORS.textSecondary, marginTop: 4 },
+  unreadPreview: { color: COLORS.text, fontWeight: '500' },
+  unreadBadge: { backgroundColor: COLORS.primary, borderRadius: 12, paddingHorizontal: 8, paddingVertical: 4, minWidth: 24, alignItems: 'center' },
+  unreadBadgeText: { color: '#FFF', fontSize: 12, fontWeight: '600' },
+  
+  // Request Card
+  requestCard: { backgroundColor: COLORS.bgCard, borderRadius: 16, padding: 16, marginVertical: 8 },
   requestHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
   requestInfo: { marginLeft: 12, flex: 1 },
   requestName: { fontSize: 18, fontWeight: '600', color: COLORS.text },
   requestLocation: { fontSize: 13, color: COLORS.textSecondary, marginTop: 2 },
-  requestPreview: { fontSize: 14, color: COLORS.textSecondary, marginBottom: 16, lineHeight: 20 },
+  requestPreview: { fontSize: 14, color: COLORS.textSecondary, marginBottom: 16, fontStyle: 'italic', lineHeight: 20 },
   requestActions: { flexDirection: 'row', gap: 12 },
   declineBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12, borderRadius: 24, borderWidth: 1, borderColor: COLORS.border, gap: 6 },
   declineBtnText: { color: COLORS.textSecondary, fontWeight: '500' },
   acceptBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12, borderRadius: 24, backgroundColor: COLORS.primary, gap: 6 },
   acceptBtnText: { color: '#FFF', fontWeight: '600' },
   
-  // Conversation Item
-  conversationItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: COLORS.border },
-  conversationAvatar: { position: 'relative' },
-  onlineDot: { position: 'absolute', bottom: 2, right: 2, width: 14, height: 14, borderRadius: 7, backgroundColor: COLORS.online, borderWidth: 2, borderColor: COLORS.bg },
-  conversationContent: { flex: 1, marginLeft: 12 },
-  conversationHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  conversationName: { fontSize: 16, fontWeight: '500', color: COLORS.text },
-  unreadName: { fontWeight: '700' },
-  conversationTime: { fontSize: 12, color: COLORS.textMuted },
-  conversationPreview: { fontSize: 14, color: COLORS.textSecondary, marginTop: 4 },
-  unreadPreview: { color: COLORS.text },
-  unreadBadge: { backgroundColor: COLORS.primary, borderRadius: 12, paddingHorizontal: 8, paddingVertical: 4, minWidth: 24, alignItems: 'center' },
-  unreadBadgeText: { color: '#FFF', fontSize: 12, fontWeight: '600' },
-  
   // Chat Screen
   chatContainer: { flex: 1, backgroundColor: COLORS.bg },
-  chatHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  chatHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: COLORS.border },
   backBtn: { padding: 8 },
   chatHeaderProfile: { flex: 1, flexDirection: 'row', alignItems: 'center', marginLeft: 4 },
-  chatHeaderInfo: { marginLeft: 10 },
-  chatHeaderName: { fontSize: 16, fontWeight: '600', color: COLORS.text },
-  chatHeaderStatus: { fontSize: 12, color: COLORS.online },
-  chatHeaderActions: { flexDirection: 'row', gap: 4 },
+  chatHeaderInfo: { marginLeft: 12 },
+  chatHeaderName: { fontSize: 17, fontWeight: '600', color: COLORS.text },
+  chatHeaderStatus: { fontSize: 12, color: COLORS.online, marginTop: 1 },
+  chatHeaderActions: { flexDirection: 'row' },
   headerActionBtn: { padding: 10 },
   
-  // Messages
-  messagesList: { padding: 16, paddingTop: 8 },
-  messageRowWrapper: { position: 'relative', marginBottom: 8 },
-  messageRow: { },
-  messageRowMe: { alignItems: 'flex-end' },
-  messageRowOther: { alignItems: 'flex-start' },
-  messageBubble: { maxWidth: '80%', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 18 },
-  messageBubbleMe: { backgroundColor: COLORS.primary, borderBottomRightRadius: 4 },
-  messageBubbleOther: { backgroundColor: COLORS.bgCard, borderBottomLeftRadius: 4 },
-  messageText: { fontSize: 15, lineHeight: 20 },
-  messageTextMe: { color: '#FFF' },
-  messageTextOther: { color: COLORS.text },
-  messageTime: { fontSize: 10, marginTop: 4 },
-  messageTimeMe: { color: 'rgba(255,255,255,0.7)', textAlign: 'right' },
-  messageTimeOther: { color: COLORS.textMuted },
-  
-  // Reply indicator (swipe)
-  replyIndicator: { position: 'absolute', top: '50%', marginTop: -10, zIndex: -1 },
-  
-  // Reply preview inside message
-  replyPreview: { flexDirection: 'row', marginBottom: 6, paddingBottom: 6, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.2)' },
-  replyBar: { width: 3, backgroundColor: COLORS.primary, borderRadius: 2, marginRight: 8 },
-  replyContent: { flex: 1 },
-  replyAuthor: { fontSize: 11, fontWeight: '600', color: COLORS.primary, marginBottom: 2 },
-  replyText: { fontSize: 12, color: COLORS.textSecondary },
-  
-  // Replying to bar
-  replyingToBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, backgroundColor: COLORS.bgCard, borderTopWidth: 1, borderTopColor: COLORS.border },
-  replyingToContent: { flex: 1, flexDirection: 'row' },
-  replyingToIndicator: { width: 4, backgroundColor: COLORS.primary, borderRadius: 2, marginRight: 10 },
-  replyingToText: { flex: 1 },
-  replyingToLabel: { fontSize: 12, fontWeight: '600', color: COLORS.primary },
-  replyingToMessage: { fontSize: 13, color: COLORS.textSecondary, marginTop: 2 },
-  replyingToClose: { padding: 4 },
-  
-  // Empty Chat
-  emptyChat: { alignItems: 'center', paddingTop: 40, transform: [{ scaleY: -1 }] },
-  emptyChatText: { fontSize: 16, color: COLORS.textSecondary, marginTop: 12 },
-  iceBreakersContainer: { marginTop: 24, width: '100%', paddingHorizontal: 16 },
-  iceBreakersTitle: { fontSize: 14, color: COLORS.textMuted, marginBottom: 12, textAlign: 'center' },
-  iceBreakerBtn: { backgroundColor: COLORS.bgCard, padding: 14, borderRadius: 12, marginBottom: 10, borderWidth: 1, borderColor: COLORS.border },
-  iceBreakerText: { fontSize: 14, color: COLORS.text, textAlign: 'center' },
-  
   // Suggestions
-  suggestionsScroll: { maxHeight: 50, borderTopWidth: 1, borderTopColor: COLORS.border },
-  suggestionsContainer: { paddingHorizontal: 12, paddingVertical: 8, gap: 8, flexDirection: 'row' },
-  suggestionChip: { backgroundColor: COLORS.bgCard, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 16, borderWidth: 1, borderColor: COLORS.border },
-  suggestionText: { fontSize: 13, color: COLORS.text },
+  suggestionsBar: { backgroundColor: COLORS.bgCard, borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  suggestionsContent: { paddingHorizontal: 12, paddingVertical: 10, gap: 8, flexDirection: 'row' },
+  suggestionChip: { backgroundColor: COLORS.suggestion, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, borderWidth: 1, borderColor: COLORS.primary },
+  suggestionText: { fontSize: 14, color: COLORS.text },
   
-  // Input Area
-  inputArea: { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 12, paddingVertical: 10, borderTopWidth: 1, borderTopColor: COLORS.border, gap: 8 },
-  inputActionBtn: { padding: 8 },
-  inputWrapper: { flex: 1, backgroundColor: COLORS.bgInput, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, maxHeight: 100 },
-  textInput: { fontSize: 15, color: COLORS.text, maxHeight: 80 },
-  sendBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: COLORS.primary, justifyContent: 'center', alignItems: 'center' },
-  voiceBtn: { padding: 10 },
+  // Messages
+  messagesContainer: { backgroundColor: COLORS.bg, paddingBottom: 10 },
   
-  // Menu Modal
-  menuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  menuContainer: { backgroundColor: COLORS.bgCard, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 16 },
+  // Input
+  inputToolbar: { backgroundColor: COLORS.bg, borderTopWidth: 1, borderTopColor: COLORS.border, paddingHorizontal: 8, paddingVertical: 8 },
+  inputPrimary: { alignItems: 'center' },
+  composerInput: { backgroundColor: COLORS.bgInput, borderRadius: 20, paddingHorizontal: 16, paddingTop: 10, paddingBottom: 10, marginRight: 8, color: COLORS.text, fontSize: 16, maxHeight: 100 },
+  sendContainer: { justifyContent: 'center', alignItems: 'center', marginRight: 4 },
+  sendButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: COLORS.primary, justifyContent: 'center', alignItems: 'center' },
+  
+  // Menu
+  menuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  menuContainer: { backgroundColor: COLORS.bgCard, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 16, paddingBottom: 32 },
   menuItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 16, gap: 14 },
   menuItemText: { fontSize: 16, color: COLORS.text },
   menuDivider: { height: 1, backgroundColor: COLORS.border, marginVertical: 8 },
   
-  // Message Context Menu
-  messageMenuContainer: { backgroundColor: COLORS.bgCard, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 16 },
-  
   // Profile Modal
-  profileModalContainer: { flex: 1, backgroundColor: COLORS.bg },
-  profileModalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  profileModal: { flex: 1, backgroundColor: COLORS.bg },
+  profileHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: COLORS.border },
   profileCloseBtn: { padding: 8 },
-  profileModalTitle: { fontSize: 18, fontWeight: '600', color: COLORS.text },
+  profileHeaderTitle: { fontSize: 18, fontWeight: '600', color: COLORS.text },
   profileLoading: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   profileContent: { flex: 1 },
-  profilePictureSection: { width: '100%', aspectRatio: 1, backgroundColor: COLORS.bgCard },
-  profileMainPicture: { width: '100%', height: '100%', resizeMode: 'cover' },
-  pictureDots: { position: 'absolute', bottom: 16, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', gap: 6 },
-  pictureDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.4)' },
-  pictureDotActive: { backgroundColor: '#FFF', width: 24 },
-  profilePlaceholderPicture: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  profileInfoSection: { padding: 20 },
+  photoCarousel: { width: SCREEN_WIDTH, height: SCREEN_HEIGHT * 0.45 },
+  profilePhoto: { width: SCREEN_WIDTH, height: SCREEN_HEIGHT * 0.45 },
+  noPhotoPlaceholder: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: COLORS.bgCard },
+  photoIndicators: { position: 'absolute', bottom: 16, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', gap: 6 },
+  photoIndicator: { width: 8, height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.4)' },
+  photoIndicatorActive: { backgroundColor: '#FFF', width: 24 },
+  profileInfo: { padding: 20 },
   profileName: { fontSize: 28, fontWeight: 'bold', color: COLORS.text },
-  profileLocationRow: { flexDirection: 'row', alignItems: 'center', marginTop: 8, gap: 4 },
+  profileLocationRow: { flexDirection: 'row', alignItems: 'center', marginTop: 8, gap: 6 },
   profileLocation: { fontSize: 14, color: COLORS.textSecondary },
   profileBio: { fontSize: 15, color: COLORS.textSecondary, lineHeight: 22, marginTop: 16 },
-  profileSection: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 },
+  profileSection: { marginTop: 24 },
   profileSectionTitle: { fontSize: 16, fontWeight: '600', color: COLORS.text, marginBottom: 12 },
-  genreChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  genreChip: { backgroundColor: COLORS.bgCard, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: COLORS.border },
-  genreChipText: { fontSize: 13, color: COLORS.text },
+  tagsContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  tag: { backgroundColor: COLORS.bgCard, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: COLORS.border },
+  tagText: { fontSize: 13, color: COLORS.text },
   movieItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.border },
   movieTitle: { fontSize: 15, color: COLORS.text },
 });
