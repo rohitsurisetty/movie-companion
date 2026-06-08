@@ -285,10 +285,9 @@ export default function Onboarding() {
       case 11:
         return (
           <OptionalProfileStep
-            profile={profile}
-            onUpdate={handleUpdate}
+            data={profile}
+            onUpdate={(field, value) => handleUpdate(field as keyof ProfileData, value)}
             onNext={handleNext}
-            onBack={handleBack}
           />
         );
       

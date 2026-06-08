@@ -119,10 +119,14 @@ export default function TinaChat({ userId, userName, onComplete, onSkip }: TinaC
         // Update profile data
         setProfileData(data.updated_profile_data || {});
         
+        // Clean up response - remove any "Tina:" prefix
+        let responseText = data.response || '';
+        responseText = responseText.replace(/^Tina:\s*/i, '').trim();
+        
         // Add Tina's response
         const tinaMessage: IMessage = {
           _id: `tina_${Date.now()}`,
-          text: data.response,
+          text: responseText,
           createdAt: new Date(),
           user: {
             _id: 'tina',
@@ -132,7 +136,7 @@ export default function TinaChat({ userId, userName, onComplete, onSkip }: TinaC
         };
         
         setMessages(previousMessages => GiftedChat.append(previousMessages, [tinaMessage]));
-        setConversationHistory(prev => [...prev, { role: 'assistant', content: data.response }]);
+        setConversationHistory(prev => [...prev, { role: 'assistant', content: responseText }]);
 
         // Check if conversation ended
         if (data.is_conversation_ended) {
