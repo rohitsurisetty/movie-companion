@@ -2,6 +2,7 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, Modal,
   ScrollView, Alert, ActivityIndicator, Platform, KeyboardAvoidingView,
+  Keyboard, TouchableWithoutFeedback,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
@@ -232,20 +233,23 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
 
   return (
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView style={styles.flex} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <Text style={styles.title}>Tell us about yourself</Text>
-        <Text style={styles.subtitle}>Let's start with the basics</Text>
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+        <ScrollView style={styles.flex} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          <Text style={styles.title}>Tell us about yourself</Text>
+          <Text style={styles.subtitle}>Let's start with the basics</Text>
 
-        <Text style={styles.label}>Name *</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="Your full name"
-          placeholderTextColor={COLORS.textMuted}
-          value={data.name}
-          onChangeText={(t) => onUpdate('name', t.slice(0, 50))}
-          maxLength={50}
-          testID="basic-name-input"
-        />
+          <Text style={styles.label}>Name *</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Your full name"
+            placeholderTextColor={COLORS.textMuted}
+            value={data.name}
+            onChangeText={(t) => onUpdate('name', t.slice(0, 50))}
+            maxLength={50}
+            returnKeyType="done"
+            onSubmitEditing={Keyboard.dismiss}
+            testID="basic-name-input"
+          />
         <Text style={styles.charCount}>{data.name.length}/50</Text>
 
         <Text style={styles.label}>Gender *</Text>
@@ -368,6 +372,8 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
           placeholderTextColor={COLORS.textMuted}
           value={locationSearch}
           onChangeText={searchLocation}
+          returnKeyType="done"
+          onSubmitEditing={Keyboard.dismiss}
           testID="basic-location-input"
         />
         {searchingLocation && <ActivityIndicator size="small" color={COLORS.primary} style={styles.loadingIndicator} />}
@@ -396,7 +402,8 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
         >
           <Text style={styles.continueBtnText}>Continue</Text>
         </TouchableOpacity>
-      </ScrollView>
+        </ScrollView>
+      </TouchableWithoutFeedback>
 
       {/* Gender Picker Modal */}
       <Modal visible={showGenderPicker} transparent animationType="fade">

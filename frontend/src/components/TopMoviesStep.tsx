@@ -2,6 +2,7 @@ import React, { useState, useCallback, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, Image,
   ScrollView, Modal, ActivityIndicator, Platform, KeyboardAvoidingView,
+  Keyboard, TouchableWithoutFeedback,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, BORDER_RADIUS } from '../theme';
@@ -83,9 +84,10 @@ export default function TopMoviesStep({ data, onUpdate, onNext }: Props) {
       style={styles.flex}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <ScrollView style={styles.flex} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <Text style={styles.title}>Your Top 5 Movies</Text>
-        <Text style={styles.subtitle}>Select up to 5 favourite movies ({data.topMovies.length}/5)</Text>
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+        <ScrollView style={styles.flex} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          <Text style={styles.title}>Your Top 5 Movies</Text>
+          <Text style={styles.subtitle}>Select up to 5 favourite movies ({data.topMovies.length}/5)</Text>
 
         {/* Selected movies grid */}
         {data.topMovies.length > 0 && (
@@ -128,6 +130,8 @@ export default function TopMoviesStep({ data, onUpdate, onNext }: Props) {
                 placeholderTextColor={COLORS.textMuted}
                 value={query}
                 onChangeText={searchMovies}
+                returnKeyType="search"
+                onSubmitEditing={Keyboard.dismiss}
                 testID="movie-search-input"
               />
               {searching && <ActivityIndicator size="small" color={COLORS.primary} />}
@@ -167,7 +171,8 @@ export default function TopMoviesStep({ data, onUpdate, onNext }: Props) {
         >
           <Text style={styles.continueBtnText}>Continue</Text>
         </TouchableOpacity>
-      </ScrollView>
+        </ScrollView>
+      </TouchableWithoutFeedback>
 
       {/* Rating Modal */}
       <Modal visible={showRatingModal} transparent animationType="fade">
