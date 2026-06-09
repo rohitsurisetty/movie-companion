@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, Modal, TextInput,
-  ActivityIndicator, Platform, KeyboardAvoidingView, Alert, Dimensions,
+  ActivityIndicator, Platform, Alert, Dimensions,
   ScrollView,
 } from 'react-native';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
@@ -525,7 +526,7 @@ export default function AuthScreen() {
             </TouchableOpacity>
 
             <TouchableOpacity onPress={handleSendEmailOTP} style={styles.resendBtn}>
-              <Text style={styles.resendText}>Didn't receive code? Resend</Text>
+              <Text style={styles.resendText}>Didn&apos;t receive code? Resend</Text>
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
@@ -587,7 +588,7 @@ export default function AuthScreen() {
             </TouchableOpacity>
 
             <TouchableOpacity onPress={handleSendPhoneOTP} style={styles.resendBtn}>
-              <Text style={styles.resendText}>Didn't receive code? Resend</Text>
+              <Text style={styles.resendText}>Didn&apos;t receive code? Resend</Text>
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
@@ -649,7 +650,7 @@ export default function AuthScreen() {
             <Ionicons name="checkmark-circle-outline" size={64} color={COLORS.success} />
             <Text style={styles.formTitle}>Check Your Email</Text>
             <Text style={styles.formSubtitle}>
-              We've sent a password reset link to {email}
+              We&apos;ve sent a password reset link to {email}
             </Text>
           </View>
 

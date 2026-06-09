@@ -1,8 +1,9 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, Modal,
-  ScrollView, Alert, ActivityIndicator, Platform, KeyboardAvoidingView,
+  ScrollView, Alert, ActivityIndicator, Platform,
 } from 'react-native';
+import { KeyboardAvoidingView, KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { COLORS, SPACING, BORDER_RADIUS } from '../theme';
@@ -231,22 +232,27 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
   const maxDays = getMaxDays(selectedMonth, selectedYear);
 
   return (
-    <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView style={styles.flex} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+    <>
+      <KeyboardAwareScrollView 
+        style={styles.flex} 
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        bottomOffset={20}
+      >
         <Text style={styles.title}>Tell us about yourself</Text>
-        <Text style={styles.subtitle}>Let's start with the basics</Text>
+        <Text style={styles.subtitle}>Let&apos;s start with the basics</Text>
 
         <Text style={styles.label}>Name *</Text>
         <TextInput
           style={styles.input}
           placeholder="Your full name"
           placeholderTextColor={COLORS.textMuted}
-          value={data.name}
-          onChangeText={(t) => onUpdate('name', t.slice(0, 50))}
-          maxLength={50}
-          testID="basic-name-input"
-        />
-        <Text style={styles.charCount}>{data.name.length}/50</Text>
+        value={data.name}
+        onChangeText={(t) => onUpdate('name', t.slice(0, 50))}
+        maxLength={50}
+        testID="basic-name-input"
+      />
+      <Text style={styles.charCount}>{data.name.length}/50</Text>
 
         <Text style={styles.label}>Gender *</Text>
         <TouchableOpacity style={styles.dropdown} onPress={() => setShowGenderPicker(true)} testID="basic-gender-dropdown">
@@ -396,7 +402,7 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
         >
           <Text style={styles.continueBtnText}>Continue</Text>
         </TouchableOpacity>
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       {/* Gender Picker Modal */}
       <Modal visible={showGenderPicker} transparent animationType="fade">
@@ -437,7 +443,7 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
           </View>
         </TouchableOpacity>
       </Modal>
-    </KeyboardAvoidingView>
+    </>
   );
 }
 

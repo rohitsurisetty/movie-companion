@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView,
-  Modal, Platform, KeyboardAvoidingView,
+  Modal, Platform,
 } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, BORDER_RADIUS } from '../theme';
 import { ProfileData } from '../types';
@@ -173,7 +174,7 @@ export default function OptionalProfileStep({ data, onUpdate, onNext }: Props) {
   };
 
   return (
-    <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <View style={styles.flex}>
       {/* Skip button at top */}
       <View style={styles.topBar}>
         <View style={styles.topBarSpacer} />
@@ -183,7 +184,7 @@ export default function OptionalProfileStep({ data, onUpdate, onNext }: Props) {
         </TouchableOpacity>
       </View>
 
-      <ScrollView style={styles.flex} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <KeyboardAwareScrollView style={styles.flex} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} bottomOffset={20}>
         <Text style={styles.title}>Almost there!</Text>
         <Text style={styles.subtitle}>Just a few more optional fields</Text>
 
@@ -243,7 +244,7 @@ export default function OptionalProfileStep({ data, onUpdate, onNext }: Props) {
                     {FEET_OPTIONS.map(f => (
                       <View key={f} style={styles.wheelItem}>
                         <Text style={[styles.wheelItemText, selectedFeet === f && styles.wheelItemTextActive]}>
-                          {f}'
+                          {f}&apos;
                         </Text>
                       </View>
                     ))}
@@ -269,7 +270,7 @@ export default function OptionalProfileStep({ data, onUpdate, onNext }: Props) {
                     {INCHES_OPTIONS.map(i => (
                       <View key={i} style={styles.wheelItem}>
                         <Text style={[styles.wheelItemText, selectedInches === i && styles.wheelItemTextActive]}>
-                          {i}"
+                          {i}&quot;
                         </Text>
                       </View>
                     ))}
@@ -371,7 +372,7 @@ export default function OptionalProfileStep({ data, onUpdate, onNext }: Props) {
             <Text style={styles.continueBtnText}>Continue</Text>
           </TouchableOpacity>
         </View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       {/* Dropdown Modal */}
       <Modal visible={!!activeDropdown} transparent animationType="fade">
@@ -392,7 +393,7 @@ export default function OptionalProfileStep({ data, onUpdate, onNext }: Props) {
           </View>
         </TouchableOpacity>
       </Modal>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
