@@ -114,7 +114,7 @@ const TinaChoiceScreen = ({
 
       {/* Description */}
       <Text style={styles.tinaDescription}>
-        Instead of boring forms, chat with Tina! She'll get to know you through a fun conversation and create your perfect profile.
+        Instead of boring forms, chat with Tina! She&apos;ll get to know you through a fun conversation and create your perfect profile.
       </Text>
 
       {/* Chat with Tina Button */}
@@ -132,7 +132,7 @@ const TinaChoiceScreen = ({
 
       {/* Skip to Manual */}
       <TouchableOpacity style={styles.skipManualBtn} onPress={onSkipToManual}>
-        <Text style={styles.skipManualText}>I'll fill the form myself</Text>
+        <Text style={styles.skipManualText}>I&apos;ll fill the form myself</Text>
       </TouchableOpacity>
 
       {/* Fun fact */}
@@ -385,20 +385,25 @@ export default function Onboarding() {
           <View style={[styles.progressBar, { width: `${((currentStep + 1) / getTotalSteps()) * 100}%` }]} />
         </View>
         
-        <TouchableOpacity 
-          style={styles.skipButton}
-          onPress={() => {
-            if (currentStep < getTotalSteps() - 1) {
-              setCurrentStep(currentStep + 1);
-            } else {
-              handleComplete();
-            }
-          }}
-        >
-          <Text style={styles.skipText}>
-            {currentStep === getTotalSteps() - 1 ? 'Done' : 'Skip'}
-          </Text>
-        </TouchableOpacity>
+        {/* Only show Skip for optional steps (3+), not for BasicInfo (0), Photos (1), or TinaChoice (2) */}
+        {currentStep >= 3 ? (
+          <TouchableOpacity 
+            style={styles.skipButton}
+            onPress={() => {
+              if (currentStep < getTotalSteps() - 1) {
+                setCurrentStep(currentStep + 1);
+              } else {
+                handleComplete();
+              }
+            }}
+          >
+            <Text style={styles.skipText}>
+              {currentStep === getTotalSteps() - 1 ? 'Done' : 'Skip'}
+            </Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={{ width: 40 }} />
+        )}
       </View>
 
       {/* Step content */}

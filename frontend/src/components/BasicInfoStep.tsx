@@ -236,7 +236,7 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
       <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
         <ScrollView style={styles.flex} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
           <Text style={styles.title}>Tell us about yourself</Text>
-          <Text style={styles.subtitle}>Let's start with the basics</Text>
+          <Text style={styles.subtitle}>Let&apos;s start with the basics</Text>
 
           <Text style={styles.label}>Name *</Text>
           <TextInput
@@ -249,6 +249,10 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
             returnKeyType="done"
             onSubmitEditing={Keyboard.dismiss}
             testID="basic-name-input"
+            autoCapitalize="words"
+            autoComplete="off"
+            textContentType="none"
+            autoCorrect={false}
           />
         <Text style={styles.charCount}>{data.name.length}/50</Text>
 
@@ -375,6 +379,9 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
           returnKeyType="done"
           onSubmitEditing={Keyboard.dismiss}
           testID="basic-location-input"
+          autoComplete="off"
+          textContentType="none"
+          autoCorrect={false}
         />
         {searchingLocation && <ActivityIndicator size="small" color={COLORS.primary} style={styles.loadingIndicator} />}
 

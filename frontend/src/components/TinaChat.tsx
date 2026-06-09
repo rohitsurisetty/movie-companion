@@ -3,9 +3,7 @@ import {
   View, Text, StyleSheet, TouchableOpacity, Image,
   KeyboardAvoidingView, Platform, ActivityIndicator, Dimensions,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { GiftedChat, Bubble, InputToolbar, Send, Composer, IMessage } from 'react-native-gifted-chat';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -200,6 +198,11 @@ export default function TinaChat({ userId, userName, onComplete, onSkip }: TinaC
       textInputStyle={styles.composerInput}
       placeholderTextColor={COLORS.textMuted}
       placeholder="Type your answer..."
+      textInputProps={{
+        autoCorrect: false,
+        autoComplete: 'off',
+        textContentType: 'none',
+      }}
     />
   );
 
@@ -226,7 +229,11 @@ export default function TinaChat({ userId, userName, onComplete, onSkip }: TinaC
   };
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView 
+      style={styles.container} 
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+    >
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={onSkip} style={styles.skipBtn}>
@@ -274,8 +281,11 @@ export default function TinaChat({ userId, userName, onComplete, onSkip }: TinaC
           showUserAvatar={false}
           showAvatarForEveryMessage={false}
           messagesContainerStyle={styles.messagesContainer}
+          bottomOffset={Platform.OS === 'ios' ? 34 : 0}
           listViewProps={{
             style: { backgroundColor: COLORS.bg },
+            keyboardDismissMode: 'interactive',
+            keyboardShouldPersistTaps: 'handled',
           }}
         />
       )}
@@ -283,10 +293,10 @@ export default function TinaChat({ userId, userName, onComplete, onSkip }: TinaC
       {/* Quick exit hint */}
       <View style={styles.hintBar}>
         <Text style={styles.hintText}>
-          Say "bye" or "done" when you're ready to continue 👋
+          Say &quot;bye&quot; or &quot;done&quot; when you&apos;re ready to continue 👋
         </Text>
       </View>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
