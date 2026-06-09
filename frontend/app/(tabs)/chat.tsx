@@ -585,7 +585,7 @@ const GiftedChatScreen = ({
     <KeyboardAvoidingView 
       style={styles.chatContainer}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
     >
       {/* Chat Header */}
       <View style={styles.chatHeader}>
