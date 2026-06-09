@@ -249,10 +249,6 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
             returnKeyType="done"
             onSubmitEditing={Keyboard.dismiss}
             testID="basic-name-input"
-            autoCapitalize="words"
-            autoComplete="off"
-            textContentType="none"
-            autoCorrect={false}
           />
         <Text style={styles.charCount}>{data.name.length}/50</Text>
 
@@ -379,9 +375,6 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
           returnKeyType="done"
           onSubmitEditing={Keyboard.dismiss}
           testID="basic-location-input"
-          autoComplete="off"
-          textContentType="none"
-          autoCorrect={false}
         />
         {searchingLocation && <ActivityIndicator size="small" color={COLORS.primary} style={styles.loadingIndicator} />}
 

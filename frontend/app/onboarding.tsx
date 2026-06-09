@@ -386,24 +386,20 @@ export default function Onboarding() {
         </View>
         
         {/* Only show Skip for optional steps (3+), not for BasicInfo (0), Photos (1), or TinaChoice (2) */}
-        {currentStep >= 3 ? (
-          <TouchableOpacity 
-            style={styles.skipButton}
-            onPress={() => {
-              if (currentStep < getTotalSteps() - 1) {
-                setCurrentStep(currentStep + 1);
-              } else {
-                handleComplete();
-              }
-            }}
-          >
-            <Text style={styles.skipText}>
-              {currentStep === getTotalSteps() - 1 ? 'Done' : 'Skip'}
-            </Text>
-          </TouchableOpacity>
-        ) : (
-          <View style={{ width: 40 }} />
-        )}
+        <TouchableOpacity 
+          style={styles.skipButton}
+          onPress={() => {
+            if (currentStep < getTotalSteps() - 1) {
+              setCurrentStep(currentStep + 1);
+            } else {
+              handleComplete();
+            }
+          }}
+        >
+          <Text style={styles.skipText}>
+            {currentStep === getTotalSteps() - 1 ? 'Done' : 'Skip'}
+          </Text>
+        </TouchableOpacity>
       </View>
 
       {/* Step content */}

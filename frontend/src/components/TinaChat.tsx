@@ -198,11 +198,6 @@ export default function TinaChat({ userId, userName, onComplete, onSkip }: TinaC
       textInputStyle={styles.composerInput}
       placeholderTextColor={COLORS.textMuted}
       placeholder="Type your answer..."
-      textInputProps={{
-        autoCorrect: false,
-        autoComplete: 'off',
-        textContentType: 'none',
-      }}
     />
   );
 

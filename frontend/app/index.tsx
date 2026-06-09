@@ -410,9 +410,7 @@ export default function AuthScreen() {
               onChangeText={setEmail}
               keyboardType="email-address"
               autoCapitalize="none"
-              autoComplete="off"
-              textContentType="none"
-              autoCorrect={false}
+              autoComplete="email"
               testID="email-input"
             />
             
@@ -457,8 +455,6 @@ export default function AuthScreen() {
               value={phone}
               onChangeText={setPhone}
               keyboardType="phone-pad"
-              autoComplete="off"
-              textContentType="none"
               testID="phone-input"
             />
             
@@ -503,9 +499,6 @@ export default function AuthScreen() {
                 placeholderTextColor={COLORS.textMuted}
                 value={name}
                 onChangeText={setName}
-                autoComplete="off"
-                textContentType="none"
-                autoCorrect={false}
                 testID="name-input"
               />
             )}
@@ -518,8 +511,6 @@ export default function AuthScreen() {
               onChangeText={setOtp}
               keyboardType="number-pad"
               maxLength={6}
-              autoComplete="off"
-              textContentType="none"
               testID="otp-input"
             />
             
@@ -570,9 +561,6 @@ export default function AuthScreen() {
                 placeholderTextColor={COLORS.textMuted}
                 value={name}
                 onChangeText={setName}
-                autoComplete="off"
-                textContentType="none"
-                autoCorrect={false}
                 testID="name-input"
               />
             )}
@@ -585,8 +573,6 @@ export default function AuthScreen() {
               onChangeText={setOtp}
               keyboardType="number-pad"
               maxLength={6}
-              autoComplete="off"
-              textContentType="none"
               testID="otp-input"
             />
             
@@ -638,8 +624,6 @@ export default function AuthScreen() {
               onChangeText={setEmail}
               keyboardType="email-address"
               autoCapitalize="none"
-              autoComplete="off"
-              textContentType="none"
               testID="forgot-email-input"
             />
             
