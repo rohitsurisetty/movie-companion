@@ -585,7 +585,7 @@ const GiftedChatScreen = ({
     <KeyboardAvoidingView 
       style={styles.chatContainer}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
     >
       {/* Chat Header */}
       <View style={styles.chatHeader}>
@@ -616,23 +616,6 @@ const GiftedChatScreen = ({
         </View>
       </View>
 
-      {/* AI Suggestions Bar */}
-      {showSuggestions && suggestions.length > 0 && (
-        <View style={styles.suggestionsBar}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.suggestionsContent}>
-            {suggestions.map((suggestion, idx) => (
-              <TouchableOpacity 
-                key={idx} 
-                style={styles.suggestionChip}
-                onPress={() => handleSuggestionPress(suggestion)}
-              >
-                <Text style={styles.suggestionText}>{suggestion}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
-      )}
-
       {/* GiftedChat */}
       {loading ? (
         <View style={styles.loadingContainer}>
@@ -648,6 +631,26 @@ const GiftedChatScreen = ({
           renderComposer={renderComposer}
           renderSend={renderSend}
           renderAvatar={renderAvatar}
+          renderAccessory={showSuggestions && suggestions.length > 0 ? () => (
+            <View style={styles.suggestionsBarBottom}>
+              <ScrollView 
+                horizontal 
+                showsHorizontalScrollIndicator={false} 
+                contentContainerStyle={styles.suggestionsContent}
+                keyboardShouldPersistTaps="handled"
+              >
+                {suggestions.map((suggestion, idx) => (
+                  <TouchableOpacity 
+                    key={idx} 
+                    style={styles.suggestionChip}
+                    onPress={() => handleSuggestionPress(suggestion)}
+                  >
+                    <Text style={styles.suggestionText}>{suggestion}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          ) : undefined}
           alwaysShowSend
           scrollToBottom
           isTyping={isTyping}
@@ -954,7 +957,8 @@ const styles = StyleSheet.create({
   
   // Suggestions
   suggestionsBar: { backgroundColor: COLORS.bgCard, borderBottomWidth: 1, borderBottomColor: COLORS.border },
-  suggestionsContent: { paddingHorizontal: 12, paddingVertical: 10, gap: 8, flexDirection: 'row' },
+  suggestionsBarBottom: { backgroundColor: COLORS.bgCard, borderTopWidth: 1, borderTopColor: COLORS.border, paddingTop: 8 },
+  suggestionsContent: { paddingHorizontal: 12, paddingVertical: 8, gap: 8, flexDirection: 'row' },
   suggestionChip: { backgroundColor: COLORS.suggestion, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, borderWidth: 1, borderColor: COLORS.primary },
   suggestionText: { fontSize: 14, color: COLORS.text },
   

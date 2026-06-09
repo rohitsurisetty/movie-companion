@@ -2,9 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, Modal, TextInput,
   ActivityIndicator, Platform, Alert, Dimensions,
-  ScrollView,
+  ScrollView, KeyboardAvoidingView,
 } from 'react-native';
-import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
