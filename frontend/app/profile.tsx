@@ -710,7 +710,7 @@ export default function ProfileScreen() {
         </View>
 
         {/* Top Movies */}
-        {profile.topMovies && profile.topMovies.length > 0 && (
+        {Array.isArray(profile?.topMovies) && profile.topMovies.length > 0 && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Your Top 5 Movies</Text>
             <View style={styles.moviesGrid}>
