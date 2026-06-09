@@ -689,7 +689,7 @@ export default function FeedScreen() {
                 </View>
 
                 {/* Top Movies */}
-                {selectedProfile.topMovies && selectedProfile.topMovies.length > 0 && (
+                {Array.isArray(selectedProfile?.topMovies) && selectedProfile.topMovies.length > 0 && (
                   <View style={styles.section}>
                     <Text style={styles.sectionTitle}>Favorite Movies</Text>
                     {selectedProfile.topMovies.slice(0, 3).map((movie, idx) => (

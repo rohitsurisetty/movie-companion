@@ -246,7 +246,7 @@ const ProfileBottomSheet = ({
               )}
 
               {/* Top Movies */}
-              {profile?.topMovies && profile.topMovies.length > 0 && (
+              {Array.isArray(profile?.topMovies) && profile.topMovies.length > 0 && (
                 <View style={styles.profileSection}>
                   <Text style={styles.profileSectionTitle}>Favorite Movies</Text>
                   {profile.topMovies.slice(0, 5).map((movie: any, idx: number) => (

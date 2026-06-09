@@ -506,6 +506,9 @@ export default function ProfileScreen() {
   const [saving, setSaving] = useState(false);
   const [editModal, setEditModal] = useState<EditModalType>(null);
   
+  // Safe array extractions to prevent .map() errors
+  const topMovies = Array.isArray(profile?.topMovies) ? profile.topMovies : [];
+  
   // Mode and theme hooks
   const { mode, setMode, colors, showModeDrawer, setShowModeDrawer } = useAppMode();
 
@@ -708,11 +711,11 @@ export default function ProfileScreen() {
         </View>
 
         {/* Top Movies */}
-        {Array.isArray(profile?.topMovies) && profile.topMovies.length > 0 && (
+        {topMovies.length > 0 && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Your Top 5 Movies</Text>
             <View style={styles.moviesGrid}>
-              {profile.topMovies.map((movie, i) => (
+              {topMovies.map((movie, i) => (
                 <View key={i} style={styles.movieItem}>
                   <Image 
                     source={{ uri: `https://image.tmdb.org/t/p/w200${movie.poster_path}` }}

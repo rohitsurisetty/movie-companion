@@ -46,9 +46,12 @@ export default function TopMoviesStep({ data, onUpdate, onNext }: Props) {
     }, 400);
   }, []);
 
+  // Safe access to topMovies
+  const topMovies = Array.isArray(data.topMovies) ? data.topMovies : [];
+
   const handleSelectMovie = (movie: any) => {
-    if (data.topMovies.length >= 5) return;
-    if (data.topMovies.find(m => m.id === movie.id)) return;
+    if (topMovies.length >= 5) return;
+    if (topMovies.find(m => m.id === movie.id)) return;
     setSelectedMovie(movie);
     setRating(0);
     setReasons([]);
@@ -64,7 +67,7 @@ export default function TopMoviesStep({ data, onUpdate, onNext }: Props) {
       rating,
       reasons,
     };
-    onUpdate('topMovies', [...data.topMovies, newMovie]);
+    onUpdate('topMovies', [...topMovies, newMovie]);
     setShowRatingModal(false);
     setSelectedMovie(null);
     setQuery('');
@@ -72,7 +75,7 @@ export default function TopMoviesStep({ data, onUpdate, onNext }: Props) {
   };
 
   const removeMovie = (id: number) => {
-    onUpdate('topMovies', data.topMovies.filter(m => m.id !== id));
+    onUpdate('topMovies', topMovies.filter(m => m.id !== id));
   };
 
   const toggleReason = (r: string) => {
@@ -87,12 +90,12 @@ export default function TopMoviesStep({ data, onUpdate, onNext }: Props) {
       <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
         <ScrollView style={styles.flex} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
           <Text style={styles.title}>Your Top 5 Movies</Text>
-          <Text style={styles.subtitle}>Select up to 5 favourite movies ({data.topMovies.length}/5)</Text>
+          <Text style={styles.subtitle}>Select up to 5 favourite movies ({topMovies.length}/5)</Text>
 
         {/* Selected movies grid */}
-        {data.topMovies.length > 0 && (
+        {topMovies.length > 0 && (
           <View style={styles.selectedGrid}>
-            {data.topMovies.map(movie => (
+            {topMovies.map(movie => (
               <View key={movie.id} style={styles.selectedCard}>
                 {movie.poster_path ? (
                   <Image source={{ uri: `${TMDB_IMAGE_BASE}${movie.poster_path}` }} style={styles.posterSmall} />
@@ -120,7 +123,7 @@ export default function TopMoviesStep({ data, onUpdate, onNext }: Props) {
         )}
 
         {/* Search */}
-        {data.topMovies.length < 5 && (
+        {topMovies.length < 5 && (
           <>
             <View style={styles.searchRow}>
               <Ionicons name="search-outline" size={20} color={COLORS.textMuted} />
@@ -139,7 +142,7 @@ export default function TopMoviesStep({ data, onUpdate, onNext }: Props) {
 
             {results.length > 0 && (
               <View style={styles.resultsGrid}>
-                {results.filter(r => !data.topMovies.find(m => m.id === r.id)).map(movie => (
+                {results.filter(r => !topMovies.find(m => m.id === r.id)).map(movie => (
                   <TouchableOpacity
                     key={movie.id}
                     style={styles.resultCard}
@@ -164,9 +167,9 @@ export default function TopMoviesStep({ data, onUpdate, onNext }: Props) {
         )}
 
         <TouchableOpacity
-          style={[styles.continueBtn, data.topMovies.length === 0 && styles.continueBtnDisabled]}
+          style={[styles.continueBtn, topMovies.length === 0 && styles.continueBtnDisabled]}
           onPress={onNext}
-          disabled={data.topMovies.length === 0}
+          disabled={topMovies.length === 0}
           testID="top-movies-continue"
         >
           <Text style={styles.continueBtnText}>Continue</Text>

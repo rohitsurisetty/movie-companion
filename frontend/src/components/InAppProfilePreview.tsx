@@ -126,7 +126,7 @@ export default function InAppProfilePreview({ visible, onClose }: Props) {
     return profileData.visibilityToggles[key] !== false;
   };
 
-  const topMovies = profileData?.topMovies || [];
+  const topMovies = Array.isArray(profileData?.topMovies) ? profileData.topMovies : [];
   const partialLocation = getPartialLocation(profileData?.location);
 
   if (!visible) return null;

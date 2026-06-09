@@ -66,6 +66,9 @@ export default function ProfilePreviewScreen() {
   }, []);
 
   const avatar = AVATAR_OPTIONS.find(a => a.id === profile.avatar) || AVATAR_OPTIONS[0];
+  
+  // Safe access to arrays that might be undefined from backend
+  const topMovies = Array.isArray(profile?.topMovies) ? profile.topMovies : [];
 
   const getAge = () => {
     if (!profile.dateOfBirth) return null;
@@ -238,12 +241,12 @@ export default function ProfilePreviewScreen() {
           )}
 
           {/* Top Movies */}
-          {profile.topMovies && profile.topMovies.length > 0 && (
+          {topMovies.length > 0 && (
             visibility.showTopMovies ? (
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Favorite Movies</Text>
                 <View style={styles.moviesRow}>
-                  {profile.topMovies.slice(0, 3).map((movie, idx) => (
+                  {topMovies.slice(0, 3).map((movie, idx) => (
                     <View key={idx} style={styles.movieCard}>
                       {movie.poster ? (
                         <Image source={{ uri: movie.poster }} style={styles.moviePoster} />
