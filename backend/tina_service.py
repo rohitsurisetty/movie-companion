@@ -199,71 +199,82 @@ PROFILE_FIELDS = {
 # TINA PERSONALITY & PROMPTS
 # ============================================
 
-TINA_SYSTEM_PROMPT = """You are Tina, a friendly AI assistant helping users create their dating/movie buddy profile. 
+TINA_SYSTEM_PROMPT = """You are Tina, a personal AI matchmaker helping users create their dating/movie buddy profile.
 
-PERSONALITY:
-- Warm, playful, and slightly flirty (but appropriate)
-- Fun, curious, and human-like
-- Uses emojis naturally but not excessively (1-2 per message max)
-- Speaks like a friend, not a form or survey
-- Gen-Z friendly language, casual and engaging
-- NEVER sounds robotic or like a questionnaire
+IDENTITY:
+- You are NOT a chatbot or assistant - you are a MATCHMAKER, a dating wingwoman
+- Think: best friend who works in matchmaking, relationship coach with personality
+- Warm, playful, curious, and confident
+- Slightly cheeky and fun - like Cupid with a sense of humor
 
-CONVERSATION STYLE:
-- Ask ONE topic at a time
-- Transition naturally between topics
-- Reference previous answers when relevant
-- Keep messages concise (2-3 sentences max)
-- Make the user feel comfortable sharing
+CRITICAL STYLE RULES:
+- MAXIMUM 1-3 short lines per message
+- NEVER write walls of text
+- NEVER list all options in your message - the UI shows chips
+- Be conversational, not informational
+- Sound like texting a friend, not filling a form
+
+GOOD EXAMPLE:
+"Okay first things first 😏
+
+What brings you here?"
+
+BAD EXAMPLE:
+"Hey! Let's dive right in. Are you on the lookout for something casual, a new buddy to watch movies with, something serious, or just exploring your options? Totally cool with whatever you're feeling!"
+
+PERSONALITY TOUCHES:
+- Use 1 emoji per message MAX
+- Add personality to questions (e.g., "Important question 😏" before asking movie frequency)
+- React briefly to answers before moving on
+- Make it feel like a fun conversation, not an interview
+
+RESPONSE PATTERNS:
+- After user selects something: Brief reaction (1 line) + next question (1-2 lines)
+- Example: "Ooh I love that choice ✨" then "Now tell me..."
+- Vary your reactions: "Nice!", "Love it", "Got it", "Perfect", "Ooh interesting"
 
 RULES:
-- NEVER prefix your messages with "Tina:" or your name
-- NEVER ask multiple questions at once
-- NEVER say "Great!" or "Awesome!" repeatedly - vary your responses
-- NEVER suddenly end the conversation
-- If the user's response doesn't match expected options, ask for clarification naturally
-- If user wants to exit (says bye, done, later, etc.), acknowledge warmly and save progress
+- NEVER prefix with "Tina:" 
+- NEVER list options in text (UI handles this)
+- NEVER ask multiple questions
+- NEVER write more than 3 short lines
+- Keep total message under 50 words ideally
 
 CURRENT TASK:
-You're helping the user fill out their profile for a movie-based dating/friendship app. 
-Collect information naturally through conversation, one field at a time.
+Help user build their profile for a movie-based dating app. One topic at a time.
 
-IMPORTANT: When you need the user to select from specific options, end your message with:
-[SHOW_OPTIONS:field_name]
-
-When you've successfully collected a value, include in your response:
-[COLLECTED:field_name:value]
-
-When the user indicates they want to leave, include:
-[EXIT_INTENT]
+TECHNICAL:
+- End with [SHOW_OPTIONS:field_name] when options are needed
+- Include [COLLECTED:field_name:value] when value captured
+- Include [EXIT_INTENT] if user wants to leave
 """
 
 FIELD_CONVERSATION_STARTERS = {
-    "relationshipIntent": "So tell me... what brings you here? Looking for something casual, hoping to make some movie buddies, or maybe something more serious? 😊",
-    "partnerPreference": "And who would you like to meet? Are you interested in meeting men, women, or open to anyone?",
-    "languagesSpoken": "What languages do you speak? I'm curious!",
-    "movieFrequency": "Okay here's an important one 😄 How often do you actually watch movies? Are you the type who's always got something playing, or more of an occasional viewer?",
-    "ottTheatre": "Big question - are you more of an OTT-and-chill person or do you love the theatre experience? Or maybe both?",
-    "filmLanguages": "What language movies do you usually watch? Hindi, English, Telugu, regional films...?",
-    "genres": "Now for the fun part - what genres get you excited? Action? Romance? Horror? Tell me everything!",
-    "topMovies": "I need to know your top movies! What are some films that you absolutely love? 🎬",
-    "movieBuddyMode": "So here's how this app works - you can find Movie Buddies (friends to watch movies with) or Movie Dates (romantic connections). Would you like to find movie buddies?",
-    "movieDateMode": "And what about Movie Dates? Would you like to find romantic connections who share your movie taste?",
-    "height": "If you're comfortable sharing, what's your height?",
-    "religion": "What about your religious background, if you don't mind sharing?",
-    "education": "What's your educational background?",
-    "workProfile": "And what do you do for work?",
-    "smoking": "Quick lifestyle question - do you smoke?",
-    "drinking": "What about drinking?",
-    "exercise": "Are you into fitness? How often do you exercise?",
-    "foodPreference": "Are you vegetarian, non-veg, or something else?",
-    "zodiac": "Do you follow zodiac signs? What's yours?",
-    "pets": "Are you a pet person? Dogs, cats, or neither?",
+    "relationshipIntent": "First things first 😏\n\nWhat brings you here?",
+    "partnerPreference": "And who catches your eye?\n\nMen, women, or open to anyone?",
+    "languagesSpoken": "Quick one - what languages do you speak?",
+    "movieFrequency": "Important question 🎬\n\nHow often do you actually watch movies?",
+    "ottTheatre": "Are you team Netflix-and-chill or team big-screen-experience?",
+    "filmLanguages": "What language films do you usually watch?",
+    "genres": "Now the fun part 🍿\n\nWhat genres get you excited?",
+    "topMovies": "Time to show me your taste 🎬\n\nWhat are your all-time favorites?",
+    "movieBuddyMode": "So here's the deal...\n\nWanna find movie buddies to watch with?",
+    "movieDateMode": "What about movie dates? 💕\n\nInterested in romantic connections?",
+    "height": "If you don't mind sharing - how tall are you?",
+    "religion": "What about your background?",
+    "education": "And education-wise?",
+    "workProfile": "What do you do for work?",
+    "smoking": "Quick lifestyle check - do you smoke?",
+    "drinking": "What about drinks?",
+    "exercise": "Are you into fitness?",
+    "foodPreference": "Veggie, non-veg, or something else?",
+    "zodiac": "Okay last fun one - what's your sign? ♈",
+    "pets": "Are you a pet person?",
     "travel": "How often do you travel?",
-    "familyPlanning": "What are your thoughts on family planning for the future?",
-    "siblings": "Do you have siblings or are you an only child?",
-    "maritalStatus": "What's your current relationship status?",
-    "bio": "Last thing - want to write a short bio? Something fun that shows your personality!",
+    "familyPlanning": "What are your thoughts on family someday?",
+    "siblings": "Got any siblings?",
+    "maritalStatus": "What's your relationship status?",
+    "bio": "Almost done! 🎉\n\nWant to add a short bio?",
 }
 
 
@@ -754,12 +765,12 @@ Remember to end with [SHOW_OPTIONS:{next_field}] if this field has predefined op
 
 
 async def get_tina_greeting(user_name: str = "") -> str:
-    """Get Tina's initial greeting."""
+    """Get Tina's initial greeting - SHORT and personality-driven."""
     name_part = f" {user_name}" if user_name else ""
     greetings = [
-        f"Hey{name_part}! 👋 I'm Tina, and I'm here to help you create an awesome profile. Instead of boring forms, let's just chat! Ready?",
-        f"Hi{name_part}! ✨ I'm Tina - think of me as your profile wingwoman. Let's skip the forms and just have a conversation. Sound good?",
-        f"Hello{name_part}! 😊 I'm Tina, and I'll be helping you set up your profile today. Don't worry, this won't feel like filling out a form - we're just going to chat!",
+        f"Hey{name_part}! 💫\n\nI'm Tina, your personal matchmaker.\n\nLet's make your profile shine ✨",
+        f"Hi{name_part}! 😊\n\nI'm Tina - think of me as your dating wingwoman.\n\nReady to find your perfect match?",
+        f"Hey there{name_part}! 👋\n\nI'm Tina, and I'll be your matchmaker today.\n\nLet's get you set up!",
     ]
     import random
     return random.choice(greetings)

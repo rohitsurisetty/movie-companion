@@ -105,6 +105,9 @@ export default function OnboardingScreen() {
   const [showTinaChat, setShowTinaChat] = useState(false);
   const [tinaCollectedFields, setTinaCollectedFields] = useState<string[]>([]);
   const [userId, setUserId] = useState<string>('');
+  // Track if we're selecting movies FOR Tina (vs manual onboarding)
+  const [tinaMovieSelectionMode, setTinaMovieSelectionMode] = useState(false);
+  const [moviesForTina, setMoviesForTina] = useState<any[]>([]);
 
   // Get user ID on mount
   useEffect(() => {
@@ -233,6 +236,21 @@ export default function OnboardingScreen() {
     }
   };
 
+  // Handler for Tina requesting movie selection
+  const handleTinaRequestMovieSelection = () => {
+    setTinaMovieSelectionMode(true);
+    setShowTinaChat(false);
+    setStep(STEP_TOP_MOVIES);
+  };
+
+  // Handler for TopMoviesStep completion when in Tina mode
+  const handleMoviesSelectedForTina = () => {
+    // Save the selected movies to pass back to Tina
+    setMoviesForTina([...data.topMovies]);
+    setTinaMovieSelectionMode(false);
+    setShowTinaChat(true);
+  };
+
   // Validation function - all selection steps are mandatory
   const isSelectionValid = (stepIdx: number): boolean => {
     const config = SELECTION_CONFIGS[stepIdx];
@@ -270,6 +288,8 @@ export default function OnboardingScreen() {
         userName={data.name || ''}
         onComplete={handleTinaComplete}
         onExit={handleTinaExit}
+        onRequestMovieSelection={handleTinaRequestMovieSelection}
+        selectedMovies={moviesForTina.length > 0 ? moviesForTina : undefined}
       />
     );
   }
@@ -320,6 +340,16 @@ export default function OnboardingScreen() {
     }
     // Step 10: Top Movies
     if (step === STEP_TOP_MOVIES) {
+      // If in Tina movie selection mode, use different onNext handler
+      if (tinaMovieSelectionMode) {
+        return (
+          <TopMoviesStep 
+            data={data} 
+            onUpdate={updateField} 
+            onNext={handleMoviesSelectedForTina}
+          />
+        );
+      }
       return <TopMoviesStep data={data} onUpdate={updateField} onNext={handleNext} />;
     }
     // Step 11: Optional Profile
