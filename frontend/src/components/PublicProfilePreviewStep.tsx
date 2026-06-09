@@ -31,7 +31,7 @@ export default function PublicProfilePreviewStep({ data, onEdit, onContinue }: P
     return data.visibilityToggles[key] !== false;
   };
 
-  const topMovies = data.topMovies || [];
+  const topMovies = Array.isArray(data.topMovies) ? data.topMovies : [];
   const partialLocation = getPartialLocation(data.location);
 
   return (
@@ -154,7 +154,7 @@ export default function PublicProfilePreviewStep({ data, onEdit, onContinue }: P
           )}
 
           {/* Top 5 Movies */}
-          {isVisible('topMovies') && topMovies.length > 0 && (
+          {isVisible('topMovies') && topMovies && topMovies.length > 0 && (
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
                 <Ionicons name="star-outline" size={16} color={COLORS.gold} />
