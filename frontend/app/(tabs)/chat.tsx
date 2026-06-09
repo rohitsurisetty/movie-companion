@@ -2,9 +2,9 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Image, TextInput,
   FlatList, ScrollView, Modal, Platform, ActivityIndicator, 
-  Dimensions, Alert, Pressable,
+  Dimensions, Alert, Pressable, KeyboardAvoidingView,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -288,7 +288,7 @@ const MessageRequestCard = ({
           <Text style={styles.requestLocation}>{user?.location || 'Unknown location'}</Text>
         </View>
       </View>
-      <Text style={styles.requestPreview} numberOfLines={2}>"{request.preview}"</Text>
+      <Text style={styles.requestPreview} numberOfLines={2}>&quot;{request.preview}&quot;</Text>
       <View style={styles.requestActions}>
         <TouchableOpacity style={styles.declineBtn} onPress={onDecline}>
           <Ionicons name="close" size={20} color={COLORS.textSecondary} />
@@ -582,7 +582,11 @@ const GiftedChatScreen = ({
   };
 
   return (
-    <View style={styles.chatContainer}>
+    <KeyboardAvoidingView 
+      style={styles.chatContainer}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+    >
       {/* Chat Header */}
       <View style={styles.chatHeader}>
         <TouchableOpacity onPress={onBack} style={styles.backBtn}>
@@ -654,8 +658,12 @@ const GiftedChatScreen = ({
           showAvatarForEveryMessage={false}
           renderAvatarOnTop
           messagesContainerStyle={styles.messagesContainer}
+          bottomOffset={Platform.OS === 'ios' ? 34 : 0}
+          minInputToolbarHeight={56}
           listViewProps={{
             style: { backgroundColor: COLORS.bg },
+            keyboardDismissMode: 'interactive',
+            keyboardShouldPersistTaps: 'handled',
           }}
         />
       )}
@@ -692,7 +700,7 @@ const GiftedChatScreen = ({
         userId={otherUserId}
         userName={otherUser?.name || 'Unknown'}
       />
-    </View>
+    </KeyboardAvoidingView>
   );
 };
 

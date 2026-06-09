@@ -1,9 +1,8 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, Modal,
-  ScrollView, Alert, ActivityIndicator, Platform,
+  ScrollView, Alert, ActivityIndicator, Platform, KeyboardAvoidingView, Keyboard,
 } from 'react-native';
-import { KeyboardAvoidingView, KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { COLORS, SPACING, BORDER_RADIUS } from '../theme';
@@ -233,32 +232,37 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
 
   return (
     <>
-      <KeyboardAwareScrollView 
+      <KeyboardAvoidingView 
         style={styles.flex} 
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-        bottomOffset={20}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
       >
-        <Text style={styles.title}>Tell us about yourself</Text>
-        <Text style={styles.subtitle}>Let&apos;s start with the basics</Text>
+        <ScrollView 
+          style={styles.flex} 
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          <Text style={styles.title}>Tell us about yourself</Text>
+          <Text style={styles.subtitle}>Let&apos;s start with the basics</Text>
 
-        <Text style={styles.label}>Name *</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="Your full name"
-          placeholderTextColor={COLORS.textMuted}
-        value={data.name}
-        onChangeText={(t) => onUpdate('name', t.slice(0, 50))}
-        maxLength={50}
-        testID="basic-name-input"
-      />
-      <Text style={styles.charCount}>{data.name.length}/50</Text>
+          <Text style={styles.label}>Name *</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Your full name"
+            placeholderTextColor={COLORS.textMuted}
+            value={data.name}
+            onChangeText={(t) => onUpdate('name', t.slice(0, 50))}
+            maxLength={50}
+            testID="basic-name-input"
+          />
+          <Text style={styles.charCount}>{data.name.length}/50</Text>
 
-        <Text style={styles.label}>Gender *</Text>
-        <TouchableOpacity style={styles.dropdown} onPress={() => setShowGenderPicker(true)} testID="basic-gender-dropdown">
-          <Text style={[styles.dropdownText, !data.gender && styles.placeholder]}>
-            {data.gender || 'Select your gender'}
-          </Text>
+          <Text style={styles.label}>Gender *</Text>
+          <TouchableOpacity style={styles.dropdown} onPress={() => setShowGenderPicker(true)} testID="basic-gender-dropdown">
+            <Text style={[styles.dropdownText, !data.gender && styles.placeholder]}>
+              {data.gender || 'Select your gender'}
+            </Text>
           <Ionicons name="chevron-down" size={20} color={COLORS.textMuted} />
         </TouchableOpacity>
 
@@ -402,7 +406,8 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
         >
           <Text style={styles.continueBtnText}>Continue</Text>
         </TouchableOpacity>
-      </KeyboardAwareScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
 
       {/* Gender Picker Modal */}
       <Modal visible={showGenderPicker} transparent animationType="fade">

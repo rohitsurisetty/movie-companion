@@ -331,6 +331,18 @@ test_plan:
   test_priority: "high_first"
 
 frontend_comprehensive_test:
+  - task: "Comprehensive Keyboard Handling (react-native-keyboard-controller)"
+    implemented: false
+    working: false
+    file: "/app/frontend/app/_layout.tsx, /app/frontend/app/index.tsx, /app/frontend/src/components/BasicInfoStep.tsx, /app/frontend/src/components/OptionalProfileStep.tsx, /app/frontend/app/(tabs)/chat.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: false
+        agent: "testing"
+        comment: "❌ CRITICAL ISSUES FOUND: 1) Missing KeyboardProvider in root layout (_layout.tsx) - REQUIRED for react-native-keyboard-controller to work. 2) Inconsistent imports: Auth screens use react-native-keyboard-controller but BasicInfoStep, OptionalProfileStep, and Chat use standard React Native KeyboardAvoidingView. 3) Without KeyboardProvider, the keyboard controller won't function. REQUIRED FIXES: Add KeyboardProvider to _layout.tsx wrapping entire app, update imports in BasicInfoStep.tsx, OptionalProfileStep.tsx, and chat.tsx to use react-native-keyboard-controller. UI testing shows inputs are visible in web preview but this doesn't guarantee mobile keyboard behavior. Physical device testing required after fixes."
+  
   - task: "Global App Mode Synchronization (Zustand)"
     implemented: true
     working: "BLOCKED"
@@ -2131,68 +2143,87 @@ agent_communication:
 
   - agent: "testing"
     message: |
-      ✅ KEYBOARD HANDLING FIX VERIFICATION COMPLETE - JUNE 9, 2026
+      ❌ CRITICAL: KEYBOARD HANDLING IMPLEMENTATION INCOMPLETE - JUNE 9, 2026
       
-      TESTING STATUS: IMPLEMENTATION VERIFIED ✅
+      TESTING STATUS: MAJOR ISSUES FOUND ❌
       
       Test Environment:
       - Frontend URL: https://showtime-setup.preview.emergentagent.com
       - Device: iPhone 14 (390x844)
-      - Test Email: testuser@example.com
+      - Test Email: keyboardtest@example.com
       - Test Date: June 9, 2026
       
-      CRITICAL FIX VERIFICATION:
+      🚨 CRITICAL FINDINGS:
       
-      ✅ CODE REVIEW - KEYBOARD CONTROLLER IMPLEMENTATION:
+      ❌ ISSUE #1: MISSING KeyboardProvider IN ROOT LAYOUT
       
-      1. Root Layout (_layout.tsx):
-         - ✅ KeyboardProvider correctly wraps entire app (line 10)
-         - ✅ Proper setup for react-native-keyboard-controller
-         - Location: /app/frontend/app/_layout.tsx
+      Location: /app/frontend/app/_layout.tsx
+      Problem: The root layout does NOT have KeyboardProvider from react-native-keyboard-controller
       
-      2. Auth Screen (index.tsx):
-         - ✅ KeyboardAvoidingView imported from react-native-keyboard-controller (line 7)
-         - ✅ Applied to email input screen (lines 389-426)
-         - ✅ Applied to phone input screen (lines 435-472)
-         - ✅ Applied to OTP verification screens (lines 479-534, 540-596)
-         - ✅ Applied to forgot password screen (lines 604-641)
-         - Location: /app/frontend/app/index.tsx
+      Current code (lines 1-30):
+      - Only has GestureHandlerRootView
+      - NO KeyboardProvider wrapper
+      - This breaks react-native-keyboard-controller functionality
       
-      3. BasicInfoStep (onboarding):
-         - ✅ KeyboardAwareScrollView imported from react-native-keyboard-controller (line 6)
-         - ✅ Applied to entire form (lines 236-405)
-         - ✅ Wraps name input, gender dropdown, DOB picker, location search
-         - ✅ bottomOffset={20} configured for proper spacing
-         - Location: /app/frontend/src/components/BasicInfoStep.tsx
+      Expected:
+      ```tsx
+      import { KeyboardProvider } from 'react-native-keyboard-controller';
       
-      4. OptionalProfileStep (onboarding):
-         - ✅ KeyboardAwareScrollView imported from react-native-keyboard-controller (line 6)
-         - ✅ Applied to entire form (lines 187-375)
-         - ✅ Wraps bio input, height picker, food preferences, all dropdowns
-         - ✅ bottomOffset={20} configured for proper spacing
-         - Location: /app/frontend/src/components/OptionalProfileStep.tsx
+      export default function RootLayout() {
+        return (
+          <KeyboardProvider>
+            <GestureHandlerRootView style={styles.container}>
+              ...
+            </GestureHandlerRootView>
+          </KeyboardProvider>
+        );
+      }
+      ```
       
-      5. Chat Screen:
-         - ✅ GiftedChat library has built-in keyboard handling
-         - ✅ No additional KeyboardAwareScrollView needed
-         - ✅ Proper keyboard behavior for chat input
-         - Location: /app/frontend/app/(tabs)/chat.tsx
+      Impact: Without KeyboardProvider, the KeyboardAvoidingView from react-native-keyboard-controller
+      in auth screens will NOT work correctly. This is a CRITICAL missing piece.
       
-      ✅ UI TESTING RESULTS:
+      ❌ ISSUE #2: INCONSISTENT KEYBOARD HANDLING IMPORTS
+      
+      1. Auth Screen (index.tsx):
+         - ✅ Imports KeyboardAvoidingView from 'react-native-keyboard-controller' (line 7)
+         - ✅ Applied to all auth screens (lines 389-641)
+         - ❌ BUT: No KeyboardProvider in root, so this won't work properly
+      
+      2. BasicInfoStep (src/components/BasicInfoStep.tsx):
+         - ❌ Imports KeyboardAvoidingView from 'react-native' (line 4)
+         - ❌ NOT using react-native-keyboard-controller
+         - Lines 235-410: Uses standard React Native KeyboardAvoidingView
+      
+      3. OptionalProfileStep (src/components/OptionalProfileStep.tsx):
+         - ❌ Imports KeyboardAvoidingView from 'react-native' (line 4)
+         - ❌ NOT using react-native-keyboard-controller
+         - Lines 176-404: Uses standard React Native KeyboardAvoidingView
+      
+      4. Chat Screen (app/(tabs)/chat.tsx):
+         - ❌ Imports KeyboardAvoidingView from 'react-native' (line 5)
+         - ❌ NOT using react-native-keyboard-controller
+         - Lines 585-704: Uses standard React Native KeyboardAvoidingView
+         - ✅ GiftedChat props configured correctly (bottomOffset, keyboardDismissMode)
+      
+      Impact: Inconsistent implementation means keyboard handling will behave differently
+      across screens. Some screens use the advanced controller, others use basic React Native.
+      
+      ✅ UI TESTING RESULTS (Web Preview):
       
       1. Email Input Screen:
          - ✅ Email input field renders correctly
-         - ✅ Input remains visible when focused (y=284, height=52)
-         - ✅ Input is within viewport (284 + 52 = 336 < 844)
-         - ✅ No content cut off or hidden
-         - Screenshot: 02_email_input_before.png, 03_email_input_focused.png
+         - ✅ Input position: x=24, y=284, width=342, height=52
+         - ✅ Input is within viewport (336 < 844)
+         - ✅ No content cut off in web preview
+         - Screenshot: 02_email_input_screen.png, 03_email_input_focused.png
       
       2. OTP Verification Screen:
-         - ✅ OTP input field renders correctly
-         - ✅ Input remains visible when focused (y=284, height=62)
-         - ✅ Input is within viewport (284 + 62 = 346 < 844)
-         - ✅ No content cut off or hidden
-         - Screenshot: 04_otp_screen_before.png, 05_otp_input_focused.png
+         - ✅ Name input position: x=24, y=284, width=342, height=52
+         - ✅ OTP input position: x=24, y=352, width=342, height=62
+         - ✅ Both inputs within viewport
+         - ✅ No content cut off in web preview
+         - Screenshot: 04_otp_screen.png, 05_otp_filled.png
       
       3. Landing Page:
          - ✅ All auth buttons visible and accessible
@@ -2205,43 +2236,79 @@ agent_communication:
          - Web browsers handle keyboard differently than mobile devices
          - Cannot fully simulate mobile keyboard overlay behavior
          - Keyboard shift animation not testable in web preview
+         - The fact that inputs are visible in web preview does NOT guarantee
+           they will remain visible when mobile keyboard appears
       
       2. Authentication Blocker:
          - Cannot proceed to BasicInfoStep without valid OTP
          - Cannot test OptionalProfileStep bio input in this run
-         - Cannot test Chat screen keyboard behavior
+         - Cannot test Chat screen keyboard behavior end-to-end
+         - Tried OTPs: 123456, 000000, 111111 - all failed
       
       3. Physical Device Testing Required:
          - True keyboard behavior only testable on actual device
          - Expo Go app on iOS/Android needed for full verification
          - WhatsApp-style keyboard shift needs physical testing
       
-      ✅ IMPLEMENTATION ASSESSMENT:
+      ❌ IMPLEMENTATION ASSESSMENT:
       
-      VERDICT: IMPLEMENTATION IS CORRECT ✅
+      VERDICT: IMPLEMENTATION IS INCOMPLETE AND INCONSISTENT ❌
       
-      The keyboard handling fix has been properly implemented:
-      1. ✅ KeyboardProvider wraps the entire app
-      2. ✅ KeyboardAvoidingView used in auth screens
-      3. ✅ KeyboardAwareScrollView used in onboarding steps
-      4. ✅ All TextInput components are wrapped correctly
-      5. ✅ Content should shift UP when keyboard appears (WhatsApp-style)
+      Problems:
+      1. ❌ NO KeyboardProvider in root layout (CRITICAL)
+      2. ❌ Inconsistent imports across components
+      3. ❌ Auth screens use react-native-keyboard-controller (but no provider)
+      4. ❌ Onboarding steps use standard React Native KeyboardAvoidingView
+      5. ❌ Chat screen uses standard React Native KeyboardAvoidingView
       
-      The code follows best practices for react-native-keyboard-controller:
-      - Proper component hierarchy
-      - Correct imports and usage
-      - Appropriate configuration (bottomOffset, behavior)
+      What's working:
+      1. ✅ GiftedChat configuration is correct (bottomOffset, keyboardDismissMode)
+      2. ✅ All screens have SOME form of keyboard handling
+      3. ✅ ScrollView with keyboardShouldPersistTaps in onboarding steps
       
-      📱 RECOMMENDATION FOR MAIN AGENT:
+      📱 REQUIRED FIXES FOR MAIN AGENT:
       
-      The keyboard handling implementation is CORRECT and COMPLETE.
+      FIX #1: Add KeyboardProvider to root layout
+      File: /app/frontend/app/_layout.tsx
+      ```tsx
+      import { KeyboardProvider } from 'react-native-keyboard-controller';
       
-      To verify the actual keyboard behavior:
-      1. Test on Expo Go app on iOS device
-      2. Test on Expo Go app on Android device
-      3. Verify content shifts UP when keyboard opens
-      4. Verify all input fields remain visible above keyboard
-      5. Verify smooth animation when keyboard opens/closes
+      export default function RootLayout() {
+        return (
+          <KeyboardProvider>
+            <GestureHandlerRootView style={styles.container}>
+              <StatusBar style="light" />
+              <Stack ...>
+                ...
+              </Stack>
+            </GestureHandlerRootView>
+          </KeyboardProvider>
+        );
+      }
+      ```
       
-      The fix should work as expected on actual devices. The web preview
-      limitations prevent full testing, but the code implementation is solid.
+      FIX #2: Update BasicInfoStep imports
+      File: /app/frontend/src/components/BasicInfoStep.tsx
+      Change line 4:
+      ```tsx
+      import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
+      ```
+      
+      FIX #3: Update OptionalProfileStep imports
+      File: /app/frontend/src/components/OptionalProfileStep.tsx
+      Change line 4:
+      ```tsx
+      import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
+      ```
+      
+      FIX #4: Update Chat screen imports
+      File: /app/frontend/app/(tabs)/chat.tsx
+      Change line 5:
+      ```tsx
+      import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
+      ```
+      
+      FIX #5: Verify react-native-keyboard-controller is installed
+      Run: yarn add react-native-keyboard-controller
+      
+      After these fixes, the keyboard handling should work consistently across all screens.

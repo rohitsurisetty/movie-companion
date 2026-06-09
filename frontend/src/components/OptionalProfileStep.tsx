@@ -1,9 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView,
-  Modal, Platform,
+  Modal, Platform, KeyboardAvoidingView,
 } from 'react-native';
-import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, BORDER_RADIUS } from '../theme';
 import { ProfileData } from '../types';
@@ -174,7 +173,11 @@ export default function OptionalProfileStep({ data, onUpdate, onNext }: Props) {
   };
 
   return (
-    <View style={styles.flex}>
+    <KeyboardAvoidingView 
+      style={styles.flex}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+    >
       {/* Skip button at top */}
       <View style={styles.topBar}>
         <View style={styles.topBarSpacer} />
@@ -184,7 +187,12 @@ export default function OptionalProfileStep({ data, onUpdate, onNext }: Props) {
         </TouchableOpacity>
       </View>
 
-      <KeyboardAwareScrollView style={styles.flex} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} bottomOffset={20}>
+      <ScrollView 
+        style={styles.flex} 
+        contentContainerStyle={styles.scrollContent} 
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
         <Text style={styles.title}>Almost there!</Text>
         <Text style={styles.subtitle}>Just a few more optional fields</Text>
 
@@ -372,7 +380,7 @@ export default function OptionalProfileStep({ data, onUpdate, onNext }: Props) {
             <Text style={styles.continueBtnText}>Continue</Text>
           </TouchableOpacity>
         </View>
-      </KeyboardAwareScrollView>
+      </ScrollView>
 
       {/* Dropdown Modal */}
       <Modal visible={!!activeDropdown} transparent animationType="fade">
@@ -393,7 +401,7 @@ export default function OptionalProfileStep({ data, onUpdate, onNext }: Props) {
           </View>
         </TouchableOpacity>
       </Modal>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
