@@ -285,7 +285,7 @@ const EmptyState = ({ mode, onRefresh }: { mode: string; onRefresh: () => void }
 
 // ============ MAIN FEED SCREEN ============
 export default function FeedScreen() {
-  const { mode } = useAppMode();
+  const { mode, setMode } = useAppMode();
   const router = useRouter();
   const [matches, setMatches] = useState<MatchProfile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -471,7 +471,7 @@ export default function FeedScreen() {
                 styles.headerModeButton,
                 mode === 'buddy' && styles.headerModeButtonActiveBuddy,
               ]}
-              onPress={() => {/* Mode controlled by shared header */}}
+              onPress={() => setMode('buddy')}
             >
               <Ionicons 
                 name="people" 
@@ -488,7 +488,7 @@ export default function FeedScreen() {
                 styles.headerModeButton,
                 mode === 'date' && styles.headerModeButtonActiveDate,
               ]}
-              onPress={() => {/* Mode controlled by shared header */}}
+              onPress={() => setMode('date')}
             >
               <Ionicons 
                 name="heart" 
