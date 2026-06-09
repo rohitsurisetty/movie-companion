@@ -1,14 +1,11 @@
 import React from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, Image, Dimensions,
+  View, Text, TouchableOpacity, StyleSheet, Image,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, BORDER_RADIUS } from '../theme';
 
-const { width, height } = Dimensions.get('window');
-
-// Tina avatar - friendly AI assistant
+// Tina avatar
 const TINA_AVATAR = 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&h=200&fit=crop&crop=face';
 
 type Props = {
@@ -20,87 +17,80 @@ type Props = {
 export default function TinaChoiceStep({ userName, onChatWithTina, onContinueManually }: Props) {
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.title}>Create Your Profile</Text>
-        <Text style={styles.subtitle}>Choose how you&apos;d like to continue</Text>
-      </View>
-
-      {/* Tina Card */}
-      <TouchableOpacity style={styles.tinaCard} onPress={onChatWithTina} activeOpacity={0.9}>
-        <LinearGradient
-          colors={['#FF6B9D', '#E50914']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.tinaGradient}
-        >
-          {/* Tina Avatar */}
-          <View style={styles.tinaAvatarContainer}>
-            <Image source={{ uri: TINA_AVATAR }} style={styles.tinaAvatar} />
-            <View style={styles.tinaOnlineDot} />
-          </View>
-
-          {/* Tina Info */}
-          <View style={styles.tinaInfo}>
-            <View style={styles.tinaNameRow}>
-              <Text style={styles.tinaName}>Chat with Tina</Text>
-              <Text style={styles.tinaSparkle}>✨</Text>
-            </View>
-            <Text style={styles.tinaDescription}>
-              Let Tina get to know you and help create your profile through a fun conversation.
-            </Text>
-          </View>
-
-          {/* Arrow */}
-          <View style={styles.tinaArrow}>
-            <Ionicons name="chatbubble-ellipses" size={28} color="#FFF" />
-          </View>
-        </LinearGradient>
-
-        {/* Features */}
-        <View style={styles.tinaFeatures}>
-          <View style={styles.featureItem}>
-            <Ionicons name="sparkles" size={16} color={COLORS.primary} />
-            <Text style={styles.featureText}>AI-powered</Text>
-          </View>
-          <View style={styles.featureItem}>
-            <Ionicons name="happy" size={16} color={COLORS.primary} />
-            <Text style={styles.featureText}>Fun &amp; casual</Text>
-          </View>
-          <View style={styles.featureItem}>
-            <Ionicons name="time" size={16} color={COLORS.primary} />
-            <Text style={styles.featureText}>~3 mins</Text>
-          </View>
+      {/* Tina Avatar & Intro */}
+      <View style={styles.introSection}>
+        <View style={styles.avatarContainer}>
+          <Image source={{ uri: TINA_AVATAR }} style={styles.avatar} />
+          <View style={styles.onlineDot} />
         </View>
-      </TouchableOpacity>
-
-      {/* Or Divider */}
-      <View style={styles.dividerContainer}>
-        <View style={styles.dividerLine} />
-        <Text style={styles.dividerText}>OR</Text>
-        <View style={styles.dividerLine} />
-      </View>
-
-      {/* Manual Option */}
-      <TouchableOpacity style={styles.manualCard} onPress={onContinueManually} activeOpacity={0.8}>
-        <View style={styles.manualIcon}>
-          <Ionicons name="create-outline" size={24} color={COLORS.textSecondary} />
-        </View>
-        <View style={styles.manualInfo}>
-          <Text style={styles.manualTitle}>Continue Filling Manually</Text>
-          <Text style={styles.manualDescription}>
-            Traditional step-by-step profile setup
-          </Text>
-        </View>
-        <Ionicons name="chevron-forward" size={24} color={COLORS.textMuted} />
-      </TouchableOpacity>
-
-      {/* Bottom hint */}
-      <View style={styles.bottomHint}>
-        <Ionicons name="information-circle-outline" size={16} color={COLORS.textMuted} />
-        <Text style={styles.hintText}>
-          You can switch between methods anytime. Progress is saved automatically.
+        <Text style={styles.greeting}>Hey {userName || 'there'}!</Text>
+        <Text style={styles.introText}>
+          I&apos;m Tina, your profile assistant. I can help you create an amazing profile through a quick chat - no boring forms!
         </Text>
+      </View>
+
+      {/* Options */}
+      <View style={styles.optionsSection}>
+        {/* Chat with Tina - Primary */}
+        <TouchableOpacity 
+          style={styles.primaryOption} 
+          onPress={onChatWithTina}
+          activeOpacity={0.8}
+        >
+          <View style={styles.optionContent}>
+            <View style={styles.optionIcon}>
+              <Ionicons name="chatbubbles" size={24} color="#FFF" />
+            </View>
+            <View style={styles.optionText}>
+              <Text style={styles.primaryOptionTitle}>Chat with Tina</Text>
+              <Text style={styles.primaryOptionSubtitle}>Quick, fun &amp; personalized</Text>
+            </View>
+          </View>
+          <Ionicons name="arrow-forward" size={20} color="#FFF" />
+        </TouchableOpacity>
+
+        {/* Divider */}
+        <View style={styles.divider}>
+          <View style={styles.dividerLine} />
+          <Text style={styles.dividerText}>or</Text>
+          <View style={styles.dividerLine} />
+        </View>
+
+        {/* Manual Option - Secondary */}
+        <TouchableOpacity 
+          style={styles.secondaryOption} 
+          onPress={onContinueManually}
+          activeOpacity={0.8}
+        >
+          <View style={styles.optionContent}>
+            <View style={styles.secondaryOptionIcon}>
+              <Ionicons name="list" size={22} color={COLORS.textSecondary} />
+            </View>
+            <View style={styles.optionText}>
+              <Text style={styles.secondaryOptionTitle}>Fill form manually</Text>
+              <Text style={styles.secondaryOptionSubtitle}>Traditional step-by-step</Text>
+            </View>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
+        </TouchableOpacity>
+      </View>
+
+      {/* Features */}
+      <View style={styles.features}>
+        <View style={styles.featureItem}>
+          <Ionicons name="time-outline" size={18} color={COLORS.primary} />
+          <Text style={styles.featureText}>~2 min</Text>
+        </View>
+        <View style={styles.featureDot} />
+        <View style={styles.featureItem}>
+          <Ionicons name="shield-checkmark-outline" size={18} color={COLORS.primary} />
+          <Text style={styles.featureText}>Private</Text>
+        </View>
+        <View style={styles.featureDot} />
+        <View style={styles.featureItem}>
+          <Ionicons name="save-outline" size={18} color={COLORS.primary} />
+          <Text style={styles.featureText}>Auto-save</Text>
+        </View>
       </View>
     </View>
   );
@@ -109,101 +99,90 @@ export default function TinaChoiceStep({ userName, onChatWithTina, onContinueMan
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    paddingHorizontal: SPACING.lg,
     paddingTop: SPACING.xl,
   },
-  header: {
-    marginBottom: SPACING.xl,
+  introSection: {
     alignItems: 'center',
+    marginBottom: SPACING.xl * 1.5,
   },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: COLORS.text,
-    marginBottom: SPACING.xs,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: COLORS.textSecondary,
-  },
-  tinaCard: {
-    backgroundColor: COLORS.bgCard,
-    borderRadius: BORDER_RADIUS.xl,
-    overflow: 'hidden',
+  avatarContainer: {
+    position: 'relative',
     marginBottom: SPACING.lg,
   },
-  tinaGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: SPACING.lg,
-  },
-  tinaAvatarContainer: {
-    position: 'relative',
-  },
-  tinaAvatar: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+  avatar: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
     borderWidth: 3,
-    borderColor: '#FFF',
+    borderColor: COLORS.primary,
   },
-  tinaOnlineDot: {
+  onlineDot: {
     position: 'absolute',
-    bottom: 2,
-    right: 2,
-    width: 14,
-    height: 14,
-    borderRadius: 7,
+    bottom: 6,
+    right: 6,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
     backgroundColor: '#4CAF50',
-    borderWidth: 2,
-    borderColor: '#FFF',
+    borderWidth: 3,
+    borderColor: COLORS.bg,
   },
-  tinaInfo: {
-    flex: 1,
-    marginLeft: SPACING.md,
+  greeting: {
+    fontSize: 26,
+    fontWeight: '700',
+    color: COLORS.text,
+    marginBottom: SPACING.sm,
   },
-  tinaNameRow: {
+  introText: {
+    fontSize: 15,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    lineHeight: 22,
+    paddingHorizontal: SPACING.md,
+  },
+  optionsSection: {
+    marginBottom: SPACING.xl,
+  },
+  primaryOption: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: COLORS.primary,
+    padding: SPACING.lg,
+    borderRadius: BORDER_RADIUS.lg,
+    marginBottom: SPACING.md,
   },
-  tinaName: {
-    fontSize: 20,
+  optionContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  optionIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: SPACING.md,
+  },
+  optionText: {
+    flex: 1,
+  },
+  primaryOptionTitle: {
+    fontSize: 18,
     fontWeight: '700',
     color: '#FFF',
   },
-  tinaSparkle: {
-    fontSize: 20,
-    marginLeft: SPACING.xs,
-  },
-  tinaDescription: {
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.9)',
-    marginTop: SPACING.xs,
-    lineHeight: 20,
-  },
-  tinaArrow: {
-    marginLeft: SPACING.sm,
-  },
-  tinaFeatures: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    paddingVertical: SPACING.md,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-  },
-  featureItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.xs,
-  },
-  featureText: {
+  primaryOptionSubtitle: {
     fontSize: 13,
-    color: COLORS.textSecondary,
+    color: 'rgba(255,255,255,0.8)',
+    marginTop: 2,
   },
-  dividerContainer: {
+  divider: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginVertical: SPACING.lg,
+    marginVertical: SPACING.md,
   },
   dividerLine: {
     flex: 1,
@@ -211,54 +190,58 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.border,
   },
   dividerText: {
-    fontSize: 14,
+    fontSize: 13,
     color: COLORS.textMuted,
     marginHorizontal: SPACING.md,
-    fontWeight: '600',
   },
-  manualCard: {
-    backgroundColor: COLORS.bgCard,
-    borderRadius: BORDER_RADIUS.lg,
+  secondaryOption: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: COLORS.bgCard,
     padding: SPACING.lg,
+    borderRadius: BORDER_RADIUS.lg,
     borderWidth: 1,
     borderColor: COLORS.border,
   },
-  manualIcon: {
+  secondaryOptionIcon: {
     width: 48,
     height: 48,
     borderRadius: 24,
     backgroundColor: COLORS.bgElevated,
     justifyContent: 'center',
     alignItems: 'center',
+    marginRight: SPACING.md,
   },
-  manualInfo: {
-    flex: 1,
-    marginLeft: SPACING.md,
-  },
-  manualTitle: {
+  secondaryOptionTitle: {
     fontSize: 16,
     fontWeight: '600',
     color: COLORS.text,
   },
-  manualDescription: {
+  secondaryOptionSubtitle: {
     fontSize: 13,
     color: COLORS.textSecondary,
     marginTop: 2,
   },
-  bottomHint: {
+  features: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  featureItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: SPACING.xl,
-    paddingHorizontal: SPACING.lg,
-    gap: SPACING.xs,
+    gap: 6,
   },
-  hintText: {
+  featureText: {
     fontSize: 13,
-    color: COLORS.textMuted,
-    textAlign: 'center',
-    lineHeight: 18,
+    color: COLORS.textSecondary,
+  },
+  featureDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: COLORS.textMuted,
+    marginHorizontal: SPACING.md,
   },
 });

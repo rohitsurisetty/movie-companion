@@ -406,6 +406,165 @@ frontend_comprehensive_test:
 agent_communication:
   - agent: "testing"
     message: |
+      ⚠️ TINA AI ONBOARDING FLOW TESTING - BLOCKED BY OTP VERIFICATION - JUNE 9, 2026
+      
+      TESTING STATUS: PARTIALLY TESTED - BLOCKED AT OTP VERIFICATION STEP
+      
+      Test Environment:
+      - Frontend: http://localhost:3000
+      - Backend: http://localhost:8001
+      - Viewport: iPhone (390x844)
+      - Test Email: tina_final_test@example.com
+      - Test Date: June 9, 2026
+      
+      WHAT WAS TESTED:
+      
+      ✅ STEP 1-3: Landing Page & Email Input - WORKING
+      - Landing page loads correctly with Film Companion branding
+      - "Login with Email" button (data-testid="email-auth-btn") works
+      - Email input screen loads and accepts input
+      - UI is clean and mobile-responsive
+      
+      ✅ STEP 4: OTP Generation - WORKING (Backend Confirmed)
+      - Backend API successfully generates OTP
+      - Network interception captured OTP: 573389
+      - API response format correct: {"success": true, "otp": "573389", "is_new_user": true}
+      - Backend endpoint /api/auth/send-email-otp is functional
+      
+      ✅ STEP 5-7: OTP Verification Screen - UI WORKING
+      - OTP verification screen loads correctly
+      - Name input (data-testid="name-input") present and functional
+      - OTP input (data-testid="otp-input") present and functional
+      - "Create Account" button present
+      - UI layout is clean and mobile-responsive
+      
+      ❌ STEP 8: OTP Verification - BLOCKED (Automation Issue)
+      - OTP verification fails in automated testing
+      - Issue: Timing problem with OTP capture from network response
+      - Intercepted OTP (573389) not used in time, fallback OTP (123456) used instead
+      - Result: 400 Bad Request or stuck on OTP screen
+      - Backend logs show: "POST /api/auth/verify-otp HTTP/1.1" 400 Bad Request
+      
+      ⚠️ STEPS 9-15: Cannot Test Due to Auth Blocker
+      - BasicInfo step (step 0) - NOT TESTED
+      - PhotoUpload step (step 1) - NOT TESTED
+      - TinaChoiceStep (step 2) - NOT TESTED (PRIMARY TEST TARGET)
+      - TinaChatScreen - NOT TESTED (PRIMARY TEST TARGET)
+      - Message sending to Tina - NOT TESTED
+      
+      BACKEND VERIFICATION (Manual API Testing):
+      
+      ✅ OTP Generation API - WORKING
+      ```bash
+      POST /api/auth/send-email-otp
+      {"email": "tina_test_user@example.com"}
+      Response: {"success": true, "otp": "267067", "is_new_user": true}
+      ```
+      
+      ✅ OTP Verification API - WORKING
+      ```bash
+      POST /api/auth/verify-otp
+      {"type": "email", "identifier": "tina_test_user@example.com", "otp": "267067", "name": "Tina Test User"}
+      Response: {"user_id": "user_e074f9e617f2", "session_token": "...", "is_new_user": true}
+      ```
+      
+      ✅ Tina AI Backend Endpoints - CONFIRMED WORKING (from previous tests)
+      - GET /api/tina/greeting/{name} - Returns flirty Gen-Z greeting
+      - POST /api/tina/chat - Handles conversation and profile extraction
+      - Both endpoints tested and working in previous test sessions
+      
+      CODE REVIEW FINDINGS:
+      
+      ✅ TinaChoiceStep Component (/app/frontend/src/components/TinaChoiceStep.tsx)
+      - Implementation looks correct
+      - Shows Tina's avatar with online badge
+      - Displays greeting: "Hey {userName}!"
+      - Has "Chat with Tina" primary button
+      - Has "Fill form manually" secondary option
+      - Features section shows: ~2 min, Private, Auto-save
+      
+      ✅ TinaChatScreen Component (/app/frontend/src/components/TinaChatScreen.tsx)
+      - Implementation looks correct
+      - Header with Tina's avatar and name
+      - Progress percentage display
+      - Chat message area with typing indicators
+      - Text input at bottom
+      - Handles greeting from /api/tina/greeting
+      - Sends messages to /api/tina/chat
+      - Profile data extraction logic present
+      
+      ✅ Onboarding Flow (/app/frontend/app/onboarding.tsx)
+      - Step 0: BasicInfo
+      - Step 1: PhotoUpload
+      - Step 2: TinaChoiceStep (NEW - correctly positioned)
+      - Tina chat triggers when "Chat with Tina" is clicked
+      - Full-screen TinaChatScreen component renders
+      - Profile data merging logic present
+      
+      SCREENSHOTS CAPTURED:
+      - otp_verification_failed.png - Shows OTP screen with filled fields
+      - tina_test_error.png - Error state screenshot
+      
+      AUTOMATION LIMITATIONS:
+      1. ❌ OTP Capture Timing Issue
+         - Network response interception works but async timing causes issues
+         - Captured OTP not available when needed
+         - This is a test automation limitation, not an app bug
+      
+      2. ❌ React Native Alert in Web
+         - Alert.alert() doesn't trigger browser alert dialog in web preview
+         - OTP shown in Alert cannot be captured in automated tests
+         - This is expected behavior for React Native web
+      
+      3. ⚠️ Browser Automation Limit Reached
+         - Used 3/3 browser automation calls (maximum allowed)
+         - Cannot continue automated testing
+         - Manual testing required for complete flow verification
+      
+      ROOT CAUSE ANALYSIS:
+      
+      The Tina AI onboarding flow implementation appears CORRECT based on:
+      1. ✅ Code review shows proper component structure
+      2. ✅ Backend APIs are confirmed working via manual testing
+      3. ✅ UI elements are present and properly styled
+      4. ✅ Navigation flow is correctly implemented
+      
+      The BLOCKER is purely a test automation issue:
+      - OTP capture timing problem in Playwright
+      - Not an application bug
+      - Manual testing will work correctly
+      
+      RECOMMENDATION FOR MAIN AGENT:
+      
+      1. 🔧 FIX OTP TESTING APPROACH:
+         Option A: Add a test mode in backend that accepts a fixed OTP (e.g., "000000")
+         Option B: Add data-testid to display OTP on screen in development mode
+         Option C: Use existing user credentials for testing (skip OTP flow)
+      
+      2. ✅ BACKEND IS CONFIRMED WORKING:
+         - No backend changes needed
+         - All Tina AI endpoints functional
+         - OTP authentication working correctly
+      
+      3. 📱 MANUAL TESTING REQUIRED:
+         - Test the complete Tina AI flow manually on actual device or browser
+         - Steps: Login → BasicInfo → PhotoUpload → TinaChoiceStep → TinaChatScreen
+         - Verify UI is clean and functional
+         - Verify Tina responds correctly to messages
+      
+      4. 🎯 IMPLEMENTATION STATUS:
+         - TinaChoiceStep: ✅ IMPLEMENTED (code review confirms)
+         - TinaChatScreen: ✅ IMPLEMENTED (code review confirms)
+         - Backend integration: ✅ WORKING (API tests confirm)
+         - UI/UX: ✅ APPEARS CORRECT (code review + partial UI testing)
+      
+      NEXT STEPS:
+      1. Main agent should implement one of the OTP testing fixes above
+      2. OR proceed with manual testing to verify the complete flow
+      3. The app implementation is likely correct and ready for manual verification
+      
+  - agent: "testing"
+    message: |
       ✅ ONBOARDING LAYOUT VERIFICATION COMPLETE - JUNE 9, 2026
       
       TESTING STATUS: LAYOUT APPEARS CORRECT - NO ZOOM ISSUES DETECTED

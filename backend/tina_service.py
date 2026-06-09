@@ -274,24 +274,38 @@ FIELD_CONVERSATION_STARTERS = {
 async def get_llm_response(messages: List[Dict[str, str]], user_name: str = "") -> str:
     """Get response from LLM (GPT-4o via Emergent)"""
     try:
-        from emergentintegrations.llm.chat import LlmChat
+        from emergentintegrations.llm.chat import LlmChat, UserMessage
         
-        # Initialize chat with model
-        chat = LlmChat.with_model("gpt-4o")
+        EMERGENT_LLM_KEY = os.getenv("EMERGENT_LLM_KEY")
         
-        # Add system prompt
+        # Build system message
         system_msg = TINA_SYSTEM_PROMPT
         if user_name:
             system_msg += f"\n\nThe user's name is {user_name}. Use it occasionally to make the conversation personal."
         
-        chat.add_message("system", system_msg)
-        
-        # Add conversation history
+        # Build conversation context
+        context_parts = [system_msg, "\n\nConversation so far:"]
         for msg in messages:
-            chat.add_message(msg["role"], msg["content"])
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if role == "system":
+                context_parts.append(f"\n[Context: {content}]")
+            elif role == "user":
+                context_parts.append(f"\nUser: {content}")
+            elif role == "assistant":
+                context_parts.append(f"\nTina: {content}")
         
-        # Get response
-        response = await chat.chat()
+        full_prompt = "".join(context_parts) + "\n\nGenerate Tina's next response:"
+        
+        # Initialize chat with correct syntax
+        chat = LlmChat(
+            api_key=EMERGENT_LLM_KEY,
+            session_id=f"tina_{user_name or 'user'}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}",
+            system_message="You are Tina, a friendly AI assistant."
+        ).with_model("openai", "gpt-4o")
+        
+        # Send message and get response (await the async call)
+        response = await chat.send_message(UserMessage(text=full_prompt))
         return response
         
     except Exception as e:
@@ -501,7 +515,7 @@ def get_field_mappings(field: str) -> Dict[str, Any]:
 
 async def get_tina_session(user_id: str) -> Dict[str, Any]:
     """Get or create Tina conversation session."""
-    if not _db:
+    if _db is None:
         return create_empty_session(user_id)
     
     try:
@@ -530,7 +544,7 @@ def create_empty_session(user_id: str) -> Dict[str, Any]:
 
 async def save_tina_session(session: Dict[str, Any]):
     """Save Tina session to database."""
-    if not _db:
+    if _db is None:
         return
     
     try:
@@ -772,7 +786,7 @@ async def get_collected_profile_data(user_id: str) -> Dict[str, Any]:
 
 async def clear_tina_session(user_id: str):
     """Clear Tina session for a user."""
-    if _db:
+    if _db is not None:
         try:
             await _db.tina_sessions.delete_one({"user_id": user_id})
         except Exception as e:
