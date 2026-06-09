@@ -58,6 +58,17 @@ from chat_service import (
     set_chat_db,
 )
 
+# Import Tina AI service for conversational profile building
+from tina_service import (
+    set_tina_db,
+    process_tina_message,
+    get_tina_greeting,
+    get_missing_fields,
+    get_collected_profile_data,
+    clear_tina_session,
+    PROFILE_FIELDS,
+)
+
 # Import picture service for profile photos
 from picture_service import (
     upload_picture_to_storage,
@@ -2889,6 +2900,108 @@ async def api_init_mock_conversations(user_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# =============================================
+# Tina AI Profile Builder API Endpoints
+# =============================================
+
+class TinaChatRequest(BaseModel):
+    """Request model for Tina chat"""
+    user_id: str
+    user_name: Optional[str] = ""
+    message: str = ""
+    selected_option: Optional[str] = None
+    selected_options: Optional[List[str]] = None
+    selected_movies: Optional[List[Dict[str, Any]]] = None
+
+
+@api_router.post("/tina/chat")
+async def tina_chat_endpoint(req: TinaChatRequest):
+    """
+    Chat with Tina AI for conversational profile building.
+    
+    Returns Tina's response along with:
+    - Options to show as chips (if applicable)
+    - Whether to show movie picker
+    - Collected field info
+    - Profile completion percentage
+    """
+    try:
+        result = await process_tina_message(
+            user_id=req.user_id,
+            user_message=req.message,
+            user_name=req.user_name or "",
+            selected_option=req.selected_option,
+            selected_options=req.selected_options,
+            selected_movies=req.selected_movies,
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Tina chat error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.get("/tina/greeting")
+async def tina_greeting_endpoint(user_name: str = ""):
+    """Get Tina's initial greeting message."""
+    try:
+        greeting = await get_tina_greeting(user_name)
+        return {"success": True, "greeting": greeting}
+    except Exception as e:
+        logger.error(f"Tina greeting error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.get("/tina/missing-fields/{user_id}")
+async def tina_missing_fields_endpoint(user_id: str):
+    """Get list of profile fields not yet collected by Tina."""
+    try:
+        missing = await get_missing_fields(user_id)
+        return {"success": True, "missing_fields": missing, "count": len(missing)}
+    except Exception as e:
+        logger.error(f"Get missing fields error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.get("/tina/profile-data/{user_id}")
+async def tina_profile_data_endpoint(user_id: str):
+    """Get all profile data collected by Tina."""
+    try:
+        data = await get_collected_profile_data(user_id)
+        return {"success": True, "profile_data": data}
+    except Exception as e:
+        logger.error(f"Get Tina profile data error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.delete("/tina/session/{user_id}")
+async def tina_clear_session_endpoint(user_id: str):
+    """Clear Tina session for a user (start fresh)."""
+    try:
+        await clear_tina_session(user_id)
+        return {"success": True, "message": "Tina session cleared"}
+    except Exception as e:
+        logger.error(f"Clear Tina session error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.get("/tina/field-options")
+async def tina_field_options_endpoint():
+    """Get all profile fields and their options (for reference)."""
+    try:
+        fields = {}
+        for field_name, config in PROFILE_FIELDS.items():
+            fields[field_name] = {
+                "type": config.get("type"),
+                "options": config.get("options", []),
+                "optional": config.get("optional", False),
+                "priority": config.get("priority", 100),
+            }
+        return {"success": True, "fields": fields}
+    except Exception as e:
+        logger.error(f"Get field options error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # Include router after all routes are defined
 app.include_router(api_router)
 
@@ -2923,6 +3036,10 @@ async def startup_event():
     # Pass MongoDB db to chat service for message persistence
     set_chat_db(db)
     logger.info("Chat service connected to MongoDB")
+    
+    # Pass MongoDB db to Tina AI service
+    set_tina_db(db)
+    logger.info("Tina AI service connected to MongoDB")
 
 
 @app.on_event("shutdown")

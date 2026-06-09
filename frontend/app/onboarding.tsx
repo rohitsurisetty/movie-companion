@@ -5,7 +5,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, BORDER_RADIUS } from '../src/theme';
 import { ProfileData, initialProfileData } from '../src/types';
-import { saveProfile, setOnboardingComplete } from '../src/store';
+import { saveProfile, setOnboardingComplete, getUserId } from '../src/store';
 import SelectionStep from '../src/components/SelectionStep';
 import BasicInfoStep from '../src/components/BasicInfoStep';
 import TopMoviesStep from '../src/components/TopMoviesStep';
@@ -14,12 +14,34 @@ import ProfilePreviewStep from '../src/components/ProfilePreviewStep';
 import PublicProfilePreviewStep from '../src/components/PublicProfilePreviewStep';
 import ModeSelectionStep from '../src/components/ModeSelectionStep';
 import PhotoUploadStep from '../src/components/PhotoUploadStep';
+import TinaChoiceStep from '../src/components/TinaChoiceStep';
+import TinaChatScreen from '../src/components/TinaChatScreen';
 
-const TOTAL_STEPS = 14; // Added PhotoUpload step after Basic Info
+const API_BASE = process.env.EXPO_PUBLIC_API_URL || '';
+
+// Step indices (Tina choice is now step 2)
+const STEP_BASIC_INFO = 0;
+const STEP_PHOTO_UPLOAD = 1;
+const STEP_TINA_CHOICE = 2;
+const STEP_TINA_CHAT = -1; // Special step for Tina chat screen
+const STEP_LOOKING_FOR = 3;
+const STEP_PARTNER_PREF = 4;
+const STEP_LANGUAGES = 5;
+const STEP_MOVIE_FREQ = 6;
+const STEP_OTT_THEATRE = 7;
+const STEP_FILM_LANG = 8;
+const STEP_GENRES = 9;
+const STEP_TOP_MOVIES = 10;
+const STEP_OPTIONAL = 11;
+const STEP_PREVIEW = 12;
+const STEP_PUBLIC_PREVIEW = 13;
+const STEP_MODE = 14;
+
+const TOTAL_STEPS = 15; // Now includes Tina choice step
 
 const STEP_LABELS = [
-  'Basic Info', 'Add Photos', 'Looking For', 'Want to Meet', 'Languages',
-  'Movie Frequency', 'OTT / Theatre', 'Film Languages', 'Genres',
+  'Basic Info', 'Add Photos', 'Create Profile', 'Looking For', 'Want to Meet', 
+  'Languages', 'Movie Frequency', 'OTT / Theatre', 'Film Languages', 'Genres',
   'Top Movies', 'Optional Info', 'Preview', 'Public Preview', 'Mode',
 ];
 
@@ -32,43 +54,43 @@ type SelectionConfig = {
   field: keyof ProfileData;
 };
 
-// Selection configs now start at step 2 (after BasicInfo at 0 and PhotoUpload at 1)
+// Selection configs now start at step 3 (after BasicInfo, PhotoUpload, TinaChoice)
 const SELECTION_CONFIGS: Record<number, SelectionConfig> = {
-  2: {
+  3: {
     title: 'What are you looking for?',
     subtitle: 'Select all that apply',
     options: ['Casual', 'Friendship', 'Serious relationship', 'Exploring'],
     multiSelect: true, displayAs: 'chips', field: 'relationshipIntent',
   },
-  3: {
+  4: {
     title: 'Who do you want to meet?',
     subtitle: 'This helps us find better matches for you',
     options: ['Men', 'Women', 'Anyone'],
     multiSelect: false, displayAs: 'chips', field: 'partnerPreference',
   },
-  4: {
+  5: {
     title: 'Languages you speak',
     subtitle: 'Select all that apply',
     options: ['English', 'Hindi', 'Telugu', 'Tamil', 'Kannada', 'Malayalam', 'Bengali', 'Marathi', 'Gujarati', 'Punjabi', 'Urdu'],
     multiSelect: true, displayAs: 'chips', field: 'languagesSpoken',
   },
-  5: {
+  6: {
     title: 'How often do you watch movies?',
     options: ['More than twice a week', 'Twice a week', 'Once a week', 'Twice a month', 'Once a month', 'Rarely'],
     multiSelect: false, displayAs: 'list', field: 'movieFrequency',
   },
-  6: {
+  7: {
     title: 'What describes you more?',
     options: ['OTT Person', 'Theatre Person', 'Both', 'None'],
     multiSelect: false, displayAs: 'chips', field: 'ottTheatre',
   },
-  7: {
+  8: {
     title: 'Languages of films you watch',
     subtitle: 'Select all that apply',
     options: ['Hindi', 'English', 'Telugu', 'Tamil', 'Malayalam', 'Kannada', 'Korean', 'Others'],
     multiSelect: true, displayAs: 'language-tiles', field: 'filmLanguages',
   },
-  8: {
+  9: {
     title: 'Your favourite genres',
     subtitle: 'Select all that apply',
     options: ['Action', 'Romance', 'Comedy', 'Thriller', 'Horror', 'Sci-Fi', 'Drama', 'Documentary'],
@@ -80,27 +102,135 @@ export default function OnboardingScreen() {
   const router = useRouter();
   const [step, setStep] = useState(0);
   const [data, setData] = useState<ProfileData>(initialProfileData);
+  const [showTinaChat, setShowTinaChat] = useState(false);
+  const [tinaCollectedFields, setTinaCollectedFields] = useState<string[]>([]);
+  const [userId, setUserId] = useState<string>('');
+
+  // Get user ID on mount
+  useEffect(() => {
+    (async () => {
+      const id = await getUserId();
+      setUserId(id || '');
+    })();
+  }, []);
 
   const updateField = (field: string, value: any) => {
     setData(prev => ({ ...prev, [field]: value }));
   };
 
+  // Merge Tina-collected data into profile
+  const mergeTinaData = (tinaData: Partial<ProfileData>) => {
+    const collected: string[] = [];
+    
+    Object.entries(tinaData).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') {
+        updateField(key, value);
+        collected.push(key);
+      }
+    });
+    
+    setTinaCollectedFields(collected);
+  };
+
+  // Check if a field was collected by Tina
+  const isFieldCollectedByTina = (field: string): boolean => {
+    return tinaCollectedFields.includes(field);
+  };
+
+  // Check if a selection step should be skipped (already collected by Tina)
+  const shouldSkipSelectionStep = (stepIdx: number): boolean => {
+    const config = SELECTION_CONFIGS[stepIdx];
+    if (!config) return false;
+    return isFieldCollectedByTina(config.field);
+  };
+
+  // Find next step that needs to be shown (skip Tina-collected fields)
+  const findNextStep = (currentStep: number): number => {
+    let next = currentStep + 1;
+    
+    // Skip selection steps that were already collected by Tina
+    while (next >= STEP_LOOKING_FOR && next <= STEP_GENRES && shouldSkipSelectionStep(next)) {
+      next++;
+    }
+    
+    // Skip TopMovies if already collected
+    if (next === STEP_TOP_MOVIES && isFieldCollectedByTina('topMovies')) {
+      next++;
+    }
+    
+    // Skip Mode selection if already collected
+    if (next === STEP_MODE && isFieldCollectedByTina('movieBuddyMode') && isFieldCollectedByTina('movieDateMode')) {
+      next++;
+    }
+    
+    return next;
+  };
+
   const handleNext = () => {
-    if (step === TOTAL_STEPS - 1) {
+    const nextStep = findNextStep(step);
+    
+    if (nextStep >= TOTAL_STEPS) {
       handleFinish();
     } else {
-      setStep(step + 1);
+      setStep(nextStep);
     }
   };
 
   const handleBack = () => {
-    if (step > 0) setStep(step - 1);
+    if (step > 0) {
+      // Find previous non-skipped step
+      let prev = step - 1;
+      while (prev >= STEP_LOOKING_FOR && prev <= STEP_GENRES && shouldSkipSelectionStep(prev)) {
+        prev--;
+      }
+      if (prev === STEP_TINA_CHOICE && tinaCollectedFields.length > 0) {
+        // Skip Tina choice if already used
+        prev = STEP_PHOTO_UPLOAD;
+      }
+      setStep(Math.max(0, prev));
+    }
   };
 
   const handleFinish = async () => {
     await saveProfile(data);
     await setOnboardingComplete();
     router.replace('/success');
+  };
+
+  // Tina handlers
+  const handleChatWithTina = () => {
+    setShowTinaChat(true);
+  };
+
+  const handleContinueManually = () => {
+    handleNext(); // Go to next step (Looking For)
+  };
+
+  const handleTinaComplete = (tinaData: Partial<ProfileData>) => {
+    mergeTinaData(tinaData);
+    setShowTinaChat(false);
+    
+    // Jump to first uncollected step or finish
+    const nextStep = findNextStep(STEP_TINA_CHOICE);
+    if (nextStep >= TOTAL_STEPS) {
+      handleFinish();
+    } else {
+      setStep(nextStep);
+    }
+  };
+
+  const handleTinaExit = (tinaData: Partial<ProfileData>) => {
+    mergeTinaData(tinaData);
+    setShowTinaChat(false);
+    
+    // Check if there are remaining fields
+    const nextStep = findNextStep(STEP_TINA_CHOICE);
+    if (nextStep < TOTAL_STEPS) {
+      // Show "Few more info required" - go to next uncollected step
+      setStep(nextStep);
+    } else {
+      handleFinish();
+    }
   };
 
   // Validation function - all selection steps are mandatory
@@ -117,36 +247,59 @@ export default function OnboardingScreen() {
     return val !== undefined && val !== null && val !== '';
   };
 
-  // Steps 0 (BasicInfo), 1 (PhotoUpload), 9 (TopMovies), 10 (OptionalProfile), 11 (ProfilePreview), 12 (PublicPreview), 13 (ModeSelection) have their own buttons
-  const STEPS_WITH_OWN_BUTTON = [0, 1, 9, 10, 11, 12, 13];
+  // Steps with their own buttons
+  const STEPS_WITH_OWN_BUTTON = [0, 1, 2, 10, 11, 12, 13, 14];
   const showSharedButton = !STEPS_WITH_OWN_BUTTON.includes(step);
 
   // Go back to edit step from public preview
   const handleEditFromPreview = () => {
-    setStep(11); // Go back to ProfilePreviewStep (visibility toggles)
+    setStep(STEP_PREVIEW);
   };
 
   // Handle photo upload completion
   const handlePhotoUploadComplete = (uploadedPictures: string[]) => {
-    // Store pictures in profile data
     updateField('uploadedPictures', uploadedPictures);
     handleNext();
   };
 
+  // If showing Tina chat, render it full-screen
+  if (showTinaChat) {
+    return (
+      <TinaChatScreen
+        userId={userId}
+        userName={data.name || ''}
+        onComplete={handleTinaComplete}
+        onExit={handleTinaExit}
+      />
+    );
+  }
+
   const renderStep = () => {
     // Step 0: Basic Info
-    if (step === 0) {
+    if (step === STEP_BASIC_INFO) {
       return <BasicInfoStep data={data} onUpdate={updateField} onNext={handleNext} />;
     }
-    // Step 1: Photo Upload (NEW - right after Basic Info)
-    if (step === 1) {
+    // Step 1: Photo Upload
+    if (step === STEP_PHOTO_UPLOAD) {
       return <PhotoUploadStep onNext={handlePhotoUploadComplete} />;
     }
-    // Steps 2-8: Selection Steps (shifted from 1-7)
-    if (step >= 2 && step <= 8) {
+    // Step 2: Tina Choice (NEW)
+    if (step === STEP_TINA_CHOICE) {
+      return (
+        <TinaChoiceStep 
+          userName={data.name || ''}
+          onChatWithTina={handleChatWithTina}
+          onContinueManually={handleContinueManually}
+        />
+      );
+    }
+    // Steps 3-9: Selection Steps
+    if (step >= STEP_LOOKING_FOR && step <= STEP_GENRES) {
       const config = SELECTION_CONFIGS[step];
-      const showOthersInput = step === 7; // Film languages (was step 6)
-      const showVisibilityToggle = step === 3; // Who do you want to meet? (was step 2)
+      if (!config) return null;
+      
+      const showOthersInput = step === STEP_FILM_LANG;
+      const showVisibilityToggle = step === STEP_PARTNER_PREF;
       return (
         <SelectionStep
           title={config.title}
@@ -165,28 +318,42 @@ export default function OnboardingScreen() {
         />
       );
     }
-    // Step 9: Top Movies (was step 8)
-    if (step === 9) {
+    // Step 10: Top Movies
+    if (step === STEP_TOP_MOVIES) {
       return <TopMoviesStep data={data} onUpdate={updateField} onNext={handleNext} />;
     }
-    // Step 10: Optional Profile (was step 9)
-    if (step === 10) {
+    // Step 11: Optional Profile
+    if (step === STEP_OPTIONAL) {
       return <OptionalProfileStep data={data} onUpdate={updateField} onNext={handleNext} />;
     }
-    // Step 11: Profile Preview (was step 10)
-    if (step === 11) {
+    // Step 12: Profile Preview
+    if (step === STEP_PREVIEW) {
       return <ProfilePreviewStep data={data} onUpdate={updateField} onNext={handleNext} />;
     }
-    // Step 12: Public Profile Preview (was step 11)
-    if (step === 12) {
+    // Step 13: Public Profile Preview
+    if (step === STEP_PUBLIC_PREVIEW) {
       return <PublicProfilePreviewStep data={data} onEdit={handleEditFromPreview} onContinue={handleNext} />;
     }
-    // Step 13: Mode Selection (was step 12)
-    if (step === 13) {
+    // Step 14: Mode Selection
+    if (step === STEP_MODE) {
       return <ModeSelectionStep data={data} onUpdate={updateField} onNext={handleNext} />;
     }
     return null;
   };
+
+  // Calculate display step for progress (excluding Tina chat)
+  const getDisplayStep = () => {
+    if (step <= STEP_TINA_CHOICE) return step;
+    // Account for skipped steps
+    let displayed = step;
+    for (let i = STEP_LOOKING_FOR; i < step; i++) {
+      if (shouldSkipSelectionStep(i)) displayed--;
+    }
+    return displayed;
+  };
+
+  // Show "Few more info" header when coming back from Tina with partial data
+  const showPartialHeader = tinaCollectedFields.length > 0 && step > STEP_TINA_CHOICE;
 
   return (
     <SafeAreaView style={styles.container} testID="onboarding-screen">
@@ -199,7 +366,12 @@ export default function OnboardingScreen() {
         ) : (
           <View style={styles.backPlaceholder} />
         )}
-        <Text style={styles.stepLabel}>{STEP_LABELS[step]}</Text>
+        <View style={styles.headerCenter}>
+          {showPartialHeader && (
+            <Text style={styles.partialHeader}>Few more details needed</Text>
+          )}
+          <Text style={styles.stepLabel}>{STEP_LABELS[step] || 'Profile'}</Text>
+        </View>
         <View style={styles.backPlaceholder} />
       </View>
 
@@ -215,7 +387,7 @@ export default function OnboardingScreen() {
         {renderStep()}
       </View>
 
-      {/* Shared Continue Button (for selection steps 1-7) */}
+      {/* Shared Continue Button (for selection steps) */}
       {showSharedButton && (
         <View style={styles.footer}>
           <TouchableOpacity
@@ -237,6 +409,16 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: SPACING.m, paddingVertical: SPACING.s,
+  },
+  headerCenter: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  partialHeader: {
+    fontSize: 12,
+    color: COLORS.primary,
+    fontWeight: '600',
+    marginBottom: 2,
   },
   backBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   backPlaceholder: { width: 44 },
