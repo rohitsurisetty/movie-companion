@@ -58,16 +58,6 @@ from chat_service import (
     set_chat_db,
 )
 
-# Import Tina AI agent service
-from tina_service import (
-    get_tina_response,
-    save_tina_profile_data,
-    get_tina_profile_data,
-    get_missing_fields,
-    get_tina_greeting,
-    set_tina_db,
-)
-
 # Import picture service for profile photos
 from picture_service import (
     upload_picture_to_storage,
@@ -2899,96 +2889,6 @@ async def api_init_mock_conversations(user_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# =============================================
-# Tina AI Agent API Endpoints
-# =============================================
-
-class TinaChatRequest(BaseModel):
-    """Request model for Tina chat"""
-    user_id: str
-    message: str
-    conversation_history: List[Dict[str, str]] = []
-    current_profile_data: Dict[str, Any] = {}
-
-
-class TinaChatResponse(BaseModel):
-    """Response model for Tina chat"""
-    response: str
-    updated_profile_data: Dict[str, Any]
-    is_conversation_ended: bool
-    greeting: Optional[str] = None
-
-
-@api_router.post("/tina/chat")
-async def tina_chat_endpoint(req: TinaChatRequest):
-    """Chat with Tina AI agent for profile building"""
-    try:
-        response_text, updated_data, is_ended = await get_tina_response(
-            user_id=req.user_id,
-            user_message=req.message,
-            conversation_history=req.conversation_history,
-            current_profile_data=req.current_profile_data
-        )
-        
-        # Save profile data if conversation ended
-        if is_ended:
-            await save_tina_profile_data(req.user_id, updated_data)
-        
-        return TinaChatResponse(
-            response=response_text,
-            updated_profile_data=updated_data,
-            is_conversation_ended=is_ended
-        )
-        
-    except Exception as e:
-        logger.error(f"Tina chat error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@api_router.get("/tina/greeting/{user_name}")
-async def tina_greeting_endpoint(user_name: str = ""):
-    """Get Tina's greeting message"""
-    try:
-        greeting = get_tina_greeting(user_name)
-        return {"success": True, "greeting": greeting}
-    except Exception as e:
-        logger.error(f"Tina greeting error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@api_router.get("/tina/profile/{user_id}")
-async def get_tina_profile_endpoint(user_id: str):
-    """Get profile data collected by Tina"""
-    try:
-        data = await get_tina_profile_data(user_id)
-        return {"success": True, "profile_data": data}
-    except Exception as e:
-        logger.error(f"Get Tina profile error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@api_router.post("/tina/save/{user_id}")
-async def save_tina_profile_endpoint(user_id: str, profile_data: Dict[str, Any]):
-    """Save profile data collected by Tina"""
-    try:
-        success = await save_tina_profile_data(user_id, profile_data)
-        return {"success": success}
-    except Exception as e:
-        logger.error(f"Save Tina profile error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@api_router.get("/tina/missing-fields/{user_id}")
-async def get_missing_fields_endpoint(user_id: str):
-    """Get list of profile fields not yet collected by Tina"""
-    try:
-        missing = await get_missing_fields(user_id)
-        return {"success": True, "missing_fields": missing}
-    except Exception as e:
-        logger.error(f"Get missing fields error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 # Include router after all routes are defined
 app.include_router(api_router)
 
@@ -3023,10 +2923,6 @@ async def startup_event():
     # Pass MongoDB db to chat service for message persistence
     set_chat_db(db)
     logger.info("Chat service connected to MongoDB")
-    
-    # Pass MongoDB db to Tina AI agent service
-    set_tina_db(db)
-    logger.info("Tina AI service connected to MongoDB")
 
 
 @app.on_event("shutdown")
