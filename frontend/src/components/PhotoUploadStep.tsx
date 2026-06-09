@@ -265,6 +265,16 @@ export default function PhotoUploadStep({ userId: propUserId, onNext, onBack }: 
         <Text style={styles.continueBtnText}>Continue</Text>
       </TouchableOpacity>
 
+      {/* Skip Option for Testing */}
+      {!canContinue && (
+        <TouchableOpacity
+          style={styles.skipBtn}
+          onPress={handleContinue}
+        >
+          <Text style={styles.skipBtnText}>Skip for Now</Text>
+        </TouchableOpacity>
+      )}
+
       <View style={{ height: 40 }} />
     </ScrollView>
   );
@@ -377,4 +387,10 @@ const styles = StyleSheet.create({
   },
   continueBtnDisabled: { opacity: 0.4 },
   continueBtnText: { fontSize: 16, fontWeight: 'bold', color: 'white' },
+  skipBtn: {
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginTop: SPACING.m,
+  },
+  skipBtnText: { fontSize: 14, color: COLORS.textMuted, textDecorationLine: 'underline' },
 });

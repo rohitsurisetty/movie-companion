@@ -10,7 +10,7 @@ import { COLORS, SPACING, BORDER_RADIUS } from '../theme';
 import { ProfileData } from '../types';
 
 const { width } = Dimensions.get('window');
-const API_BASE = process.env.EXPO_PUBLIC_API_URL || '';
+const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || process.env.EXPO_PUBLIC_API_URL || '';
 
 // Tina avatar
 const TINA_AVATAR = 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&h=200&fit=crop&crop=face';

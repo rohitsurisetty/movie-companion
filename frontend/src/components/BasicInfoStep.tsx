@@ -299,11 +299,19 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
                   nestedScrollEnabled
                 >
                   {DAYS.slice(0, maxDays).map(d => (
-                    <View key={d} style={styles.wheelItem}>
+                    <TouchableOpacity 
+                      key={d} 
+                      style={styles.wheelItem}
+                      onPress={() => {
+                        setSelectedDay(d);
+                        dayScrollRef.current?.scrollTo({ y: (d - 1) * ITEM_HEIGHT, animated: true });
+                        validateAndSetDate(d, selectedMonth, selectedYear);
+                      }}
+                    >
                       <Text style={[styles.wheelItemText, selectedDay === d && styles.wheelItemTextActive]}>
                         {String(d).padStart(2, '0')}
                       </Text>
-                    </View>
+                    </TouchableOpacity>
                   ))}
                 </ScrollView>
               </View>
@@ -325,11 +333,22 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
                   nestedScrollEnabled
                 >
                   {MONTHS.map(m => (
-                    <View key={m.value} style={styles.wheelItem}>
+                    <TouchableOpacity 
+                      key={m.value} 
+                      style={styles.wheelItem}
+                      onPress={() => {
+                        setSelectedMonth(m.value);
+                        monthScrollRef.current?.scrollTo({ y: (m.value - 1) * ITEM_HEIGHT, animated: true });
+                        const maxDays = getMaxDays(m.value, selectedYear);
+                        const adjustedDay = Math.min(selectedDay, maxDays);
+                        setSelectedDay(adjustedDay);
+                        validateAndSetDate(adjustedDay, m.value, selectedYear);
+                      }}
+                    >
                       <Text style={[styles.wheelItemText, selectedMonth === m.value && styles.wheelItemTextActive]}>
                         {m.label}
                       </Text>
-                    </View>
+                    </TouchableOpacity>
                   ))}
                 </ScrollView>
               </View>
@@ -350,12 +369,23 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
                   contentContainerStyle={{ paddingVertical: ITEM_HEIGHT }}
                   nestedScrollEnabled
                 >
-                  {YEARS.map(y => (
-                    <View key={y} style={styles.wheelItem}>
+                  {YEARS.map((y, idx) => (
+                    <TouchableOpacity 
+                      key={y} 
+                      style={styles.wheelItem}
+                      onPress={() => {
+                        setSelectedYear(y);
+                        yearScrollRef.current?.scrollTo({ y: idx * ITEM_HEIGHT, animated: true });
+                        const maxDays = getMaxDays(selectedMonth, y);
+                        const adjustedDay = Math.min(selectedDay, maxDays);
+                        setSelectedDay(adjustedDay);
+                        validateAndSetDate(adjustedDay, selectedMonth, y);
+                      }}
+                    >
                       <Text style={[styles.wheelItemText, selectedYear === y && styles.wheelItemTextActive]}>
                         {y}
                       </Text>
-                    </View>
+                    </TouchableOpacity>
                   ))}
                 </ScrollView>
               </View>
