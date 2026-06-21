@@ -83,10 +83,10 @@ export default function GlobalTinaChatScreen({
       Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
       (e) => {
         setKeyboardHeight(e.endCoordinates.height);
-        // Scroll to show latest message when keyboard opens
+        // When keyboard opens, scroll to show latest message in visible area
         setTimeout(() => {
           scrollToLatestMessage();
-        }, 100);
+        }, 150);
       }
     );
     
@@ -101,18 +101,24 @@ export default function GlobalTinaChatScreen({
       keyboardWillShow.remove();
       keyboardWillHide.remove();
     };
-  }, []);
+  }, [scrollToLatestMessage]);
 
-  // Scroll to show the latest message in the middle of the screen
+  // Scroll to show the latest message - positioned so it's fully visible above keyboard
   const scrollToLatestMessage = useCallback(() => {
     if (messages.length > 0 && flatListRef.current) {
+      // Small delay to ensure layout is complete
       setTimeout(() => {
-        flatListRef.current?.scrollToIndex({
-          index: messages.length - 1,
-          animated: true,
-          viewPosition: 0.5, // 0.5 = center of the visible area
-        });
-      }, 100);
+        try {
+          flatListRef.current?.scrollToIndex({
+            index: messages.length - 1,
+            animated: true,
+            viewPosition: 0.3, // Position at 30% from top (visible above keyboard)
+          });
+        } catch (e) {
+          // Fallback
+          flatListRef.current?.scrollToEnd({ animated: true });
+        }
+      }, 50);
     }
   }, [messages.length]);
 
