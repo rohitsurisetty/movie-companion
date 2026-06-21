@@ -49,7 +49,7 @@ export default function GlobalTinaChatScreen({
   userProfile,
 }: Props) {
   const insets = useSafeAreaInsets();
-  const { isFieldCollected, markFieldAsCollected, markFieldAsAsked, getMissingFields } = useTina();
+  const { isFieldCollected, markFieldAsCollected, markFieldAsAsked, getMissingFields, state: tinaState } = useTina();
   
   // Initialize messages from existing
   const [messages, setMessages] = useState<Message[]>(() => {
@@ -57,7 +57,7 @@ export default function GlobalTinaChatScreen({
   });
   const [inputText, setInputText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
-  const [isLoading, setIsLoading] = useState(existingMessages.length === 0);
+  const [isLoading, setIsLoading] = useState(false);
   const [currentOptions, setCurrentOptions] = useState<{
     field: string;
     options: string[];
@@ -66,11 +66,12 @@ export default function GlobalTinaChatScreen({
   const [selectedOptions, setSelectedOptions] = useState<string[]>([]);
   const [showSendButton, setShowSendButton] = useState(false);
   const [currentDeepLink, setCurrentDeepLink] = useState<DeepLinkAction | null>(null);
+  const [hasGreetedThisSession, setHasGreetedThisSession] = useState(false);
   
   const flatListRef = useRef<FlatList>(null);
   const typingAnimation = useRef(new Animated.Value(0)).current;
   const messageAnimations = useRef<{ [key: string]: Animated.Value }>({});
-  const hasInitialized = useRef(false);
+  const mountedRef = useRef(true);
 
   // ========== HELPER FUNCTIONS ==========
 
@@ -110,17 +111,23 @@ export default function GlobalTinaChatScreen({
   // ========== API CALLS ==========
 
   const sendToTina = useCallback(async (userMessage: string) => {
+    if (!mountedRef.current) return;
+    
     setIsTyping(true);
 
     try {
       // Build context about what's already collected
       const collectedInfo: string[] = [];
       if (userProfile) {
+        if (userProfile.name) collectedInfo.push(`Name: ${userProfile.name}`);
         if (userProfile.genres?.length) collectedInfo.push(`Favorite genres: ${userProfile.genres.join(', ')}`);
-        if (userProfile.topMovies?.length) collectedInfo.push(`Top movies selected`);
-        if (userProfile.relationshipIntent) collectedInfo.push(`Looking for: ${userProfile.relationshipIntent}`);
+        if (userProfile.topMovies?.length) collectedInfo.push(`Has ${userProfile.topMovies.length} favorite movies`);
+        if (userProfile.relationshipIntent) collectedInfo.push(`Looking for: ${Array.isArray(userProfile.relationshipIntent) ? userProfile.relationshipIntent.join(', ') : userProfile.relationshipIntent}`);
         if (userProfile.languagesSpoken?.length) collectedInfo.push(`Languages: ${userProfile.languagesSpoken.join(', ')}`);
+        if (userProfile.filmLanguages?.length) collectedInfo.push(`Film languages: ${userProfile.filmLanguages.join(', ')}`);
       }
+
+      console.log('[GlobalTina] Sending message to Tina:', userMessage?.substring(0, 50));
 
       const response = await fetch(`${API_BASE}/api/tina/chat`, {
         method: 'POST',
@@ -129,14 +136,21 @@ export default function GlobalTinaChatScreen({
           user_id: userId,
           user_name: userName,
           message: userMessage,
-          is_onboarding_complete: isOnboardingComplete,
+          is_onboarding_complete: isOnboardingComplete || tinaState.onboardingStage === 'completed',
           collected_fields: collectedInfo,
+          conversation_context: messages.slice(-6).map(m => ({
+            role: m.isUser ? 'user' : 'assistant',
+            content: m.text
+          })),
         }),
       });
 
-      const data = await response.json();
+      if (!mountedRef.current) return;
 
-      if (data.success) {
+      const data = await response.json();
+      console.log('[GlobalTina] Received response:', data.success, data.response?.substring(0, 50));
+
+      if (data.success && data.response) {
         addMessage(data.response, false);
 
         // Handle options
@@ -160,92 +174,121 @@ export default function GlobalTinaChatScreen({
             markFieldAsCollected(field);
           });
         }
+      } else {
+        // Fallback if response is empty
+        addMessage("I'm here! What would you like to chat about? 😊", false);
       }
     } catch (error) {
-      console.error('[GlobalTina] Error:', error);
-      addMessage("Hmm, I got a bit distracted! Could you say that again? 😅", false);
+      console.error('[GlobalTina] Error sending message:', error);
+      if (mountedRef.current) {
+        addMessage("Hmm, I got a bit distracted! Could you say that again? 😅", false);
+      }
     } finally {
-      setIsTyping(false);
+      if (mountedRef.current) {
+        setIsTyping(false);
+      }
     }
-  }, [userId, userName, userProfile, isOnboardingComplete, addMessage, markFieldAsAsked, markFieldAsCollected]);
+  }, [userId, userName, userProfile, isOnboardingComplete, tinaState.onboardingStage, messages, addMessage, markFieldAsAsked, markFieldAsCollected]);
 
-  const initializeChat = useCallback(async () => {
-    if (hasInitialized.current) return;
-    hasInitialized.current = true;
-
+  // Fetch a proactive greeting from Tina
+  const fetchTinaGreeting = useCallback(async () => {
+    if (!mountedRef.current || hasGreetedThisSession) return;
+    
+    console.log('[GlobalTina] Fetching greeting, onboardingComplete:', isOnboardingComplete, tinaState.onboardingStage);
     setIsLoading(true);
 
     try {
       // Get collected fields from context to pass to backend
-      const collectedFieldsList = getMissingFields().length > 0 
-        ? ALL_PROFILE_FIELDS.filter(f => !getMissingFields().includes(f))
-        : [];
+      const missing = getMissingFields();
+      const collectedFieldsList = ALL_PROFILE_FIELDS.filter(f => !missing.includes(f));
       
-      // If we have existing messages, just fetch a welcome back message
-      if (existingMessages.length > 0) {
-        setMessages(existingMessages);
-        setIsLoading(false);
-        
-        // Fetch contextual welcome back with collected fields
-        const welcomeResponse = await fetch(`${API_BASE}/api/tina/welcome-back`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            user_id: userId,
-            user_name: userName,
-            is_onboarding_complete: isOnboardingComplete,
-            collected_fields: collectedFieldsList,
-          }),
-        });
+      const actuallyComplete = isOnboardingComplete || tinaState.onboardingStage === 'completed';
+      
+      console.log('[GlobalTina] Calling welcome-back API, collected fields:', collectedFieldsList.length, 'complete:', actuallyComplete);
+      
+      const welcomeResponse = await fetch(`${API_BASE}/api/tina/welcome-back`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: userId,
+          user_name: userName,
+          is_onboarding_complete: actuallyComplete,
+          collected_fields: collectedFieldsList,
+        }),
+      });
 
-        if (welcomeResponse.ok) {
-          const welcomeData = await welcomeResponse.json();
-          if (welcomeData.success && welcomeData.message) {
-            setTimeout(() => {
+      if (!mountedRef.current) return;
+
+      if (welcomeResponse.ok) {
+        const welcomeData = await welcomeResponse.json();
+        console.log('[GlobalTina] Welcome response:', welcomeData.success, welcomeData.message?.substring(0, 50));
+        
+        if (welcomeData.success && welcomeData.message) {
+          // Add a small delay for natural feel
+          setTimeout(() => {
+            if (mountedRef.current) {
               addMessage(welcomeData.message, false);
+              setHasGreetedThisSession(true);
+              
               if (welcomeData.show_options) {
                 setCurrentOptions(welcomeData.show_options);
               }
-            }, 300);
+            }
+          }, 300);
+        }
+      } else {
+        // Fallback greeting
+        setTimeout(() => {
+          if (mountedRef.current) {
+            const greeting = actuallyComplete
+              ? `Hey ${userName || 'there'}! 💫 Good to see you! What's on your mind?`
+              : `Hey ${userName || 'there'}! 👋 Let's continue setting up your profile!`;
+            addMessage(greeting, false);
+            setHasGreetedThisSession(true);
           }
-        }
-        return;
+        }, 300);
       }
-
-      // Fresh start - get greeting
-      const greetingResponse = await fetch(
-        `${API_BASE}/api/tina/greeting?user_name=${encodeURIComponent(userName)}`
-      );
-
-      if (greetingResponse.ok) {
-        const data = await greetingResponse.json();
-        if (data.success && data.greeting) {
-          addMessage(data.greeting, false);
-          setIsLoading(false);
-          setTimeout(() => sendToTina(''), 1200);
-          return;
-        }
-      }
-
-      // Fallback greeting
-      addMessage(`Hey ${userName || 'there'}! 💫 I'm Tina, your matchmaker. How can I help you today?`, false);
-      setIsLoading(false);
-
     } catch (error) {
       console.error('[GlobalTina] Init error:', error);
-      addMessage(`Hey ${userName || 'there'}! 💫 I'm Tina. What can I help you with?`, false);
-      setIsLoading(false);
+      setTimeout(() => {
+        if (mountedRef.current) {
+          addMessage(`Hey ${userName || 'there'}! 💫 What can I help you with?`, false);
+          setHasGreetedThisSession(true);
+        }
+      }, 300);
+    } finally {
+      if (mountedRef.current) {
+        setIsLoading(false);
+      }
     }
-  }, [existingMessages, userId, userName, isOnboardingComplete, addMessage, sendToTina]);
+  }, [userId, userName, isOnboardingComplete, tinaState.onboardingStage, hasGreetedThisSession, getMissingFields, addMessage]);
 
   // ========== EFFECTS ==========
 
+  // Track component mount state
   useEffect(() => {
-    initializeChat();
+    mountedRef.current = true;
+    console.log('[GlobalTina] Component mounted, onboardingComplete:', isOnboardingComplete, 'stage:', tinaState.onboardingStage);
+    
     return () => {
-      hasInitialized.current = false;
+      mountedRef.current = false;
+      console.log('[GlobalTina] Component unmounting');
     };
   }, []);
+
+  // Fetch greeting when modal opens (always greet on each open)
+  useEffect(() => {
+    // Only fetch greeting if we don't have a recent message from Tina
+    const lastMessage = messages[messages.length - 1];
+    const lastMessageIsOld = !lastMessage || 
+      (lastMessage.isUser) || // Last message was from user, Tina should respond
+      (Date.now() - new Date(lastMessage.timestamp).getTime() > 5 * 60 * 1000); // Older than 5 minutes
+    
+    if (!hasGreetedThisSession && lastMessageIsOld) {
+      console.log('[GlobalTina] Triggering greeting fetch');
+      fetchTinaGreeting();
+    }
+  }, [hasGreetedThisSession, fetchTinaGreeting]);
 
   // Sync messages to parent
   useEffect(() => {

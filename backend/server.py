@@ -2931,6 +2931,9 @@ class TinaChatRequest(BaseModel):
     selected_option: Optional[str] = None
     selected_options: Optional[List[str]] = None
     selected_movies: Optional[List[Dict[str, Any]]] = None
+    is_onboarding_complete: bool = False
+    collected_fields: Optional[List[str]] = None
+    conversation_context: Optional[List[Dict[str, str]]] = None
 
 
 @api_router.post("/tina/chat")
@@ -2952,6 +2955,8 @@ async def tina_chat_endpoint(req: TinaChatRequest):
             selected_option=req.selected_option,
             selected_options=req.selected_options,
             selected_movies=req.selected_movies,
+            is_onboarding_complete=req.is_onboarding_complete,
+            conversation_context=req.conversation_context,
         )
         return result
     except Exception as e:

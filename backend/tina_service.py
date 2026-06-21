@@ -612,12 +612,15 @@ async def process_tina_message(
     selected_option: Optional[str] = None,
     selected_options: Optional[List[str]] = None,
     selected_movies: Optional[List[Dict]] = None,
+    is_onboarding_complete: bool = False,
+    conversation_context: List[Dict] = None,
 ) -> Dict[str, Any]:
     """
     Process a message in the Tina conversation.
     
     Returns:
         {
+            "success": bool,
             "response": str,  # Tina's response
             "show_options": Optional[Dict],  # Options to show as chips
             "show_movie_picker": bool,  # Whether to show movie picker
@@ -631,6 +634,7 @@ async def process_tina_message(
     session = await get_tina_session(user_id)
     
     result = {
+        "success": True,
         "response": "",
         "show_options": None,
         "show_movie_picker": False,
@@ -689,11 +693,77 @@ async def process_tina_message(
             # Need clarification
             session["awaiting_clarification"] = True
     
+    # Check if onboarding is complete - either from flag or all mandatory fields done
+    mandatory_fields = [f for f, c in PROFILE_FIELDS.items() if not c.get("optional", False)]
+    completed_count = len([f for f in mandatory_fields if f in session.get("completed_fields", [])])
+    actually_complete = is_onboarding_complete or completed_count >= len(mandatory_fields)
+    
     # Build conversation history for LLM
     history = session.get("conversation_history", [])
+    
+    # Add conversation context from frontend if provided
+    if conversation_context:
+        for ctx in conversation_context:
+            if ctx not in history:
+                history.append(ctx)
+    
     if user_message:
         history.append({"role": "user", "content": user_message})
     
+    # POST-ONBOARDING: Engage in free-form conversation
+    if actually_complete and user_message:
+        logger.info(f"Post-onboarding chat for user {user_id}: {user_message[:50]}...")
+        
+        # Build engaging conversation context
+        context = f"""
+You are Tina, a warm and playful matchmaker chatbot on a movie-based dating app.
+The user has completed their profile setup. Now you're just chatting!
+
+USER INFO:
+- Name: {user_name or 'friend'}
+
+YOUR PERSONALITY:
+- Warm, playful, curious, slightly cheeky
+- Like a fun friend who loves movies and dating talk
+- Use 1 emoji per message MAX
+- Keep messages SHORT (1-3 lines)
+- Be engaging and ask follow-up questions
+- React to what they say with personality
+
+TOPICS YOU CAN DISCUSS:
+- Movies, TV shows, cinema experiences
+- Dating advice, relationship talk
+- Fun questions about preferences
+- Movie recommendations
+- Their taste in movies and what it says about them
+- Fun movie trivia or hot takes
+
+User's message: {user_message}
+
+Recent conversation:
+{chr(10).join([f"{'User' if m.get('role')=='user' else 'Tina'}: {m.get('content','')[:100]}" for m in history[-4:]])}
+
+Generate a friendly, engaging response. Ask a follow-up question to keep the conversation going.
+DO NOT prefix with "Tina:" - just write the response directly.
+"""
+        
+        # Get LLM response for post-onboarding chat
+        tina_response = await get_llm_response([{"role": "system", "content": context}], user_name)
+        
+        # Clean up response
+        tina_response = tina_response.replace("Tina:", "").strip()
+        
+        result["response"] = tina_response
+        result["completion_percentage"] = 100
+        
+        # Update history
+        history.append({"role": "assistant", "content": tina_response})
+        session["conversation_history"] = history[-20:]
+        
+        await save_tina_session(session)
+        return result
+    
+    # ONBOARDING: Collect profile fields
     # Get next field to collect
     next_field = get_next_field_to_collect(session)
     
