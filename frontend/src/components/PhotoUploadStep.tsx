@@ -35,6 +35,7 @@ export default function PhotoUploadStep({ userId: propUserId, onNext, onBack }: 
   ]);
 
   const uploadedCount = pictures.filter(p => p.uri && p.uploaded).length;
+  const canContinue = uploadedCount >= 1;
 
   useEffect(() => {
     if (!propUserId) {
@@ -255,10 +256,11 @@ export default function PhotoUploadStep({ userId: propUserId, onNext, onBack }: 
         </Text>
       </View>
 
-      {/* Continue Button - Always enabled */}
+      {/* Continue Button - Always shown, enabled only when at least 1 photo */}
       <TouchableOpacity
-        style={styles.continueBtn}
+        style={[styles.continueBtn, !canContinue && styles.continueBtnDisabled]}
         onPress={handleContinue}
+        disabled={!canContinue}
       >
         <Text style={styles.continueBtnText}>Continue</Text>
       </TouchableOpacity>
@@ -373,5 +375,6 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.full,
     alignItems: 'center',
   },
+  continueBtnDisabled: { opacity: 0.4 },
   continueBtnText: { fontSize: 16, fontWeight: 'bold', color: 'white' },
 });
