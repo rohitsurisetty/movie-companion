@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback } from 'react';
+import React, { useEffect, useCallback, useState, useRef } from 'react';
 import {
   View,
   StyleSheet,
@@ -25,10 +25,21 @@ export default function TinaModal({ onNavigationRequest }: TinaModalProps) {
   const { state, closeTina, minimizeTina, userProfile, setMessages, addMessage } = useTina();
   const slideAnim = React.useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   const fadeAnim = React.useRef(new Animated.Value(0)).current;
+  
+  // Track session open count to trigger new greeting each time modal opens
+  const [sessionOpenCount, setSessionOpenCount] = useState(0);
+  const wasOpen = useRef(false);
 
-  // Animate modal in/out
+  // Animate modal in/out AND trigger new greeting on open
   useEffect(() => {
     if (state.isOpen) {
+      // Increment session count to trigger a new greeting
+      if (!wasOpen.current) {
+        setSessionOpenCount(prev => prev + 1);
+        console.log('[TinaModal] Modal opened - triggering new greeting session');
+      }
+      wasOpen.current = true;
+      
       Animated.parallel([
         Animated.spring(slideAnim, {
           toValue: 0,
@@ -43,6 +54,8 @@ export default function TinaModal({ onNavigationRequest }: TinaModalProps) {
         }),
       ]).start();
     } else {
+      wasOpen.current = false;
+      
       Animated.parallel([
         Animated.timing(slideAnim, {
           toValue: SCREEN_HEIGHT,
@@ -142,6 +155,7 @@ export default function TinaModal({ onNavigationRequest }: TinaModalProps) {
               onNavigationRequest={onNavigationRequest}
               isOnboardingComplete={state.isOnboardingComplete}
               userProfile={userProfile}
+              sessionOpenCount={sessionOpenCount}
             />
           </View>
         </SafeAreaView>

@@ -1052,10 +1052,28 @@ async def generate_welcome_back_message(
         # Find a topic we haven't asked yet
         available_topics = [t for t in POST_ONBOARDING_TOPICS if t["topic"] not in asked_topics]
         
+        # Always pick a fresh engaging greeting + question
+        import random
+        
+        # Varied opening greetings to make it feel personal
+        opening_greetings = [
+            f"Hey {name}! Look who's back 💕",
+            f"Oooh, {name}'s here! 🥰",
+            f"Well, well, well... {name}! 💫",
+            f"There you are, {name}! 😊",
+            f"Yay! {name}'s back! 🎉",
+            f"Hey you! Missed chatting with you 💭",
+            f"Oh hello, {name}! 👋",
+            f"Back for more? I like that, {name} 😏",
+            f"{name}! Perfect timing ✨",
+            f"Hey stranger! JK, it's my fave, {name} 💫",
+        ]
+        
+        greeting = random.choice(opening_greetings)
+        
         if available_topics:
-            import random
             chosen = random.choice(available_topics)
-            result["message"] = f"Hey {name}! 💫\n\n{chosen['question']}"
+            result["message"] = f"{greeting}\n\n{chosen['question']}"
             result["topic"] = chosen["topic"]
             
             # Save that we asked this topic
@@ -1063,17 +1081,23 @@ async def generate_welcome_back_message(
             session["asked_engagement_topics"] = asked_topics
             await save_tina_session(session)
         else:
-            # Asked all topics, generate something generic but warm
-            greetings = [
-                f"Hey {name}! Good to see you back 😊 What's on your mind?",
-                f"Welcome back! Anything exciting happening in your movie world? 🎬",
-                f"Hey there! Ready to chat about movies? 🍿",
-                f"Nice to see you again, {name}! What's up? 💫",
+            # Asked all topics, generate AI-powered response for variety
+            generic_questions = [
+                "What's the last movie that made you ugly cry? 🥹",
+                "Quick - name a movie you'd never admit to loving 😅",
+                "What movie do you wish you could watch for the first time again? 🎬",
+                "Got any movie plans this weekend? 🍿",
+                "What's your go-to comfort movie? The one you watch when you need a hug? 🤗",
+                "Movie hot take time - which beloved movie do you just not get? 😬",
+                "If you could live in any movie universe, which would you pick? 🌟",
+                "What movie made you fall in love with cinema? 💕",
+                "Popcorn or nachos at the theatre? This is important 🍿",
+                "Who would play you in a movie about your life? 🎭",
             ]
-            import random
-            result["message"] = random.choice(greetings)
             
-            # Reset topics so we can ask again
+            result["message"] = f"{greeting}\n\n{random.choice(generic_questions)}"
+            
+            # Reset topics so we can ask again next time
             session["asked_engagement_topics"] = []
             await save_tina_session(session)
     

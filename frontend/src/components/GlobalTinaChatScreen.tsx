@@ -37,6 +37,7 @@ interface Props {
   onNavigationRequest?: (destination: string, params?: any) => void;
   isOnboardingComplete?: boolean;
   userProfile?: UserProfileData | null;
+  sessionOpenCount?: number; // Triggers new greeting when incremented
 }
 
 export default function GlobalTinaChatScreen({
@@ -47,6 +48,7 @@ export default function GlobalTinaChatScreen({
   onNavigationRequest,
   isOnboardingComplete = false,
   userProfile,
+  sessionOpenCount = 0,
 }: Props) {
   const insets = useSafeAreaInsets();
   const { isFieldCollected, markFieldAsCollected, markFieldAsAsked, getMissingFields, state: tinaState } = useTina();
@@ -276,19 +278,27 @@ export default function GlobalTinaChatScreen({
     };
   }, []);
 
-  // Fetch greeting when modal opens (always greet on each open)
+  // CRITICAL: Fetch a NEW greeting EVERY TIME the modal opens (sessionOpenCount changes)
+  // Tina ALWAYS sends the first message - she initiates conversation every time
+  const lastSessionCount = useRef(0);
+  
   useEffect(() => {
-    // Only fetch greeting if we don't have a recent message from Tina
-    const lastMessage = messages[messages.length - 1];
-    const lastMessageIsOld = !lastMessage || 
-      (lastMessage.isUser) || // Last message was from user, Tina should respond
-      (Date.now() - new Date(lastMessage.timestamp).getTime() > 5 * 60 * 1000); // Older than 5 minutes
-    
-    if (!hasGreetedThisSession && lastMessageIsOld) {
-      console.log('[GlobalTina] Triggering greeting fetch');
-      fetchTinaGreeting();
+    // Only trigger when sessionOpenCount actually increases (modal opened fresh)
+    if (sessionOpenCount > lastSessionCount.current && sessionOpenCount > 0) {
+      console.log('[GlobalTina] New session detected! Fetching fresh greeting. Session:', sessionOpenCount);
+      lastSessionCount.current = sessionOpenCount;
+      
+      // Reset greeting state and fetch new one
+      setHasGreetedThisSession(false);
+      
+      // Small delay to ensure component is ready
+      setTimeout(() => {
+        if (mountedRef.current) {
+          fetchTinaGreeting();
+        }
+      }, 100);
     }
-  }, [hasGreetedThisSession, fetchTinaGreeting]);
+  }, [sessionOpenCount, fetchTinaGreeting]);
 
   // Sync messages to parent
   useEffect(() => {
