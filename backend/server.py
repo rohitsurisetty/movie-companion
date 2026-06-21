@@ -606,15 +606,15 @@ async def verify_otp(req: VerifyOTPRequest):
     
     if is_new_user:
         # Create new user
-        if not req.name:
-            raise HTTPException(status_code=400, detail="Name is required for new users")
-        
         user_id = f"user_{uuid.uuid4().hex[:12]}"
         session_token = f"session_{uuid.uuid4().hex}"
         
+        # Name is optional - can be set later during onboarding
+        user_name = req.name.strip() if req.name else ""
+        
         user_data = {
             "user_id": user_id,
-            "name": req.name.strip(),
+            "name": user_name,
             "picture": "",
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -630,7 +630,7 @@ async def verify_otp(req: VerifyOTPRequest):
         # Send welcome email
         send_mock_welcome_email(
             identifier if req.type == "email" else f"{identifier}@phone.filmcompanion.com",
-            req.name.strip()
+            user_name if user_name else "there"
         )
         
         logger.info(f"New user created: {user_id} via {req.type}: {identifier}")

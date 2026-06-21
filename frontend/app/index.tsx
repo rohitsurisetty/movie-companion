@@ -492,17 +492,6 @@ export default function AuthScreen() {
           </View>
 
           <View style={styles.formInputs}>
-            {isNewUser && (
-              <TextInput
-                style={styles.input}
-                placeholder="Your Name"
-                placeholderTextColor={COLORS.textMuted}
-                value={name}
-                onChangeText={setName}
-                testID="name-input"
-              />
-            )}
-            
             <TextInput
               style={[styles.input, styles.otpInput]}
               placeholder="Enter OTP"
@@ -554,17 +543,6 @@ export default function AuthScreen() {
           </View>
 
           <View style={styles.formInputs}>
-            {isNewUser && (
-              <TextInput
-                style={styles.input}
-                placeholder="Your Name"
-                placeholderTextColor={COLORS.textMuted}
-                value={name}
-                onChangeText={setName}
-                testID="name-input"
-              />
-            )}
-            
             <TextInput
               style={[styles.input, styles.otpInput]}
               placeholder="Enter OTP"
