@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Image, TextInput,
-  FlatList, Platform, KeyboardAvoidingView,
+  FlatList, Platform,
   Dimensions, Animated, Easing, ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -412,116 +412,112 @@ export default function GlobalTinaChatScreen({
         </View>
       )}
 
-      {/* Chat Area with KeyboardAvoidingView */}
-      <KeyboardAvoidingView 
+      {/* Chat Area - NO KeyboardAvoidingView here, handled by parent modal */}
+      <FlatList
+        ref={flatListRef}
+        data={messages}
+        renderItem={renderMessage}
+        keyExtractor={item => item.id}
+        contentContainerStyle={[
+          styles.messageList,
+          { paddingBottom: currentOptions || currentDeepLink ? 200 : 100 },
+        ]}
+        onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
         style={styles.chatArea}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={0}
-      >
-        <FlatList
-          ref={flatListRef}
-          data={messages}
-          renderItem={renderMessage}
-          keyExtractor={item => item.id}
-          contentContainerStyle={[
-            styles.messageList,
-            { paddingBottom: currentOptions || currentDeepLink ? 200 : 100 },
-          ]}
-          onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          ListFooterComponent={isTyping ? (
-            <View style={[styles.messageRow, styles.tinaMessageRow]}>
-              <Image source={{ uri: TINA_AVATAR }} style={styles.avatar} />
-              <Animated.View style={[styles.typingBubble, { opacity: typingAnimation }]}>
-                <View style={styles.typingDot} />
-                <View style={[styles.typingDot, styles.typingDotMiddle]} />
-                <View style={styles.typingDot} />
-              </Animated.View>
-            </View>
-          ) : null}
-        />
+        ListFooterComponent={isTyping ? (
+          <View style={[styles.messageRow, styles.tinaMessageRow]}>
+            <Image source={{ uri: TINA_AVATAR }} style={styles.avatar} />
+            <Animated.View style={[styles.typingBubble, { opacity: typingAnimation }]}>
+              <View style={styles.typingDot} />
+              <View style={[styles.typingDot, styles.typingDotMiddle]} />
+              <View style={styles.typingDot} />
+            </Animated.View>
+          </View>
+        ) : null}
+      />
 
-        {/* Options */}
-        {currentOptions && (
-          <View style={styles.optionsContainer}>
-            <View style={styles.optionsHeader}>
-              <Text style={styles.optionsHint}>
-                {currentOptions.multiSelect ? 'Select all that apply' : 'Tap to select'}
-              </Text>
-            </View>
-            <View style={styles.optionsScroll}>
-              {currentOptions.options.map((option, idx) => (
-                <TouchableOpacity
-                  key={idx}
+      {/* Options */}
+      {currentOptions && (
+        <View style={styles.optionsContainer}>
+          <View style={styles.optionsHeader}>
+            <Text style={styles.optionsHint}>
+              {currentOptions.multiSelect ? 'Select all that apply' : 'Tap to select'}
+            </Text>
+          </View>
+          <View style={styles.optionsScroll}>
+            {currentOptions.options.map((option, idx) => (
+              <TouchableOpacity
+                key={idx}
+                style={[
+                  styles.optionChip,
+                  selectedOptions.includes(option) && styles.optionChipSelected,
+                ]}
+                onPress={() => handleOptionSelect(option)}
+              >
+                <Text
                   style={[
-                    styles.optionChip,
-                    selectedOptions.includes(option) && styles.optionChipSelected,
+                    styles.optionText,
+                    selectedOptions.includes(option) && styles.optionTextSelected,
                   ]}
-                  onPress={() => handleOptionSelect(option)}
                 >
-                  <Text
-                    style={[
-                      styles.optionText,
-                      selectedOptions.includes(option) && styles.optionTextSelected,
-                    ]}
-                  >
-                    {option}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            {currentOptions.multiSelect && selectedOptions.length > 0 && (
-              <TouchableOpacity style={styles.confirmButton} onPress={handleConfirmSelection}>
-                <Text style={styles.confirmButtonText}>Confirm ({selectedOptions.length})</Text>
+                  {option}
+                </Text>
               </TouchableOpacity>
-            )}
+            ))}
           </View>
-        )}
-
-        {/* Deep Link CTA */}
-        {currentDeepLink && (
-          <View style={styles.deepLinkContainer}>
-            <TouchableOpacity style={styles.deepLinkButton} onPress={handleDeepLink}>
-              <Ionicons name={currentDeepLink.icon as any} size={20} color="#FFFFFF" />
-              <Text style={styles.deepLinkText}>{currentDeepLink.label}</Text>
-              <Ionicons name="chevron-forward" size={18} color="#FFFFFF" />
+          {currentOptions.multiSelect && selectedOptions.length > 0 && (
+            <TouchableOpacity style={styles.confirmButton} onPress={handleConfirmSelection}>
+              <Text style={styles.confirmButtonText}>Confirm ({selectedOptions.length})</Text>
             </TouchableOpacity>
-          </View>
-        )}
-
-        {/* Composer */}
-        <View style={[styles.composerContainer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-          <View style={styles.composer}>
-            <TextInput
-              style={styles.input}
-              value={inputText}
-              onChangeText={text => {
-                setInputText(text);
-                setShowSendButton(text.trim().length > 0);
-              }}
-              placeholder="Type your message..."
-              placeholderTextColor="rgba(255,255,255,0.4)"
-              multiline
-              maxLength={500}
-              returnKeyType="send"
-              onSubmitEditing={handleSend}
-            />
-            <TouchableOpacity
-              style={[styles.sendBtn, showSendButton && styles.sendBtnActive]}
-              onPress={handleSend}
-              disabled={!showSendButton}
-              activeOpacity={0.7}
-            >
-              <Ionicons
-                name="send"
-                size={20}
-                color={showSendButton ? '#FFFFFF' : 'rgba(255,255,255,0.3)'}
-              />
-            </TouchableOpacity>
-          </View>
+          )}
         </View>
-      </KeyboardAvoidingView>
+      )}
+
+      {/* Deep Link CTA */}
+      {currentDeepLink && (
+        <View style={styles.deepLinkContainer}>
+          <TouchableOpacity style={styles.deepLinkButton} onPress={handleDeepLink}>
+            <Ionicons name={currentDeepLink.icon as any} size={20} color="#FFFFFF" />
+            <Text style={styles.deepLinkText}>{currentDeepLink.label}</Text>
+            <Ionicons name="chevron-forward" size={18} color="#FFFFFF" />
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Composer */}
+      <View style={[styles.composerContainer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+        <View style={styles.composer}>
+          <TextInput
+            style={styles.input}
+            value={inputText}
+            onChangeText={text => {
+              setInputText(text);
+              setShowSendButton(text.trim().length > 0);
+            }}
+            placeholder="Type your message..."
+            placeholderTextColor="rgba(255,255,255,0.4)"
+            multiline
+            maxLength={500}
+            returnKeyType="send"
+            onSubmitEditing={handleSend}
+          />
+          <TouchableOpacity
+            style={[styles.sendBtn, showSendButton && styles.sendBtnActive]}
+            onPress={handleSend}
+            disabled={!showSendButton}
+            activeOpacity={0.7}
+          >
+            <Ionicons
+              name="send"
+              size={20}
+              color={showSendButton ? '#FFFFFF' : 'rgba(255,255,255,0.3)'}
+            />
+          </TouchableOpacity>
+        </View>
+      </View>
     </View>
   );
 }

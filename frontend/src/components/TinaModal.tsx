@@ -113,7 +113,7 @@ export default function TinaModal({ onNavigationRequest }: TinaModalProps) {
       <KeyboardAvoidingView
         style={styles.keyboardAvoid}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={0}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 10 : 0}
       >
         <Animated.View
           style={[
