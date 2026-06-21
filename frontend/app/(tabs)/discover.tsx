@@ -22,6 +22,7 @@ import {
 import { saveSwipeState, getSwipeState, getFilters, getProfile, clearAll } from '../../src/store';
 import { useAppMode, ModeSwitcher } from '../../src/components/SharedHeader';
 import InAppProfilePreview from '../../src/components/InAppProfilePreview';
+import { formatLocationForPrivacy } from '../../src/utils/locationFormatter';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const CARD_WIDTH = SCREEN_WIDTH * 0.88;

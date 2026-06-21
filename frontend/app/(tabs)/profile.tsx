@@ -11,6 +11,7 @@ import { COLORS, SPACING, BORDER_RADIUS } from '../../src/theme';
 import { ProfileData, initialProfileData, MovieSelection } from '../../src/types';
 import { getProfile, saveProfile, clearAll } from '../../src/store';
 import { getPartialLocation } from '../../src/utils/location';
+import { formatLocationForPrivacy } from '../../src/utils/locationFormatter';
 import { SharedHeader, ModeSwitcher, useAppMode } from '../../src/components/SharedHeader';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
@@ -31,11 +32,11 @@ const RELATIONSHIP_INTENTS = ['Casual', 'Friendship', 'Serious relationship', 'E
 const PARTNER_PREFS = ['Men', 'Women', 'Anyone'];
 const LANGUAGES = ['English', 'Hindi', 'Telugu', 'Tamil', 'Kannada', 'Malayalam', 'Bengali', 'Marathi', 'Gujarati', 'Punjabi', 'Urdu'];
 const MOVIE_FREQUENCIES = ['More than twice a week', 'Twice a week', 'Once a week', 'Twice a month', 'Once a month', 'Rarely'];
-const OTT_OPTIONS = ['OTT Person', 'Theatre Person', 'Both', 'None'];
 const FILM_LANGUAGES = ['Hindi', 'English', 'Telugu', 'Tamil', 'Malayalam', 'Kannada', 'Korean', 'Others'];
 const GENRES = ['Action', 'Romance', 'Comedy', 'Thriller', 'Horror', 'Sci-Fi', 'Drama', 'Documentary'];
-const RELIGIONS = ['Hindu', 'Muslim', 'Christian', 'Sikh', 'Buddhist', 'Jain', 'Other', 'Prefer not to say'];
+const RELIGIONS = ['Hindu', 'Muslim', 'Christian', 'Sikh', 'Buddhist', 'Jain', 'Atheist', 'Other', 'Prefer not to say'];
 const MARITAL_STATUSES = ['Single', 'Divorced', 'Widowed', 'Separated'];
+const OTT_OPTIONS = ['OTT Person', 'Theatre Person', 'Both OTT & Theatre', 'Neither'];
 const FOOD_PREFS = ['Vegetarian', 'Non-vegetarian', 'Vegan', 'Eggetarian', 'Jain'];
 const SMOKING_OPTS = ['Never', 'Socially', 'Regularly', 'Trying to quit'];
 const DRINKING_OPTS = ['Never', 'Socially', 'Regularly', 'Sober'];

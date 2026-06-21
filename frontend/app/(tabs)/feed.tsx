@@ -12,6 +12,7 @@ import { useAppMode } from '../../src/components/SharedHeader';
 import { getUserId } from '../../src/store';
 import BottomSheet, { BottomSheetScrollView, BottomSheetBackdrop } from '@gorhom/bottom-sheet';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { formatLocationForPrivacy } from '../../src/utils/locationFormatter';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const TILE_GAP = 12;
@@ -173,7 +174,7 @@ const ProfileTile = ({
           </Text>
           <View style={styles.tileLocationRow}>
             <Ionicons name="location" size={10} color={COLORS.textSecondary} />
-            <Text style={styles.tileLocation} numberOfLines={1}>{profile.location}</Text>
+            <Text style={styles.tileLocation} numberOfLines={1}>{formatLocationForPrivacy(profile.location)}</Text>
           </View>
         </View>
       </View>

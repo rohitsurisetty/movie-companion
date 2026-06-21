@@ -82,7 +82,7 @@ const SELECTION_CONFIGS: Record<number, SelectionConfig> = {
   },
   7: {
     title: 'What describes you more?',
-    options: ['OTT Person', 'Theatre Person', 'Both', 'None'],
+    options: ['OTT Person', 'Theatre Person', 'Both OTT & Theatre', 'Neither'],
     multiSelect: false, displayAs: 'chips', field: 'ottTheatre',
   },
   8: {

@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { COLORS, SPACING, BORDER_RADIUS } from '../theme';
 import { ProfileData } from '../types';
+import { formatLocationForPrivacy } from '../utils/locationFormatter';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
@@ -172,8 +173,10 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
   }, []);
 
   const selectLocation = (description: string) => {
+    // Store full address for backend, display formatted version
     onUpdate('location', description);
-    setLocationSearch(description);
+    onUpdate('locationFull', description); // Keep full for backend
+    setLocationSearch(formatLocationForPrivacy(description));
     setPredictions([]);
   };
 
@@ -191,8 +194,13 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
       );
       const result = await resp.json();
       if (result.location) {
-        onUpdate('location', result.formatted_address || result.location);
-        setLocationSearch(result.formatted_address || result.location);
+        const fullAddress = result.formatted_address || result.location;
+        // Store full address for backend
+        onUpdate('location', fullAddress);
+        onUpdate('locationFull', fullAddress);
+        onUpdate('coordinates', { lat: loc.coords.latitude, lng: loc.coords.longitude });
+        // Display formatted version
+        setLocationSearch(formatLocationForPrivacy(fullAddress));
       }
     } catch (e) {
       Alert.alert('Error', 'Could not get your location.');

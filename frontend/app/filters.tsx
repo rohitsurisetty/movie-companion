@@ -31,7 +31,7 @@ const FILTER_CONFIGS: FilterConfig[] = [
   { key: 'genres', title: 'Favourite Genres', options: ['Action', 'Romance', 'Comedy', 'Thriller', 'Horror', 'Sci-Fi', 'Drama', 'Documentary'] },
   { key: 'ottTheatre', title: 'OTT/Theatre Preference', options: ['OTT Lover', 'Theatre Enthusiast', 'Both'] },
   { key: 'filmLanguages', title: 'Languages They Watch', options: ['English', 'Hindi', 'Telugu', 'Tamil', 'Kannada', 'Malayalam', 'Korean', 'Japanese', 'Spanish', 'French'] },
-  { key: 'religion', title: 'Religion', options: ['Hindu', 'Muslim', 'Christian', 'Sikh', 'Buddhist', 'Jain', 'Other', 'Prefer not to say'] },
+  { key: 'religion', title: 'Religion', options: ['Hindu', 'Muslim', 'Christian', 'Sikh', 'Buddhist', 'Jain', 'Atheist', 'Other', 'Prefer not to say'] },
   { key: 'zodiac', title: 'Zodiac Sign', options: ['Aries', 'Taurus', 'Gemini', 'Cancer', 'Leo', 'Virgo', 'Libra', 'Scorpio', 'Sagittarius', 'Capricorn', 'Aquarius', 'Pisces'] },
   { key: 'siblings', title: 'Siblings', options: ['Only child', 'Has siblings'] },
   { key: 'education', title: 'Education', options: ['High School', "Bachelor's", "Master's", 'PhD', 'Other'] },
@@ -256,6 +256,9 @@ function HeightWheelPicker({ value, onChange }: { value: HeightFilter; onChange:
 
   // Helper to convert ft/in to total inches for comparison
   const toTotalInches = (feet: number, inches: number) => feet * 12 + inches;
+  
+  // State for error message
+  const [heightError, setHeightError] = useState<string | null>(null);
 
   // Scroll to initial positions
   useEffect(() => {
@@ -278,14 +281,22 @@ function HeightWheelPicker({ value, onChange }: { value: HeightFilter; onChange:
     const maxTotal = toTotalInches(newValue.maxFeet, newValue.maxInches);
     
     if (minTotal <= maxTotal) {
+      setHeightError(null);
       onChange(newValue);
+    } else {
+      setHeightError('Minimum height cannot be greater than maximum height');
+      // Auto-clear error after 2 seconds
+      setTimeout(() => setHeightError(null), 2000);
     }
-    // If invalid, don't update (keeps current valid state)
   };
 
   const validateAndUpdateCm = (newValue: HeightFilter) => {
     if (newValue.minCm <= newValue.maxCm) {
+      setHeightError(null);
       onChange(newValue);
+    } else {
+      setHeightError('Minimum height cannot be greater than maximum height');
+      setTimeout(() => setHeightError(null), 2000);
     }
   };
 
@@ -371,6 +382,13 @@ function HeightWheelPicker({ value, onChange }: { value: HeightFilter; onChange:
       </View>
 
       <Text style={wheelStyles.valueLabel}>{minDisplay} - {maxDisplay}</Text>
+      
+      {/* Height Error Message */}
+      {heightError && (
+        <View style={wheelStyles.errorContainer}>
+          <Text style={wheelStyles.errorText}>{heightError}</Text>
+        </View>
+      )}
 
       {!isMetric ? (
         <View style={wheelStyles.heightContainer}>
@@ -652,6 +670,19 @@ const wheelStyles = StyleSheet.create({
   },
   cmSection: {
     alignItems: 'center',
+  },
+  errorContainer: {
+    backgroundColor: 'rgba(229, 57, 53, 0.15)',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    marginBottom: SPACING.s,
+  },
+  errorText: {
+    color: '#E53935',
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
   },
 });
 

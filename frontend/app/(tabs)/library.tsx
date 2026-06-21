@@ -529,7 +529,7 @@ const styles = StyleSheet.create({
   header: {
     paddingHorizontal: GRID_PADDING,
     paddingTop: 8,
-    paddingBottom: 4,
+    paddingBottom: 16,
   },
   headerTitle: {
     fontSize: 26,
@@ -546,7 +546,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: COLORS.bgInput,
     marginHorizontal: GRID_PADDING,
-    marginBottom: 10,
+    marginTop: 8,
+    marginBottom: 16,
     paddingHorizontal: 14,
     borderRadius: 10,
     height: 44,

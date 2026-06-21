@@ -16,7 +16,7 @@ const AVATAR_OPTIONS = [
   { id: 'av6', color: '#FF9800', icon: 'sunny' as const },
 ];
 
-const RELIGIONS = ['Hindu', 'Muslim', 'Christian', 'Sikh', 'Buddhist', 'Jain', 'Other', 'Prefer not to say'];
+const RELIGIONS = ['Hindu', 'Muslim', 'Christian', 'Sikh', 'Buddhist', 'Jain', 'Atheist', 'Other', 'Prefer not to say'];
 const MARITAL_STATUSES = ['Single', 'Divorced', 'Widowed', 'Separated'];
 const FOOD_PREFS = ['Vegetarian', 'Non-vegetarian', 'Vegan', 'Eggetarian', 'Jain'];
 const SMOKING_OPTS = ['Never', 'Socially', 'Regularly', 'Trying to quit'];
@@ -197,22 +197,6 @@ export default function OptionalProfileStep({ data, onUpdate, onNext }: Props) {
         <Text style={styles.subtitle}>Just a few more optional fields</Text>
 
         {/* Avatar Selection */}
-        <Text style={styles.sectionTitle}>Choose an Avatar</Text>
-        <View style={styles.avatarGrid}>
-          {AVATAR_OPTIONS.map(av => (
-            <TouchableOpacity
-              key={av.id}
-              style={[styles.avatarItem, data.avatarId === av.id && styles.avatarActive]}
-              onPress={() => onUpdate('avatarId', av.id)}
-              testID={`avatar-${av.id}`}
-            >
-              <View style={[styles.avatarCircle, { backgroundColor: av.color }]}>
-                <Ionicons name={av.icon} size={28} color={COLORS.white} />
-              </View>
-            </TouchableOpacity>
-          ))}
-        </View>
-
         {/* Height - Minimalistic Wheel Picker */}
         <Text style={styles.label}>Height</Text>
         <View style={styles.heightUnitToggle}>
