@@ -52,7 +52,10 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
   const [showIdentityPicker, setShowIdentityPicker] = useState(false);
   const [underAge, setUnderAge] = useState(false);
   const [calculatedAge, setCalculatedAge] = useState(data.age || 0);
-  const [locationSearch, setLocationSearch] = useState(data.location || '');
+  // Format location for display (privacy-safe format)
+  const [locationSearch, setLocationSearch] = useState(
+    data.location ? formatLocationForPrivacy(data.location) : ''
+  );
   const [predictions, setPredictions] = useState<any[]>([]);
   const [searchingLocation, setSearchingLocation] = useState(false);
   const [gettingCurrentLoc, setGettingCurrentLoc] = useState(false);

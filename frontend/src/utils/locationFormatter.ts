@@ -2,6 +2,9 @@
  * Utility function to format location for privacy
  * Only shows: Region/Area, City, State, Country
  * Hides: House number, apartment, street name, postal address, coordinates
+ * 
+ * Example: "L 141, Opposite Rajesh Jewellery Mart, HSR Layout, Bengaluru, Karnataka 560102, India"
+ * Returns: "HSR Layout, Bengaluru, Karnataka, India"
  */
 
 export function formatLocationForPrivacy(fullLocation: string): string {
@@ -10,56 +13,56 @@ export function formatLocationForPrivacy(fullLocation: string): string {
   }
 
   // Split by comma and clean up
-  const parts = fullLocation.split(',').map(p => p.trim()).filter(Boolean);
+  let parts = fullLocation.split(',').map(p => p.trim()).filter(Boolean);
   
   if (parts.length === 0) return fullLocation;
   
-  // Common patterns to remove (house numbers, street names, postal codes)
-  const patternsToRemove = [
-    /^\d+[\s,]*/,           // Leading numbers (house numbers)
-    /^#\d+[\s,]*/,          // Apartment numbers like #123
-    /^\d+-\d+[\s,]*/,       // Range numbers like 12-14
-    /^flat\s*\d*/i,         // Flat numbers
-    /^apt\.?\s*\d*/i,       // Apartment numbers
-    /^block\s*[a-z0-9]*/i,  // Block names
-    /^tower\s*[a-z0-9]*/i,  // Tower names
-    /^building\s*[a-z0-9]*/i, // Building names
-    /^floor\s*\d*/i,        // Floor numbers
-    /\d{5,6}/,              // Postal codes (5-6 digits)
-    /^\d+\/\d+/,            // Numbers like 12/3
-  ];
+  // First, clean postal codes from all parts
+  parts = parts.map(part => {
+    // Remove 5-6 digit postal codes
+    return part.replace(/\b\d{5,6}\b/g, '').trim();
+  }).filter(p => p.length > 0);
+  
+  // Patterns that indicate PRIVATE/SPECIFIC location info to REMOVE
+  const shouldRemovePart = (part: string): boolean => {
+    const lowerPart = part.toLowerCase();
+    
+    // Remove if starts with numbers or letter+number (house numbers like "L 141", "123", "B-23")
+    if (/^[A-Z]?\s*\d+/i.test(part)) return true;
+    if (/^\d+[A-Z]?[\s\-\/]/i.test(part)) return true;
+    
+    // Remove if starts with directional/positional words
+    if (/^(opposite|opp\.?|near|nr\.?|behind|beside|next to|in front|adjacent|above|below)\s/i.test(part)) return true;
+    
+    // Remove if contains commercial/landmark identifiers
+    if (/\b(mart|shop|store|jewellery|jewelry|hospital|hotel|mall|cinema|theatre|theater|bank|atm|petrol|gas station|showroom|plaza|arcade|complex)\b/i.test(part)) return true;
+    
+    // Remove apartment/building identifiers with numbers
+    if (/^(flat|apt|apartment|block|tower|building|floor|plot|door|unit|no\.?)\s*[#\d]/i.test(part)) return true;
+    
+    // Remove if it's just a number pattern
+    if (/^\d+[\/\-]?\d*$/.test(part)) return true;
+    
+    // Remove common street suffixes ONLY if they're the main content
+    // Be careful not to remove neighborhood names like "HSR Layout"
+    if (/^(main\s+)?(road|street|lane|avenue|drive|way|marg|gali|cross)(\s+\d+)?$/i.test(part)) return true;
+    
+    // Skip very short parts (likely abbreviations)
+    if (part.length < 3) return true;
+    
+    return false;
+  };
 
-  // Filter out parts that match removal patterns
-  const filteredParts = parts.filter(part => {
-    // Skip parts that are just numbers or start with numbers
-    if (/^\d+$/.test(part)) return false;
-    
-    // Skip parts containing "Street", "Road", "Lane", "Avenue", etc.
-    const streetTerms = /\b(street|st\.|road|rd\.|lane|ln\.|avenue|ave\.|drive|dr\.|way|place|pl\.|nagar|gali|marg|path|colony|society|complex|apartments?|residency|enclave|layout|sector|phase)\b/i;
-    if (streetTerms.test(part)) return false;
-    
-    // Check against removal patterns
-    for (const pattern of patternsToRemove) {
-      if (pattern.test(part)) return false;
-    }
-    
-    // Skip very short parts (likely abbreviations or codes)
-    if (part.length < 3) return false;
-    
-    return true;
-  });
+  // Filter parts
+  const filteredParts = parts.filter(part => !shouldRemovePart(part));
 
-  // If we filtered too much, try to keep at least the last few meaningful parts
+  // If we filtered too much, fall back to last 4 parts (usually reliable)
   if (filteredParts.length === 0) {
-    // Take last 3-4 parts which are usually City, State, Country
-    const lastParts = parts.slice(-4);
-    return lastParts.join(', ');
+    return parts.slice(-4).join(', ');
   }
 
-  // Take at most 4 parts: Area, City, State, Country
-  const result = filteredParts.slice(-4);
-  
-  return result.join(', ');
+  // Return at most 4 parts: Area, City, State, Country
+  return filteredParts.slice(-4).join(', ');
 }
 
 /**
@@ -88,7 +91,6 @@ export function hasPrivateInfo(location: string): boolean {
     /^\d+/,                  // Starts with number
     /flat|apt|apartment|building|tower|floor|block/i,
     /\d{5,6}/,              // Postal code
-    /street|road|lane|avenue|drive/i,
   ];
   
   return privatePatterns.some(pattern => pattern.test(location));
