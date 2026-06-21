@@ -57,8 +57,13 @@ export default function TinaChatScreen({
   isReturningFromMovieSelection,
 }: Props) {
   const insets = useSafeAreaInsets();
-  // Initialize messages from existing if returning from movie selection
-  const [messages, setMessages] = useState<Message[]>(existingMessages || []);
+  // Initialize messages from existing if available
+  const [messages, setMessages] = useState<Message[]>(() => {
+    if (existingMessages && existingMessages.length > 0) {
+      return existingMessages;
+    }
+    return [];
+  });
   const [inputText, setInputText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [topicsCollected, setTopicsCollected] = useState(0);
@@ -73,8 +78,11 @@ export default function TinaChatScreen({
   const [currentDeepLink, setCurrentDeepLink] = useState<DeepLinkAction | null>(null);
   const [isExiting, setIsExiting] = useState(false);
   // Only initialize if no existing messages (not returning from movie selection)
-  const [hasInitialized, setHasInitialized] = useState(existingMessages && existingMessages.length > 0);
+  const [hasInitialized, setHasInitialized] = useState(() => {
+    return (existingMessages && existingMessages.length > 0) || isReturningFromMovieSelection === true;
+  });
   const [pendingMoviesProcessed, setPendingMoviesProcessed] = useState(false);
+  const [welcomeBackShown, setWelcomeBackShown] = useState(false);
   
   const flatListRef = useRef<FlatList>(null);
   const typingAnimation = useRef(new Animated.Value(0)).current;
@@ -102,14 +110,46 @@ export default function TinaChatScreen({
     }
   }, [hasInitialized]);
 
+  // Handle returning from movie selection
+  useEffect(() => {
+    if (isReturningFromMovieSelection && !welcomeBackShown) {
+      setWelcomeBackShown(true);
+      
+      // If user came back WITHOUT selecting movies, show welcome back and continue
+      if (!incomingMovies || incomingMovies.length === 0) {
+        // Small delay to ensure messages state is ready
+        setTimeout(() => {
+          addMessage(`Welcome back, ${userName || 'there'}! 😊`, false);
+          setTimeout(() => {
+            addMessage("Let's continue where we left off...", false);
+            // Resume conversation from where it left
+            setTimeout(() => sendToTina(''), 1000);
+          }, 500);
+        }, 100);
+      }
+      // If movies ARE selected, handleMoviesReceived will handle the flow
+    }
+  }, [isReturningFromMovieSelection, welcomeBackShown]);
+
   // Handle incoming movies from TopMoviesStep
   useEffect(() => {
     if (incomingMovies && incomingMovies.length > 0 && !pendingMoviesProcessed) {
       setPendingMoviesProcessed(true);
       // Clear the deep link CTA
       setCurrentDeepLink(null);
-      // Process the selected movies
-      handleMoviesReceived(incomingMovies);
+      
+      // Add a small delay for smooth transition when returning
+      setTimeout(() => {
+        // Show welcome back message first if returning
+        if (isReturningFromMovieSelection) {
+          addMessage(`Great picks, ${userName || 'there'}! 🎬`, false);
+          setTimeout(() => {
+            handleMoviesReceived(incomingMovies);
+          }, 300);
+        } else {
+          handleMoviesReceived(incomingMovies);
+        }
+      }, 100);
     }
   }, [incomingMovies, pendingMoviesProcessed]);
 

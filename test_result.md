@@ -420,6 +420,146 @@ frontend_comprehensive_test:
 agent_communication:
   - agent: "testing"
     message: |
+      🚨 CRITICAL BUG FOUND: NAME FIELD MISSING IN OTP VERIFICATION - JUNE 21, 2026
+      
+      TESTING STATUS: BLOCKED BY CRITICAL FRONTEND BUG ❌
+      
+      Test Environment:
+      - Frontend: https://showtime-setup.preview.emergentagent.com
+      - Viewport: iPhone (390x844)
+      - Test Phone: +9876543210, +1234567890
+      - Test Date: June 21, 2026
+      
+      🚨 CRITICAL BUG DISCOVERED:
+      
+      **BUG: Missing Name Input Field in OTP Verification Screens**
+      
+      Location: /app/frontend/app/index.tsx
+      - Email OTP screen (lines 475-522): NO name input field
+      - Phone OTP screen (lines 526-573): NO name input field
+      
+      Impact: NEW USERS CANNOT COMPLETE REGISTRATION
+      
+      Root Cause Analysis:
+      1. handleVerifyOTP function (lines 206-216) requires name for new users:
+         ```typescript
+         if (isNewUser && !name.trim()) {
+           Alert.alert('Error', 'Please enter your name');
+           return;
+         }
+         ```
+      
+      2. BUT the OTP verification screens do NOT render a name input field
+      
+      3. Result: New users cannot provide their name, so OTP verification always fails
+      
+      4. Backend API works correctly (confirmed via curl test):
+         ```bash
+         curl -X POST /api/auth/verify-otp \
+           -d '{"type": "phone", "identifier": "+1234567890", "otp": "123456", "name": "TestUser"}'
+         # Returns: 200 OK with user_id and session_token
+         ```
+      
+      5. Frontend bug blocks the entire flow
+      
+      TESTING EVIDENCE:
+      
+      ✅ WHAT WAS TESTED:
+      1. Phone login button click - WORKS
+      2. Phone number input - WORKS
+      3. Send OTP button - WORKS
+      4. OTP sent successfully - WORKS (backend returns OTP in alert)
+      5. OTP input field - WORKS (can enter 123456)
+      6. Create Account button - VISIBLE but DOESN'T WORK
+      
+      ❌ WHAT FAILED:
+      1. Name input field - MISSING (should be visible for new users)
+      2. OTP verification - FAILS (stuck on OTP screen after clicking Create Account)
+      3. Navigation to onboarding - BLOCKED (cannot proceed without name)
+      
+      SCREENSHOTS CAPTURED:
+      - otp_screen_full.png: Shows OTP screen with only OTP input, no name field
+      - before_create_account.png: OTP filled, ready to click Create Account
+      - after_create_account.png: Still on OTP screen after clicking (no navigation)
+      
+      BACKEND VERIFICATION (Manual API Tests):
+      ✅ POST /api/auth/send-phone-otp - WORKS
+         Response: {"success": true, "otp": "866822", "is_new_user": true}
+      
+      ✅ POST /api/auth/verify-otp with hardcoded OTP "123456" - WORKS
+         Response: {"user_id": "user_42ea22741cd1", "session_token": "...", "is_new_user": true}
+      
+      ✅ Backend has hardcoded OTP bypass (line 574-590 in server.py)
+      
+      IMPACT ON TINA CHAT FLOW TEST:
+      
+      ❌ CANNOT TEST TINA CHAT STATE PRESERVATION
+      - Blocked at OTP verification step
+      - Cannot reach onboarding screen
+      - Cannot reach Tina Choice screen
+      - Cannot test movie selection deep-link
+      - Cannot verify chat state preservation
+      
+      REQUIRED FIX:
+      
+      File: /app/frontend/app/index.tsx
+      
+      Add name input field to BOTH OTP verification screens (email and phone):
+      
+      ```typescript
+      // Phone OTP Verification Screen (line 526)
+      if (authMode === 'phone-otp') {
+        return (
+          <SafeAreaView style={styles.container}>
+            <KeyboardAvoidingView ...>
+              ...
+              <View style={styles.formInputs}>
+                {/* ADD THIS: Name input for new users */}
+                {isNewUser && (
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Your full name"
+                    placeholderTextColor={COLORS.textMuted}
+                    value={name}
+                    onChangeText={setName}
+                    autoCapitalize="words"
+                    testID="name-input"
+                  />
+                )}
+                
+                <TextInput
+                  style={[styles.input, styles.otpInput]}
+                  placeholder="Enter OTP"
+                  ...
+                />
+                ...
+              </View>
+            </KeyboardAvoidingView>
+          </SafeAreaView>
+        );
+      }
+      ```
+      
+      Same fix needed for email OTP screen (line 475).
+      
+      RECOMMENDATION:
+      
+      1. 🔧 URGENT: Add name input field to OTP verification screens
+      2. 🔧 Make name field conditionally visible when isNewUser === true
+      3. ✅ Backend is working correctly - no changes needed
+      4. 📱 After fix, re-test complete flow including Tina chat state preservation
+      
+      NEXT STEPS AFTER FIX:
+      1. Complete OTP verification with name
+      2. Navigate to onboarding
+      3. Complete Basic Info and Photo Upload
+      4. Reach Tina Choice screen
+      5. Test Tina chat interaction
+      6. Test movie selection deep-link
+      7. Verify chat state preservation on return
+      
+  - agent: "testing"
+    message: |
       ⚠️ TINA AI ONBOARDING FLOW TESTING - BLOCKED BY OTP VERIFICATION - JUNE 9, 2026
       
       TESTING STATUS: PARTIALLY TESTED - BLOCKED AT OTP VERIFICATION STEP
