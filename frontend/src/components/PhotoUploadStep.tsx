@@ -229,49 +229,53 @@ export default function PhotoUploadStep({ userId: propUserId, onNext, onBack }: 
   );
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-      <Text style={styles.title}>Add Your Photos</Text>
-      <Text style={styles.subtitle}>
-        Your photos help others get to know you. Add at least 1 to continue.
-      </Text>
-
-      {/* Main Photo */}
-      <View style={styles.mainSection}>
-        {renderSlot(pictures[0], true)}
-      </View>
-
-      {/* Additional Photos */}
-      <Text style={styles.sectionLabel}>Additional Photos</Text>
-      <View style={styles.grid}>
-        {pictures.slice(1).map(slot => renderSlot(slot, false))}
-      </View>
-
-      {/* Progress */}
-      <View style={styles.progressSection}>
-        <View style={styles.progressBar}>
-          <View style={[styles.progressFill, { width: `${(uploadedCount / 5) * 100}%` }]} />
-        </View>
-        <Text style={styles.progressText}>
-          {uploadedCount}/5 photos {uploadedCount >= 1 ? '✓' : ''}
+    <View style={styles.container}>
+      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+        <Text style={styles.title}>Add Your Photos</Text>
+        <Text style={styles.subtitle}>
+          Your photos help others get to know you. Add at least 1 to continue.
         </Text>
+
+        {/* Main Photo */}
+        <View style={styles.mainSection}>
+          {renderSlot(pictures[0], true)}
+        </View>
+
+        {/* Additional Photos */}
+        <Text style={styles.sectionLabel}>Additional Photos</Text>
+        <View style={styles.grid}>
+          {pictures.slice(1).map(slot => renderSlot(slot, false))}
+        </View>
+
+        {/* Progress */}
+        <View style={styles.progressSection}>
+          <View style={styles.progressBar}>
+            <View style={[styles.progressFill, { width: `${(uploadedCount / 5) * 100}%` }]} />
+          </View>
+          <Text style={styles.progressText}>
+            {uploadedCount}/5 photos {uploadedCount >= 1 ? '✓' : ''}
+          </Text>
+        </View>
+      </ScrollView>
+
+      {/* Continue Button - Fixed at bottom, always visible */}
+      <View style={styles.bottomContainer}>
+        <TouchableOpacity
+          style={[styles.continueBtn, !canContinue && styles.continueBtnDisabled]}
+          onPress={handleContinue}
+          disabled={!canContinue}
+        >
+          <Text style={styles.continueBtnText}>Continue</Text>
+        </TouchableOpacity>
       </View>
-
-      {/* Continue Button - Always shown, enabled only when at least 1 photo */}
-      <TouchableOpacity
-        style={[styles.continueBtn, !canContinue && styles.continueBtnDisabled]}
-        onPress={handleContinue}
-        disabled={!canContinue}
-      >
-        <Text style={styles.continueBtnText}>Continue</Text>
-      </TouchableOpacity>
-
-      <View style={{ height: 40 }} />
-    </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  scrollView: { flex: 1 },
+  scrollContent: { paddingBottom: SPACING.xl },
   title: { fontSize: 28, fontWeight: 'bold', color: COLORS.text, marginBottom: SPACING.xs },
   subtitle: { fontSize: 15, color: COLORS.textSecondary, lineHeight: 22, marginBottom: SPACING.xl },
   
@@ -369,6 +373,11 @@ const styles = StyleSheet.create({
   },
   progressText: { fontSize: 13, color: COLORS.textMuted, textAlign: 'center' },
   
+  bottomContainer: {
+    paddingTop: SPACING.m,
+    paddingBottom: SPACING.xl,
+    backgroundColor: COLORS.bgMain,
+  },
   continueBtn: {
     backgroundColor: COLORS.primary,
     paddingVertical: 16,
