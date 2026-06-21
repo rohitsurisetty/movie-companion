@@ -362,7 +362,7 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Tina-Collected Fields Skip Logic in Manual Onboarding"
+    - "Post-Rating Navigation Flow - Like/Dislike Button Delay"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -778,6 +778,158 @@ agent_communication:
       6. Test movie selection deep-link
       7. Verify chat state preservation on return
       
+  - agent: "testing"
+    message: |
+      ⚠️ POST-RATING NAVIGATION FLOW TEST - BLOCKED BY ONBOARDING REQUIREMENT - JUNE 21, 2026
+      
+      TESTING STATUS: CANNOT REPRODUCE ISSUE - USER NEEDS ONBOARDING ⚠️
+      
+      Test Request: Test Like/Dislike button delay issue after rating submission
+      Test Environment:
+      - Frontend: https://showtime-setup.preview.emergentagent.com
+      - Viewport: iPhone 12 (390x844)
+      - Test Phone: +1234567890
+      - Test OTP: 123456
+      - Test Date: June 21, 2026
+      
+      ========================================
+      WHAT WAS TESTED SUCCESSFULLY:
+      ========================================
+      
+      ✅ LOGIN FLOW - WORKING PERFECTLY:
+      1. Phone number input: +1234567890 ✅
+      2. Send OTP button: Working ✅
+      3. OTP input: 123456 ✅
+      4. Login button: Successfully clicked using page.get_by_text("Login", exact=True) ✅
+      5. Backend authentication: Working (user_42ea22741cd1 logged in) ✅
+      6. Navigation after login: Redirected to /onboarding ✅
+      
+      Backend logs confirm:
+      - "SMS OTP SENT (MOCK)" for +1234567890
+      - "Existing user login: user_42ea22741cd1 via phone: +1234567890"
+      - "Logged login to Supabase for user user_42ea22741cd1"
+      
+      ========================================
+      CRITICAL BLOCKER IDENTIFIED:
+      ========================================
+      
+      ❌ USER +1234567890 HAS NOT COMPLETED ONBOARDING
+      
+      Evidence:
+      1. After successful login, user is redirected to /onboarding (not /discover or /(tabs)/discover)
+      2. User lands on "Basic Info" step - first step of onboarding
+      3. Screen shows: "Tell us about yourself" with fields for Name, Gender, DOB, Location
+      4. Cannot access Discover/Swipe screen without completing onboarding
+      5. Like/Dislike buttons only exist on Discover screen, not on onboarding
+      
+      Screenshots captured:
+      - 01_after_login.png: Shows Basic Info onboarding screen
+      - 02_no_buttons_found.png: Confirms no swipe buttons present
+      
+      ========================================
+      IMPACT ON TEST:
+      ========================================
+      
+      ❌ CANNOT TEST POST-RATING NAVIGATION FLOW
+      - Cannot access Discover/Swipe screen
+      - Cannot click Like/Dislike buttons (they don't exist on onboarding)
+      - Cannot trigger rating modal
+      - Cannot observe post-rating behavior
+      - Cannot reproduce the reported 5-second button delay issue
+      
+      ========================================
+      CODE REVIEW OF REPORTED ISSUE:
+      ========================================
+      
+      While unable to test the actual behavior, I reviewed the code to understand the flow:
+      
+      File: /app/frontend/app/(tabs)/discover.tsx
+      
+      BUTTON CLICK FLOW (lines 1252-1269):
+      1. User clicks Like button → handleSwipe('right', currentMovie) is called
+      2. handleSwipe immediately removes movie from array: 
+         `setMovies((prev) => prev.filter((m) => m.id !== movie.id))` (line 1268)
+      3. handleSwipe shows rating modal: `setShowRatingModal(true)` (line 1264)
+      4. Movie is stored in pendingMovie state
+      
+      RATING SUBMISSION FLOW (lines 1333-1339):
+      1. User clicks "Confirm Rating" → handleRatingSubmit is called
+      2. handleRatingSubmit calls recordSwipe (NOT awaited - async but non-blocking)
+      3. Modal closes immediately: `setShowRatingModal(false)` (line 1338)
+      4. pendingMovie is cleared: `setPendingMovie(null)` (line 1336)
+      
+      BUTTON RENDERING (lines 1430-1450):
+      - Buttons render when: `{movies.length > 0 && (...)}`
+      - Since movie was removed in step 2 of button click flow, movies array is already updated
+      - Next movie should become movies[0] immediately
+      
+      POTENTIAL ISSUE IDENTIFIED:
+      The recordSwipe function (lines 1291-1331) makes a backend API call:
+      - Line 1310: `await saveSwipeState(newState)` - saves to local storage
+      - Lines 1314-1329: `fetch('/api/user/swipe')` - sends to backend
+      
+      However, handleRatingSubmit does NOT await recordSwipe, so the modal should close immediately.
+      
+      POSSIBLE CAUSES OF 5-SECOND DELAY:
+      1. React state update batching causing delayed re-render
+      2. Animation timing in SwipeCard component (250ms animation on gesture swipes)
+      3. Backend API call blocking UI thread (unlikely since not awaited)
+      4. Network latency causing state synchronization issues
+      5. Multiple state updates causing render delays
+      
+      ========================================
+      RECOMMENDATIONS FOR MAIN AGENT:
+      ========================================
+      
+      1. 🔧 PROVIDE TEST USER WITH COMPLETED ONBOARDING:
+         - Create a new test user who has completed all onboarding steps
+         - OR complete onboarding for +1234567890
+         - Update /app/memory/test_credentials.md with proper test users
+      
+      2. 🔍 INVESTIGATE STATE UPDATE TIMING:
+         - Check if multiple setState calls are causing batching delays
+         - Consider using useCallback or useMemo to optimize re-renders
+         - Add console.log timestamps to track actual timing
+      
+      3. 🐛 POTENTIAL FIX (if issue is confirmed):
+         - Ensure movie removal and modal close happen in single state update
+         - Consider using useTransition or startTransition for non-urgent updates
+         - Add loading state to prevent button clicks during transition
+      
+      4. 📱 MANUAL TESTING REQUIRED:
+         - Test on actual device (not just web preview)
+         - Measure exact timing of button visibility
+         - Check if issue occurs on both button clicks and gesture swipes
+         - Verify if issue is consistent or intermittent
+      
+      ========================================
+      TESTING LIMITATIONS:
+      ========================================
+      
+      - Used 3/3 browser automation attempts (maximum allowed)
+      - Cannot complete onboarding flow in automated test (too complex)
+      - Cannot access Discover screen without onboarding completion
+      - Cannot reproduce reported issue without proper test user
+      
+      ========================================
+      FINAL VERDICT:
+      ========================================
+      
+      STATUS: ⚠️ TEST BLOCKED - CANNOT REPRODUCE ISSUE
+      
+      Reason: Test user +1234567890 has not completed onboarding
+      
+      Code Review: Identified potential timing issue in state updates, but cannot confirm without actual testing
+      
+      Next Steps:
+      1. Provide test user with completed onboarding
+      2. Re-run test to observe actual button behavior
+      3. Measure exact timing of button visibility after rating submission
+      4. Implement fix if 5-second delay is confirmed
+      
+      The login flow works perfectly. The issue cannot be tested without a user who has access to the Discover screen.
+      
+
   - agent: "testing"
     message: |
       ⚠️ TINA AI ONBOARDING FLOW TESTING - BLOCKED BY OTP VERIFICATION - JUNE 9, 2026
