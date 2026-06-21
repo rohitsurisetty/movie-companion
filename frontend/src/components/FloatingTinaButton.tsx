@@ -17,7 +17,7 @@ interface FloatingTinaButtonProps {
   // Optional custom positioning
   bottomOffset?: number;
   rightOffset?: number;
-  // Hide on certain screens
+  // Hide on certain screens (deprecated - use shouldShowFloatingButton from context)
   visible?: boolean;
 }
 
@@ -27,13 +27,16 @@ export default function FloatingTinaButton({
   visible = true,
 }: FloatingTinaButtonProps) {
   const insets = useSafeAreaInsets();
-  const { state, toggleTina } = useTina();
+  const { state, toggleTina, shouldShowFloatingButton } = useTina();
   const scaleAnim = React.useRef(new Animated.Value(1)).current;
   const pulseAnim = React.useRef(new Animated.Value(1)).current;
 
+  // Check if button should be visible based on context
+  const isVisible = visible && shouldShowFloatingButton();
+
   // Pulse animation when there's an unread message
   React.useEffect(() => {
-    if (state.hasUnreadMessage) {
+    if (state.hasUnreadMessage && isVisible) {
       Animated.loop(
         Animated.sequence([
           Animated.timing(pulseAnim, {
@@ -51,7 +54,7 @@ export default function FloatingTinaButton({
     } else {
       pulseAnim.setValue(1);
     }
-  }, [state.hasUnreadMessage, pulseAnim]);
+  }, [state.hasUnreadMessage, isVisible, pulseAnim]);
 
   const handlePressIn = () => {
     Animated.spring(scaleAnim, {
@@ -68,7 +71,8 @@ export default function FloatingTinaButton({
     }).start();
   };
 
-  if (!visible || state.isOpen) return null;
+  // Hide if not visible or Tina is already open
+  if (!isVisible) return null;
 
   return (
     <Animated.View

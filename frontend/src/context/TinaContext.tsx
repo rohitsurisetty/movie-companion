@@ -39,6 +39,13 @@ export type UserProfileData = {
   [key: string]: any;
 };
 
+// Onboarding stages for visibility control
+export type OnboardingStage = 
+  | 'pre_decision'      // Before "Continue with Tina" / "Manual" choice
+  | 'tina_onboarding'   // User chose Tina-assisted onboarding
+  | 'manual_onboarding' // User chose manual form filling
+  | 'completed';        // Onboarding complete
+
 export type TinaState = {
   isOpen: boolean;
   isMinimized: boolean;
@@ -46,6 +53,7 @@ export type TinaState = {
   hasUnreadMessage: boolean;
   lastInteractionTime: number;
   isOnboardingComplete: boolean;
+  onboardingStage: OnboardingStage;
   currentOnboardingStep?: string;
   askedQuestions: string[]; // Track what Tina has asked
   collectedFields: string[]; // Track what fields have been collected
@@ -76,15 +84,20 @@ type TinaContextType = {
   syncProfileFromBackend: (userId: string) => Promise<void>;
   
   // Onboarding
+  setOnboardingStage: (stage: OnboardingStage) => void;
   setOnboardingComplete: (complete: boolean) => void;
   setCurrentOnboardingStep: (step: string | undefined) => void;
   
   // Field tracking
   markFieldAsAsked: (field: string) => void;
   markFieldAsCollected: (field: string) => void;
+  markFieldsAsCollected: (fields: string[]) => void;
   isFieldCollected: (field: string) => boolean;
   wasFieldAsked: (field: string) => boolean;
   getMissingFields: () => string[];
+  
+  // Floating button visibility
+  shouldShowFloatingButton: () => boolean;
 };
 
 const defaultState: TinaState = {
@@ -94,6 +107,7 @@ const defaultState: TinaState = {
   hasUnreadMessage: false,
   lastInteractionTime: Date.now(),
   isOnboardingComplete: false,
+  onboardingStage: 'pre_decision',
   currentOnboardingStep: undefined,
   askedQuestions: [],
   collectedFields: [],
@@ -330,10 +344,20 @@ export function TinaProvider({ children }: { children: React.ReactNode }) {
 
   // ========== ONBOARDING ==========
 
+  const setOnboardingStage = useCallback((stage: OnboardingStage) => {
+    console.log('[TinaContext] Setting onboarding stage:', stage);
+    setState(prev => ({
+      ...prev,
+      onboardingStage: stage,
+      isOnboardingComplete: stage === 'completed',
+    }));
+  }, []);
+
   const setOnboardingComplete = useCallback((complete: boolean) => {
     setState(prev => ({
       ...prev,
       isOnboardingComplete: complete,
+      onboardingStage: complete ? 'completed' : prev.onboardingStage,
     }));
   }, []);
 
@@ -354,9 +378,18 @@ export function TinaProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const markFieldAsCollected = useCallback((field: string) => {
+    console.log('[TinaContext] Marking field as collected:', field);
     setState(prev => ({
       ...prev,
       collectedFields: [...new Set([...prev.collectedFields, field])],
+    }));
+  }, []);
+
+  const markFieldsAsCollected = useCallback((fields: string[]) => {
+    console.log('[TinaContext] Marking fields as collected:', fields);
+    setState(prev => ({
+      ...prev,
+      collectedFields: [...new Set([...prev.collectedFields, ...fields])],
     }));
   }, []);
 
@@ -384,6 +417,21 @@ export function TinaProvider({ children }: { children: React.ReactNode }) {
     return ALL_PROFILE_FIELDS.filter(field => !isFieldCollected(field));
   }, [isFieldCollected]);
 
+  // ========== FLOATING BUTTON VISIBILITY ==========
+
+  const shouldShowFloatingButton = useCallback((): boolean => {
+    // Hide during pre_decision stage (before user chooses Tina or Manual)
+    if (state.onboardingStage === 'pre_decision') {
+      return false;
+    }
+    // Hide when Tina modal is already open
+    if (state.isOpen) {
+      return false;
+    }
+    // Show in all other cases
+    return true;
+  }, [state.onboardingStage, state.isOpen]);
+
   const value: TinaContextType = {
     state,
     userProfile,
@@ -400,13 +448,16 @@ export function TinaProvider({ children }: { children: React.ReactNode }) {
     setUserProfile,
     updateUserProfile,
     syncProfileFromBackend,
+    setOnboardingStage,
     setOnboardingComplete,
     setCurrentOnboardingStep,
     markFieldAsAsked,
     markFieldAsCollected,
+    markFieldsAsCollected,
     isFieldCollected,
     wasFieldAsked,
     getMissingFields,
+    shouldShowFloatingButton,
   };
 
   return (
