@@ -6,7 +6,6 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS } from '../theme';
 import { ProfileData } from '../types';
 
@@ -40,6 +39,10 @@ type Props = {
   onRequestMovieSelection?: () => void;
   // Movies passed back from TopMoviesStep
   selectedMovies?: any[];
+  // Preserve messages across navigation
+  existingMessages?: any[];
+  onMessagesChange?: (messages: any[]) => void;
+  isReturningFromMovieSelection?: boolean;
 };
 
 export default function TinaChatScreen({ 
@@ -49,9 +52,13 @@ export default function TinaChatScreen({
   onExit,
   onRequestMovieSelection,
   selectedMovies: incomingMovies,
+  existingMessages,
+  onMessagesChange,
+  isReturningFromMovieSelection,
 }: Props) {
   const insets = useSafeAreaInsets();
-  const [messages, setMessages] = useState<Message[]>([]);
+  // Initialize messages from existing if returning from movie selection
+  const [messages, setMessages] = useState<Message[]>(existingMessages || []);
   const [inputText, setInputText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [topicsCollected, setTopicsCollected] = useState(0);
@@ -65,7 +72,8 @@ export default function TinaChatScreen({
   const [showSendButton, setShowSendButton] = useState(false);
   const [currentDeepLink, setCurrentDeepLink] = useState<DeepLinkAction | null>(null);
   const [isExiting, setIsExiting] = useState(false);
-  const [hasInitialized, setHasInitialized] = useState(false);
+  // Only initialize if no existing messages (not returning from movie selection)
+  const [hasInitialized, setHasInitialized] = useState(existingMessages && existingMessages.length > 0);
   const [pendingMoviesProcessed, setPendingMoviesProcessed] = useState(false);
   
   const flatListRef = useRef<FlatList>(null);
@@ -105,6 +113,13 @@ export default function TinaChatScreen({
     }
   }, [incomingMovies, pendingMoviesProcessed]);
 
+  // Save messages to parent whenever they change
+  useEffect(() => {
+    if (onMessagesChange && messages.length > 0) {
+      onMessagesChange(messages);
+    }
+  }, [messages, onMessagesChange]);
+
   const getMessageAnimation = (id: string) => {
     if (!messageAnimations.current[id]) {
       messageAnimations.current[id] = new Animated.Value(0);
@@ -119,7 +134,10 @@ export default function TinaChatScreen({
       isUser,
       timestamp: new Date(),
     };
-    setMessages(prev => [...prev, msg]);
+    setMessages(prev => {
+      const newMessages = [...prev, msg];
+      return newMessages;
+    });
     
     // Animate message entrance
     const anim = getMessageAnimation(msg.id);
@@ -400,8 +418,6 @@ export default function TinaChatScreen({
     );
   };
 
-  const progressPercentage = Math.round((topicsCollected / TOTAL_TOPICS) * 100);
-
   return (
     <View style={styles.container}>
       {/* Premium Header */}
@@ -431,24 +447,6 @@ export default function TinaChatScreen({
           >
             <Text style={styles.skipText}>Skip</Text>
           </TouchableOpacity>
-        </View>
-
-        {/* Profile Strength Progress */}
-        <View style={styles.progressSection}>
-          <View style={styles.progressHeader}>
-            <Text style={styles.progressLabel}>Profile Strength</Text>
-            <Text style={styles.progressCount}>
-              {topicsCollected} of {TOTAL_TOPICS} collected
-            </Text>
-          </View>
-          <View style={styles.progressBarBg}>
-            <LinearGradient
-              colors={['#FF6B6B', '#FF8E53', '#FFC107']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={[styles.progressBarFill, { width: `${Math.max(5, progressPercentage)}%` }]}
-            />
-          </View>
         </View>
       </SafeAreaView>
 

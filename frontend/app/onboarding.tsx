@@ -108,6 +108,9 @@ export default function OnboardingScreen() {
   // Track if we're selecting movies FOR Tina (vs manual onboarding)
   const [tinaMovieSelectionMode, setTinaMovieSelectionMode] = useState(false);
   const [moviesForTina, setMoviesForTina] = useState<any[]>([]);
+  // Preserve Tina messages across movie selection navigation
+  const [tinaMessages, setTinaMessages] = useState<any[]>([]);
+  const [returningFromMovieSelection, setReturningFromMovieSelection] = useState(false);
 
   // Get user ID on mount
   useEffect(() => {
@@ -246,8 +249,10 @@ export default function OnboardingScreen() {
   // Handler for TopMoviesStep completion when in Tina mode
   const handleMoviesSelectedForTina = () => {
     // Save the selected movies to pass back to Tina
-    setMoviesForTina([...data.topMovies]);
+    const movies = Array.isArray(data.topMovies) ? [...data.topMovies] : [];
+    setMoviesForTina(movies);
     setTinaMovieSelectionMode(false);
+    setReturningFromMovieSelection(true);
     setShowTinaChat(true);
   };
 
@@ -290,6 +295,9 @@ export default function OnboardingScreen() {
         onExit={handleTinaExit}
         onRequestMovieSelection={handleTinaRequestMovieSelection}
         selectedMovies={moviesForTina.length > 0 ? moviesForTina : undefined}
+        existingMessages={tinaMessages}
+        onMessagesChange={setTinaMessages}
+        isReturningFromMovieSelection={returningFromMovieSelection}
       />
     );
   }
