@@ -83,9 +83,9 @@ export default function GlobalTinaChatScreen({
       Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
       (e) => {
         setKeyboardHeight(e.endCoordinates.height);
-        // Scroll to end when keyboard opens
+        // Scroll to show latest message when keyboard opens
         setTimeout(() => {
-          flatListRef.current?.scrollToEnd({ animated: true });
+          scrollToLatestMessage();
         }, 100);
       }
     );
@@ -101,6 +101,26 @@ export default function GlobalTinaChatScreen({
       keyboardWillShow.remove();
       keyboardWillHide.remove();
     };
+  }, []);
+
+  // Scroll to show the latest message in the middle of the screen
+  const scrollToLatestMessage = useCallback(() => {
+    if (messages.length > 0 && flatListRef.current) {
+      setTimeout(() => {
+        flatListRef.current?.scrollToIndex({
+          index: messages.length - 1,
+          animated: true,
+          viewPosition: 0.5, // 0.5 = center of the visible area
+        });
+      }, 100);
+    }
+  }, [messages.length]);
+
+  // Handle scroll failures (fallback to scrollToEnd)
+  const onScrollToIndexFailed = useCallback((info: { index: number }) => {
+    setTimeout(() => {
+      flatListRef.current?.scrollToEnd({ animated: true });
+    }, 100);
   }, []);
 
   // ========== HELPER FUNCTIONS ==========
@@ -447,13 +467,14 @@ export default function GlobalTinaChatScreen({
         keyExtractor={item => item.id}
         contentContainerStyle={[
           styles.messageList,
-          { paddingBottom: 20 },
+          { paddingBottom: 150 }, // Extra padding so last message can scroll to center
         ]}
-        onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
-        onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })}
+        onContentSizeChange={() => scrollToLatestMessage()}
+        onLayout={() => scrollToLatestMessage()}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="interactive"
+        onScrollToIndexFailed={onScrollToIndexFailed}
         ListFooterComponent={isTyping ? (
           <View style={[styles.messageRow, styles.tinaMessageRow]}>
             <Image source={{ uri: TINA_AVATAR }} style={styles.avatar} />
