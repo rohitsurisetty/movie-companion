@@ -1042,21 +1042,21 @@ export default function SwipeScreen() {
           name: profile.name || '',
           age: profile.age || 0,
           gender: profile.gender || '',
-          genres: profile.genres || [],
-          filmLanguages: profile.filmLanguages || [],
-          languagesSpoken: profile.languagesSpoken || [],
-          topMovies: (profile.topMovies || []).map(m => ({
+          genres: Array.isArray(profile.genres) ? profile.genres : [],
+          filmLanguages: Array.isArray(profile.filmLanguages) ? profile.filmLanguages : [],
+          languagesSpoken: Array.isArray(profile.languagesSpoken) ? profile.languagesSpoken : [],
+          topMovies: (Array.isArray(profile.topMovies) ? profile.topMovies : []).map(m => ({
             id: m.id,
             title: m.title,
             poster_path: m.poster_path || '',
             release_date: m.release_date || '',
             vote_average: m.vote_average || 0,
             rating: m.rating || 0,
-            genres: m.genres || [],
+            genres: Array.isArray(m.genres) ? m.genres : [],
           })),
           movieFrequency: profile.movieFrequency || '',
           ottTheatre: profile.ottTheatre || '',
-          relationshipIntent: profile.relationshipIntent || [],
+          relationshipIntent: Array.isArray(profile.relationshipIntent) ? profile.relationshipIntent : [],
         }),
       });
       
