@@ -381,6 +381,9 @@ frontend_comprehensive_test:
       - working: false
         agent: "testing"
         comment: "❌ CRITICAL ISSUES FOUND: 1) Missing KeyboardProvider in root layout (_layout.tsx) - REQUIRED for react-native-keyboard-controller to work. 2) Inconsistent imports: Auth screens use react-native-keyboard-controller but BasicInfoStep, OptionalProfileStep, and Chat use standard React Native KeyboardAvoidingView. 3) Without KeyboardProvider, the keyboard controller won't function. REQUIRED FIXES: Add KeyboardProvider to _layout.tsx wrapping entire app, update imports in BasicInfoStep.tsx, OptionalProfileStep.tsx, and chat.tsx to use react-native-keyboard-controller. UI testing shows inputs are visible in web preview but this doesn't guarantee mobile keyboard behavior. Physical device testing required after fixes."
+      - working: false
+        agent: "testing"
+        comment: "❌ CRITICAL KEYBOARD ISSUES IN TINA CHAT MODAL (June 21, 2026): Comprehensive code review and testing attempts reveal MAJOR keyboard handling problems. CODE ANALYSIS: 1) DOUBLE KeyboardAvoidingView NESTING - TinaModal.tsx (lines 113-117) wraps entire modal with KeyboardAvoidingView, GlobalTinaChatScreen.tsx (lines 416-420) wraps chat area with ANOTHER KeyboardAvoidingView. This causes conflicts and unpredictable behavior. 2) INCONSISTENT BEHAVIORS - TinaModal uses behavior='padding' (iOS) and 'height' (Android), GlobalTinaChatScreen uses behavior='padding' (iOS) and undefined (Android). 3) ZERO OFFSET - Both have keyboardVerticalOffset={0}, not accounting for modal header height (~60px). 4) NOT USING react-native-keyboard-controller - Code uses React Native's standard KeyboardAvoidingView which has known issues in modals. TESTING RESULTS: Attempted 3 automated tests to verify keyboard behavior but could not complete onboarding flow due to form field automation limitations (gender dropdown, location field not filling correctly). However, code review confirms keyboard handling is INCORRECT. EXPECTED BEHAVIOR (like WhatsApp): Input field should stay visible above keyboard, messages should scroll up, user can see typed text. ACTUAL IMPLEMENTATION: Nested KeyboardAvoidingViews will likely cause input to be hidden behind keyboard or have erratic behavior. REQUIRED FIXES: 1) Remove one KeyboardAvoidingView (keep only in TinaModal.tsx), 2) Set proper keyboardVerticalOffset to account for header height, 3) Use consistent behavior across components, 4) Consider implementing react-native-keyboard-controller for better modal support. CONFIDENCE: HIGH - Code structure is definitively incorrect for proper keyboard handling in modals."
   
   - task: "Global App Mode Synchronization (Zustand)"
     implemented: true
@@ -461,6 +464,19 @@ frontend_comprehensive_test:
         comment: "✅ FLOATING TINA BUTTON VISIBILITY RULES - COMPREHENSIVE TEST PASSED (June 21, 2026): All 6/6 critical test cases PASSED. AUTOMATED TESTING RESULTS: 1) Login Screen ✅ - 0 floating Tina buttons found (CORRECT - should be hidden), 2) Phone Login Screen ✅ - 0 floating Tina buttons found (CORRECT - should be hidden), 3) OTP Screen ✅ - 0 floating Tina buttons found (CORRECT - should be hidden), 4) Basic Info Onboarding Step ✅ - 0 floating Tina buttons found (CORRECT - should be hidden), 5) Photo Upload Step ✅ - 0 floating Tina buttons found (CORRECT - should be hidden), 6) Tina Choice Step ✅ - 0 floating Tina buttons found (CORRECT - should be hidden). IMPLEMENTATION VERIFIED: TinaContext.tsx shouldShowFloatingButton() (lines 447-459) returns true ONLY when onboardingStage === 'completed', FloatingTinaButton.tsx (line 35) uses shouldShowFloatingButton() to control visibility, Default onboardingStage is 'pre_decision' (line 118 in TinaContext.tsx) which keeps button hidden during signup/onboarding. EXPECTED BEHAVIOR CONFIRMED: Floating button is correctly HIDDEN during all onboarding steps (login, OTP, Basic Info, Photo Upload, Tina Choice), Button should ONLY appear when onboardingStage === 'completed' (after onboarding finishes). Test credentials: Phone +9876543210, OTP: 123456. Mobile viewport: 390x844. All visibility rules working as designed. Feature is PRODUCTION-READY."
       - working: "VERIFIED_BY_CODE"
         agent: "testing"
+
+
+  - task: "Tina Chat Modal Keyboard Behavior (Post-Signup)"
+    implemented: true
+    working: false
+    file: "/app/frontend/src/components/TinaModal.tsx, /app/frontend/src/components/GlobalTinaChatScreen.tsx"
+    stuck_count: 1
+    priority: "critical"
+    needs_retesting: true
+    status_history:
+      - working: false
+        agent: "testing"
+        comment: "❌ CRITICAL KEYBOARD HANDLING ISSUE IN TINA CHAT MODAL (June 21, 2026): PROBLEM: Nested KeyboardAvoidingView components causing keyboard to hide input field instead of pushing it up (NOT like WhatsApp). CODE ANALYSIS: 1) TinaModal.tsx (lines 113-117) has KeyboardAvoidingView wrapping entire modal with behavior='padding' (iOS) / 'height' (Android), 2) GlobalTinaChatScreen.tsx (lines 416-420) has ANOTHER KeyboardAvoidingView wrapping chat area with behavior='padding' (iOS) / undefined (Android), 3) Both have keyboardVerticalOffset={0} which doesn't account for modal header height (~60px), 4) Double nesting causes conflicts - one tries to add padding while the other tries to adjust height, resulting in unpredictable behavior. TESTING: Attempted 3 automated E2E tests but could not complete onboarding flow due to form automation limitations (gender dropdown, location field). However, code structure definitively shows incorrect implementation. EXPECTED BEHAVIOR (like WhatsApp): When keyboard opens, input field should stay visible above keyboard, messages should scroll up, user can see typed text, send button accessible. ACTUAL BEHAVIOR (based on code): Input field likely gets hidden behind keyboard or has erratic positioning due to conflicting KeyboardAvoidingView behaviors. REQUIRED FIXES: 1) Remove KeyboardAvoidingView from GlobalTinaChatScreen.tsx (keep only in TinaModal.tsx), 2) Set keyboardVerticalOffset in TinaModal to account for header height (recommend 60-80px), 3) Use consistent behavior='padding' for iOS, 4) Test on actual device after fix. CONFIDENCE: HIGH - Code structure is definitively incorrect for proper keyboard handling in modals."
 
   - agent: "testing"
     message: |
@@ -5437,3 +5453,154 @@ agent_communication:
       🎯 Focus manual testing on: Complete onboarding → Check main tabs for floating button
       
       The Floating Tina Button visibility rules are working exactly as designed.
+
+
+  - agent: "testing"
+    message: |
+      ❌ CRITICAL ISSUE: TINA CHAT MODAL KEYBOARD BEHAVIOR - JUNE 21, 2026
+      
+      TEST OBJECTIVE: Verify keyboard handling in post-signup Tina chat modal (like WhatsApp)
+      
+      ========================================
+      TESTING SUMMARY
+      ========================================
+      
+      STATUS: ❌ CRITICAL KEYBOARD HANDLING ISSUE IDENTIFIED
+      
+      Attempted 3 automated E2E tests to verify keyboard behavior in Tina chat modal.
+      Could not complete full onboarding flow due to form automation limitations, BUT
+      comprehensive code review reveals DEFINITIVE keyboard handling problems.
+      
+      ========================================
+      CODE ANALYSIS - CRITICAL ISSUES FOUND
+      ========================================
+      
+      🔴 ISSUE #1: NESTED KeyboardAvoidingView COMPONENTS
+      
+      File: /app/frontend/src/components/TinaModal.tsx (lines 113-117)
+      ```typescript
+      <KeyboardAvoidingView
+        style={styles.keyboardAvoid}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={0}
+      >
+      ```
+      
+      File: /app/frontend/src/components/GlobalTinaChatScreen.tsx (lines 416-420)
+      ```typescript
+      <KeyboardAvoidingView 
+        style={styles.chatArea}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={0}
+      >
+      ```
+      
+      PROBLEM: Two KeyboardAvoidingView components are NESTED:
+      - TinaModal wraps the entire modal with one KeyboardAvoidingView
+      - GlobalTinaChatScreen wraps the chat area with ANOTHER KeyboardAvoidingView
+      - This causes conflicts: one tries to add padding, the other adjusts height
+      - Result: Unpredictable behavior, input field likely hidden behind keyboard
+      
+      🔴 ISSUE #2: INCONSISTENT BEHAVIORS
+      
+      - TinaModal: behavior='padding' (iOS) / 'height' (Android)
+      - GlobalTinaChatScreen: behavior='padding' (iOS) / undefined (Android)
+      - Inconsistency causes different behavior across components
+      
+      🔴 ISSUE #3: ZERO KEYBOARD OFFSET
+      
+      - Both components have keyboardVerticalOffset={0}
+      - Does NOT account for modal header height (~60px)
+      - Input field will be positioned incorrectly relative to keyboard
+      
+      🔴 ISSUE #4: NOT USING react-native-keyboard-controller
+      
+      - Code uses React Native's standard KeyboardAvoidingView
+      - Standard component has known issues in modals
+      - react-native-keyboard-controller provides better modal support
+      
+      ========================================
+      EXPECTED vs ACTUAL BEHAVIOR
+      ========================================
+      
+      EXPECTED (like WhatsApp):
+      ✅ Input field stays visible ABOVE keyboard
+      ✅ Messages scroll up when keyboard opens
+      ✅ User can see what they're typing
+      ✅ Send button is accessible
+      ✅ Smooth keyboard animation
+      
+      ACTUAL (based on code):
+      ❌ Input field likely HIDDEN behind keyboard
+      ❌ Messages may not scroll properly
+      ❌ User cannot see typed text
+      ❌ Erratic positioning due to nested KeyboardAvoidingViews
+      ❌ Inconsistent behavior across iOS/Android
+      
+      ========================================
+      REQUIRED FIXES
+      ========================================
+      
+      1. REMOVE NESTED KeyboardAvoidingView
+         - Remove KeyboardAvoidingView from GlobalTinaChatScreen.tsx
+         - Keep ONLY the one in TinaModal.tsx
+         - This eliminates conflicts
+      
+      2. SET PROPER KEYBOARD OFFSET
+         - In TinaModal.tsx, change keyboardVerticalOffset from 0 to 60-80
+         - This accounts for modal header height
+         - Ensures input field is positioned correctly
+      
+      3. USE CONSISTENT BEHAVIOR
+         - Use behavior='padding' for iOS consistently
+         - Use behavior='height' for Android consistently
+         - Remove undefined behavior
+      
+      4. CONSIDER react-native-keyboard-controller
+         - For better modal keyboard handling
+         - More reliable than standard KeyboardAvoidingView
+         - Better animation and positioning
+      
+      ========================================
+      TESTING ATTEMPTS
+      ========================================
+      
+      Attempt 1: Phone login button selector issue
+      Attempt 2: OTP verification - Login button not clicked
+      Attempt 3: Onboarding incomplete - gender/location fields not filled
+      
+      All attempts blocked by form automation limitations (React Native Web
+      selector issues with dropdowns and location fields). However, this does
+      NOT affect the validity of the code analysis findings.
+      
+      ========================================
+      CONFIDENCE LEVEL
+      ========================================
+      
+      CONFIDENCE: HIGH (95%)
+      
+      Reasoning:
+      - Code structure is definitively incorrect for modal keyboard handling
+      - Nested KeyboardAvoidingViews are a well-known anti-pattern
+      - Zero offset with modal header will cause positioning issues
+      - Standard KeyboardAvoidingView has documented issues in modals
+      
+      Even without E2E testing, the code review provides sufficient evidence
+      that keyboard behavior will NOT work like WhatsApp.
+      
+      ========================================
+      RECOMMENDATION
+      ========================================
+      
+      🚨 CRITICAL PRIORITY: Fix keyboard handling BEFORE production
+      
+      1. Apply the 4 fixes listed above
+      2. Test on actual iOS device (simulator may not show keyboard issues)
+      3. Test on actual Android device
+      4. Verify input field stays visible when keyboard opens
+      5. Verify messages scroll up properly
+      6. Verify user can see typed text
+      
+      This is a CRITICAL UX issue that will significantly impact user experience
+      if not fixed. Users will not be able to chat with Tina effectively if they
+      cannot see what they're typing.
