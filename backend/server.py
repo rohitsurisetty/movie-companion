@@ -67,6 +67,8 @@ from tina_service import (
     get_collected_profile_data,
     clear_tina_session,
     PROFILE_FIELDS,
+    generate_welcome_back_message,
+    get_user_onboarding_status,
 )
 
 # Import picture service for profile photos
@@ -2998,6 +3000,38 @@ async def tina_clear_session_endpoint(user_id: str):
         return {"success": True, "message": "Tina session cleared"}
     except Exception as e:
         logger.error(f"Clear Tina session error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class WelcomeBackRequest(BaseModel):
+    user_id: str
+    user_name: str = ""
+    is_onboarding_complete: bool = False
+
+
+@api_router.post("/tina/welcome-back")
+async def tina_welcome_back_endpoint(req: WelcomeBackRequest):
+    """Generate a contextual welcome-back message when user returns to Tina."""
+    try:
+        result = await generate_welcome_back_message(
+            user_id=req.user_id,
+            user_name=req.user_name,
+            is_onboarding_complete=req.is_onboarding_complete,
+        )
+        return {"success": True, **result}
+    except Exception as e:
+        logger.error(f"Welcome back error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.get("/tina/onboarding-status/{user_id}")
+async def tina_onboarding_status_endpoint(user_id: str):
+    """Check user's onboarding status."""
+    try:
+        status = await get_user_onboarding_status(user_id)
+        return {"success": True, **status}
+    except Exception as e:
+        logger.error(f"Onboarding status error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

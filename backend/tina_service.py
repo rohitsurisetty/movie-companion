@@ -802,3 +802,195 @@ async def clear_tina_session(user_id: str):
             await _db.tina_sessions.delete_one({"user_id": user_id})
         except Exception as e:
             logger.error(f"Error clearing Tina session: {e}")
+
+
+# ============================================
+# WELCOME BACK & RE-ENGAGEMENT
+# ============================================
+
+# Topics for post-onboarding engagement
+POST_ONBOARDING_TOPICS = [
+    {
+        "topic": "comfort_movies",
+        "question": "Quick question - what's your go-to comfort movie? The one you put on when nothing else sounds good 🛋️",
+        "follow_up": True
+    },
+    {
+        "topic": "movie_night_setup", 
+        "question": "Curious 🍿 What's your perfect movie night setup? Popcorn? Blankets? Snacks?",
+        "follow_up": True
+    },
+    {
+        "topic": "first_movie_date",
+        "question": "If you had to pick a movie for a first date, what would it be? 🎬",
+        "follow_up": True
+    },
+    {
+        "topic": "unpopular_opinion",
+        "question": "Time for a hot take 🔥 What's your most unpopular movie opinion?",
+        "follow_up": True
+    },
+    {
+        "topic": "favorite_actor",
+        "question": "Who's your ultimate movie crush? Actor or actress who you'd watch in anything 😏",
+        "follow_up": True
+    },
+    {
+        "topic": "rewatched_most",
+        "question": "What movie have you rewatched the most times? Be honest 😄",
+        "follow_up": True
+    },
+    {
+        "topic": "movie_character",
+        "question": "Here's a fun one - which movie character would you want to grab coffee with? ☕",
+        "follow_up": True
+    },
+    {
+        "topic": "hidden_gem",
+        "question": "Got a hidden gem movie that not enough people know about? Share your secret 🤫",
+        "follow_up": True
+    },
+    {
+        "topic": "theatre_vs_home",
+        "question": "Big debate time - is the theatre experience worth it, or is home better? 🎭",
+        "follow_up": True
+    },
+    {
+        "topic": "movie_partner_ideal",
+        "question": "What's your ideal movie buddy like? Someone who talks during movies or stays quiet? 🤔",
+        "follow_up": True
+    },
+]
+
+
+async def generate_welcome_back_message(
+    user_id: str,
+    user_name: str = "",
+    is_onboarding_complete: bool = False,
+    conversation_history: List[Dict] = None,
+    collected_fields: Dict = None,
+) -> Dict[str, Any]:
+    """
+    Generate a contextual welcome-back message when user returns to Tina.
+    
+    Returns:
+        {
+            "message": str,  # Tina's welcome back message
+            "show_options": Optional[Dict],  # Options to show
+            "next_field": Optional[str],  # Field to collect next (if onboarding incomplete)
+            "topic": Optional[str],  # Engagement topic (if post-onboarding)
+        }
+    """
+    session = await get_tina_session(user_id)
+    collected = session.get("collected_fields", {}) if collected_fields is None else collected_fields
+    
+    # Track asked topics to avoid repetition
+    asked_topics = session.get("asked_engagement_topics", [])
+    
+    result = {
+        "message": "",
+        "show_options": None,
+        "next_field": None,
+        "topic": None,
+    }
+    
+    name = user_name or collected.get("name", "there")
+    
+    if not is_onboarding_complete:
+        # === ONBOARDING INCOMPLETE ===
+        next_field = get_next_field_to_collect(session)
+        completion = get_completion_percentage(session)
+        
+        if next_field:
+            result["next_field"] = next_field
+            field_config = PROFILE_FIELDS.get(next_field, {})
+            
+            # Generate contextual welcome back based on what's missing
+            if completion < 30:
+                greetings = [
+                    f"Hey {name}! 👋 Let's keep building your profile!",
+                    f"Welcome back, {name}! Ready to continue? 😊",
+                    f"Good to see you again! Let's pick up where we left off 💫",
+                ]
+            elif completion < 60:
+                greetings = [
+                    f"You're back! 🎉 We're making great progress, {name}!",
+                    f"Hey {name}! Almost halfway there - let's keep going! 💪",
+                    f"Welcome back! Your profile is coming together nicely 😊",
+                ]
+            elif completion < 90:
+                greetings = [
+                    f"So close, {name}! Just a few more things and you're all set 🚀",
+                    f"Almost there! Let's finish up your profile 🎯",
+                    f"Hey! You're nearly done - let's wrap this up! ✨",
+                ]
+            else:
+                greetings = [
+                    f"Just one more thing, {name}! Let's complete your profile 🎊",
+                    f"Final stretch! One more question and you're good to go 💫",
+                ]
+            
+            import random
+            result["message"] = random.choice(greetings)
+            
+            # Add options if the next field needs them
+            if field_config.get("type") in ["single_select", "multi_select"]:
+                result["show_options"] = {
+                    "field": next_field,
+                    "options": field_config.get("options", []),
+                    "multiSelect": field_config.get("type") == "multi_select"
+                }
+        else:
+            # Somehow no next field but not complete?
+            result["message"] = f"Welcome back, {name}! Let's continue our chat 😊"
+    
+    else:
+        # === ONBOARDING COMPLETE - ENGAGEMENT MODE ===
+        # Find a topic we haven't asked yet
+        available_topics = [t for t in POST_ONBOARDING_TOPICS if t["topic"] not in asked_topics]
+        
+        if available_topics:
+            import random
+            chosen = random.choice(available_topics)
+            result["message"] = f"Hey {name}! 💫\n\n{chosen['question']}"
+            result["topic"] = chosen["topic"]
+            
+            # Save that we asked this topic
+            asked_topics.append(chosen["topic"])
+            session["asked_engagement_topics"] = asked_topics
+            await save_tina_session(session)
+        else:
+            # Asked all topics, generate something generic but warm
+            greetings = [
+                f"Hey {name}! Good to see you back 😊 What's on your mind?",
+                f"Welcome back! Anything exciting happening in your movie world? 🎬",
+                f"Hey there! Ready to chat about movies? 🍿",
+                f"Nice to see you again, {name}! What's up? 💫",
+            ]
+            import random
+            result["message"] = random.choice(greetings)
+            
+            # Reset topics so we can ask again
+            session["asked_engagement_topics"] = []
+            await save_tina_session(session)
+    
+    return result
+
+
+async def get_user_onboarding_status(user_id: str) -> Dict[str, Any]:
+    """Check if user has completed onboarding."""
+    session = await get_tina_session(user_id)
+    completed = set(session.get("completed_fields", []))
+    
+    # Count mandatory fields completed
+    mandatory_fields = [f for f, c in PROFILE_FIELDS.items() if not c.get("optional", False)]
+    mandatory_completed = len([f for f in mandatory_fields if f in completed])
+    total_mandatory = len(mandatory_fields)
+    
+    return {
+        "is_complete": mandatory_completed >= total_mandatory,
+        "completion_percentage": get_completion_percentage(session),
+        "completed_fields": list(completed),
+        "missing_fields": [f for f in mandatory_fields if f not in completed],
+    }
+

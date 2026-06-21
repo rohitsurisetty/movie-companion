@@ -234,6 +234,35 @@ export default function TinaChatScreen({
     return null;
   }, [userId]);
   
+  // Fetch welcome-back message from backend
+  const fetchWelcomeBackMessage = useCallback(async (isOnboardingComplete: boolean = false): Promise<string | null> => {
+    try {
+      const response = await fetch(`${API_BASE}/api/tina/welcome-back`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: userId,
+          user_name: userName || '',
+          is_onboarding_complete: isOnboardingComplete,
+        }),
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.message) {
+          // If there are options to show, set them
+          if (data.show_options) {
+            setCurrentOptions(data.show_options);
+          }
+          return data.message;
+        }
+      }
+    } catch (error) {
+      console.error('[Tina] Failed to fetch welcome-back message:', error);
+    }
+    return null;
+  }, [userId, userName]);
+  
   // ========== GUARANTEED INITIALIZATION ==========
   // This function ALWAYS results in messages being displayed - NEVER a blank screen
   const initializeConversation = useCallback(async () => {
@@ -251,13 +280,13 @@ export default function TinaChatScreen({
       hasIncomingMovies: incomingMovies?.length || 0
     });
     
-    // If we already have messages (from useState initializer), just handle special cases
+    // If we already have messages (from useState initializer or props), handle welcome back
     if (messages.length > 0) {
-      console.log('[Tina] Already have messages, handling special cases');
+      console.log('[Tina] Already have messages, fetching contextual welcome back');
       setIsInitialized(true);
       setIsLoading(false);
       
-      // Handle returning from movie selection
+      // Handle returning from movie selection - special case
       if (isReturningFromMovieSelection && !welcomeBackShown) {
         setWelcomeBackShown(true);
         if (incomingMovies && incomingMovies.length > 0 && !pendingMoviesProcessed) {
@@ -268,13 +297,28 @@ export default function TinaChatScreen({
             setTimeout(() => handleMoviesReceived(incomingMovies), 300);
           }, 100);
         } else {
+          // Fetch contextual welcome back message from API
+          const welcomeMsg = await fetchWelcomeBackMessage(false);
           setTimeout(() => {
-            addMessage(`Welcome back, ${userName || 'there'}! 😊`, false);
-            setTimeout(() => {
-              addMessage("Let's continue where we left off...", false);
-              setTimeout(() => sendToTina(''), 800);
-            }, 400);
+            addMessage(welcomeMsg || `Welcome back, ${userName || 'there'}! 😊`, false);
+            setTimeout(() => sendToTina(''), 800);
           }, 100);
+        }
+        return;
+      }
+      
+      // For regular returns (not from movie selection), also fetch contextual message
+      if (!welcomeBackShown) {
+        setWelcomeBackShown(true);
+        const welcomeMsg = await fetchWelcomeBackMessage(onboardingContext === 'post_onboarding');
+        if (welcomeMsg) {
+          setTimeout(() => {
+            addMessage(welcomeMsg, false);
+            // Only continue chat if onboarding incomplete
+            if (onboardingContext !== 'post_onboarding') {
+              setTimeout(() => sendToTina(''), 800);
+            }
+          }, 200);
         }
       }
       return;
@@ -291,10 +335,13 @@ export default function TinaChatScreen({
         setIsInitialized(true);
         setIsLoading(false);
         
-        // Add a welcome back message
+        // Fetch contextual welcome back message
+        const welcomeMsg = await fetchWelcomeBackMessage(onboardingContext === 'post_onboarding');
         setTimeout(() => {
-          addMessage(`Welcome back, ${userName || 'there'}! 😊`, false);
-          setTimeout(() => sendToTina(''), 800);
+          addMessage(welcomeMsg || `Welcome back, ${userName || 'there'}! 😊`, false);
+          if (onboardingContext !== 'post_onboarding') {
+            setTimeout(() => sendToTina(''), 800);
+          }
         }, 300);
         return;
       }
@@ -351,7 +398,9 @@ export default function TinaChatScreen({
     pendingMoviesProcessed,
     welcomeBackShown,
     userName, 
+    onboardingContext,
     loadSavedConversation, 
+    fetchWelcomeBackMessage,
     addMessage, 
     addMessagesSequentially, 
     getContextualFallbackGreeting
