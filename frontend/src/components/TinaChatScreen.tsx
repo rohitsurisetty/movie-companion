@@ -1,13 +1,14 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Image, TextInput,
   FlatList, Platform, KeyboardAvoidingView,
-  Dimensions, ScrollView, Animated, Easing,
+  Dimensions, ScrollView, Animated, Easing, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../theme';
 import { ProfileData } from '../types';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width } = Dimensions.get('window');
 const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || process.env.EXPO_PUBLIC_API_URL || '';
@@ -17,6 +18,33 @@ const TINA_AVATAR = 'https://images.unsplash.com/photo-1494790108377-be9c29b2933
 
 // Total mandatory fields for progress calculation
 const TOTAL_TOPICS = 12;
+
+// Storage key for conversation persistence
+const TINA_CONVERSATION_KEY = 'tina_conversation_state';
+
+// Fallback greetings when API fails - contextual based on onboarding stage
+const FALLBACK_GREETINGS = {
+  default: [
+    "Hey there! 💫 I'm Tina, your personal matchmaker.",
+    "Let's get to know you better so I can find your perfect movie buddy!",
+  ],
+  returning: [
+    "Welcome back! 😊",
+    "Ready to continue where we left off?",
+  ],
+  movieSelection: [
+    "Great picks! 🎬",
+    "I can already tell we're going to find you some amazing matches!",
+  ],
+  profileStart: [
+    "Hi! Let's get your profile ready 🎬",
+    "I'll guide you through the process - it'll be fun, I promise!",
+  ],
+  emailVerification: [
+    "Perfect! Your email is verified ✅",
+    "Now let's build your profile together!",
+  ],
+};
 
 type Message = {
   id: string;
@@ -31,6 +59,15 @@ type DeepLinkAction = {
   icon: string;
 };
 
+// Onboarding context to help Tina know where user is in the flow
+type OnboardingContext = 
+  | 'fresh_start'      // First time entering Tina
+  | 'profile_building' // Building profile
+  | 'movie_selection'  // Returning from movie selection
+  | 'email_verified'   // Just verified email
+  | 'returning'        // Returning to existing conversation
+  | 'post_onboarding'; // Onboarding complete, free chat
+
 type Props = {
   userId: string;
   userName: string;
@@ -43,6 +80,8 @@ type Props = {
   existingMessages?: any[];
   onMessagesChange?: (messages: any[]) => void;
   isReturningFromMovieSelection?: boolean;
+  // NEW: Onboarding context for smart conversation handling
+  onboardingContext?: OnboardingContext;
 };
 
 export default function TinaChatScreen({ 
@@ -55,22 +94,17 @@ export default function TinaChatScreen({
   existingMessages,
   onMessagesChange,
   isReturningFromMovieSelection,
+  onboardingContext = 'fresh_start',
 }: Props) {
   const insets = useSafeAreaInsets();
   
-  // Track if this is a fresh mount or a return from navigation
-  const hasExistingConversation = existingMessages && existingMessages.length > 0;
-  
-  // Initialize messages from existing if available
-  const [messages, setMessages] = useState<Message[]>(() => {
-    if (hasExistingConversation) {
-      return existingMessages;
-    }
-    return [];
-  });
+  // ========== CORE STATE ==========
+  const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
-  const [isLoading, setIsLoading] = useState(false); // Loading state for better UX
+  const [isLoading, setIsLoading] = useState(true); // Start with loading state
+  const [isInitialized, setIsInitialized] = useState(false);
+  const [initializationAttempts, setInitializationAttempts] = useState(0);
   const [topicsCollected, setTopicsCollected] = useState(0);
   const [profileData, setProfileData] = useState<Partial<ProfileData>>({});
   const [currentOptions, setCurrentOptions] = useState<{
@@ -82,22 +116,220 @@ export default function TinaChatScreen({
   const [showSendButton, setShowSendButton] = useState(false);
   const [currentDeepLink, setCurrentDeepLink] = useState<DeepLinkAction | null>(null);
   const [isExiting, setIsExiting] = useState(false);
-  
-  // Track initialization - only init new conversation if no existing messages AND not returning
-  const [hasInitialized, setHasInitialized] = useState(() => {
-    // If we have existing messages, we're already initialized
-    if (hasExistingConversation) return true;
-    // If returning from movie selection, we'll handle that separately
-    if (isReturningFromMovieSelection) return true;
-    return false;
-  });
   const [pendingMoviesProcessed, setPendingMoviesProcessed] = useState(false);
-  const [welcomeBackShown, setWelcomeBackShown] = useState(false);
   
   const flatListRef = useRef<FlatList>(null);
   const typingAnimation = useRef(new Animated.Value(0)).current;
   const messageAnimations = useRef<{ [key: string]: Animated.Value }>({});
+  const initializationRef = useRef(false);
+  
+  // ========== HELPER FUNCTIONS ==========
+  
+  // Generate a unique message ID
+  const generateMessageId = (isUser: boolean) => 
+    `${isUser ? 'user' : 'tina'}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  
+  // Get contextual fallback greeting based on onboarding stage
+  const getContextualFallbackGreeting = useCallback((): string[] => {
+    const name = userName || 'there';
+    
+    if (isReturningFromMovieSelection) {
+      return [`Great picks, ${name}! 🎬`, "Your movie taste tells me a lot about you!"];
+    }
+    
+    switch (onboardingContext) {
+      case 'email_verified':
+        return [`Perfect! Email verified ✅`, `Now let's build your profile, ${name}!`];
+      case 'returning':
+        return [`Welcome back, ${name}! 😊`, "Ready to continue where we left off?"];
+      case 'movie_selection':
+        return [`Great picks, ${name}! 🎬`, "I can already tell we're going to find you some amazing matches!"];
+      case 'post_onboarding':
+        return [`Hey ${name}! 💫`, "Your profile is looking great! How can I help you today?"];
+      case 'profile_building':
+      case 'fresh_start':
+      default:
+        return [`Hey ${name}! 💫`, "I'm Tina, your personal matchmaker. Let's create an amazing profile together!"];
+    }
+  }, [userName, onboardingContext, isReturningFromMovieSelection]);
+  
+  // Add message with animation
+  const addMessage = useCallback((text: string, isUser: boolean): Message => {
+    const msg: Message = {
+      id: generateMessageId(isUser),
+      text,
+      isUser,
+      timestamp: new Date(),
+    };
+    
+    setMessages(prev => [...prev, msg]);
+    
+    // Animate message entrance
+    if (!messageAnimations.current[msg.id]) {
+      messageAnimations.current[msg.id] = new Animated.Value(0);
+    }
+    Animated.spring(messageAnimations.current[msg.id], {
+      toValue: 1,
+      tension: 100,
+      friction: 8,
+      useNativeDriver: true,
+    }).start();
+    
+    return msg;
+  }, []);
+  
+  // Add multiple messages sequentially with delays
+  const addMessagesSequentially = useCallback(async (texts: string[], delayMs: number = 500) => {
+    for (let i = 0; i < texts.length; i++) {
+      await new Promise(resolve => setTimeout(resolve, i === 0 ? 0 : delayMs));
+      addMessage(texts[i], false);
+    }
+  }, [addMessage]);
+  
+  // Save conversation to AsyncStorage
+  const saveConversation = useCallback(async (msgs: Message[]) => {
+    if (!userId) return;
+    try {
+      const data = {
+        userId,
+        messages: msgs,
+        timestamp: Date.now(),
+        profileData,
+        topicsCollected,
+      };
+      await AsyncStorage.setItem(`${TINA_CONVERSATION_KEY}_${userId}`, JSON.stringify(data));
+    } catch (error) {
+      console.error('Failed to save conversation:', error);
+    }
+  }, [userId, profileData, topicsCollected]);
+  
+  // Load conversation from AsyncStorage
+  const loadSavedConversation = useCallback(async (): Promise<Message[] | null> => {
+    if (!userId) return null;
+    try {
+      const saved = await AsyncStorage.getItem(`${TINA_CONVERSATION_KEY}_${userId}`);
+      if (saved) {
+        const data = JSON.parse(saved);
+        // Check if conversation is less than 24 hours old
+        if (data.timestamp && Date.now() - data.timestamp < 24 * 60 * 60 * 1000) {
+          if (data.profileData) setProfileData(data.profileData);
+          if (data.topicsCollected) setTopicsCollected(data.topicsCollected);
+          return data.messages || [];
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load saved conversation:', error);
+    }
+    return null;
+  }, [userId]);
+  
+  // ========== GUARANTEED INITIALIZATION ==========
+  // This function ALWAYS results in messages being displayed - NEVER a blank screen
+  const initializeConversation = useCallback(async () => {
+    // Prevent double initialization
+    if (initializationRef.current) return;
+    initializationRef.current = true;
+    
+    setIsLoading(true);
+    
+    try {
+      // PRIORITY 1: Use existing messages from props (navigation state)
+      if (existingMessages && existingMessages.length > 0) {
+        setMessages(existingMessages);
+        setIsInitialized(true);
+        setIsLoading(false);
+        
+        // If returning from movie selection with movies, handle that
+        if (isReturningFromMovieSelection && incomingMovies && incomingMovies.length > 0 && !pendingMoviesProcessed) {
+          setPendingMoviesProcessed(true);
+          setCurrentDeepLink(null);
+          setTimeout(() => {
+            addMessage(`Great picks! 🎬`, false);
+            setTimeout(() => handleMoviesReceived(incomingMovies), 300);
+          }, 100);
+        } else if (isReturningFromMovieSelection) {
+          // Returning without movies selected
+          setTimeout(() => {
+            addMessage(`Welcome back, ${userName || 'there'}! 😊`, false);
+            setTimeout(() => {
+              addMessage("Let's continue where we left off...", false);
+              setTimeout(() => sendToTina(''), 800);
+            }, 400);
+          }, 100);
+        }
+        return;
+      }
+      
+      // PRIORITY 2: Try to load from AsyncStorage
+      const savedMessages = await loadSavedConversation();
+      if (savedMessages && savedMessages.length > 0) {
+        setMessages(savedMessages);
+        setIsInitialized(true);
+        setIsLoading(false);
+        
+        // Add a welcome back message
+        setTimeout(() => {
+          addMessage(`Welcome back, ${userName || 'there'}! 😊`, false);
+          setTimeout(() => sendToTina(''), 800);
+        }, 300);
+        return;
+      }
+      
+      // PRIORITY 3: Fetch greeting from API
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8000);
+        
+        const res = await fetch(
+          `${API_BASE}/api/tina/greeting?user_name=${encodeURIComponent(userName || '')}`,
+          { signal: controller.signal }
+        );
+        clearTimeout(timeoutId);
+        
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && data.greeting) {
+            addMessage(data.greeting, false);
+            setIsInitialized(true);
+            setIsLoading(false);
+            setTimeout(() => sendToTina(''), 1200);
+            return;
+          }
+        }
+      } catch (apiError) {
+        console.log('API greeting failed, using fallback:', apiError);
+      }
+      
+      // PRIORITY 4: GUARANTEED FALLBACK - Always show something
+      const fallbackMessages = getContextualFallbackGreeting();
+      await addMessagesSequentially(fallbackMessages, 600);
+      setIsInitialized(true);
+      setIsLoading(false);
+      setTimeout(() => sendToTina(''), 1000);
+      
+    } catch (error) {
+      console.error('Initialization error:', error);
+      
+      // ULTIMATE FALLBACK - This MUST NEVER fail
+      const emergencyMessage = `Hey ${userName || 'there'}! 💫 I'm Tina, your matchmaker. Let's get started!`;
+      addMessage(emergencyMessage, false);
+      setIsInitialized(true);
+      setIsLoading(false);
+    }
+  }, [
+    existingMessages, 
+    isReturningFromMovieSelection, 
+    incomingMovies, 
+    pendingMoviesProcessed,
+    userName, 
+    loadSavedConversation, 
+    addMessage, 
+    addMessagesSequentially, 
+    getContextualFallbackGreeting
+  ]);
 
+  // ========== EFFECTS ==========
+  
   // Typing dots animation
   useEffect(() => {
     if (isTyping) {
@@ -110,123 +342,54 @@ export default function TinaChatScreen({
     } else {
       typingAnimation.setValue(0);
     }
-  }, [isTyping]);
+  }, [isTyping, typingAnimation]);
 
-  // Restore messages from parent when component mounts with existing messages
+  // MAIN INITIALIZATION - Runs once on mount
   useEffect(() => {
-    if (hasExistingConversation && messages.length === 0) {
-      // Messages were lost during re-mount, restore them
-      setMessages(existingMessages);
-    }
-  }, []);
-
-  // Initialize conversation only for fresh starts (no existing messages)
+    initializeConversation();
+    
+    // Cleanup function
+    return () => {
+      initializationRef.current = false;
+    };
+  }, []); // Empty deps - only run on mount
+  
+  // Save messages to parent and AsyncStorage whenever they change
   useEffect(() => {
-    if (!hasInitialized && !hasExistingConversation) {
-      setIsLoading(true);
-      initConversation().finally(() => setIsLoading(false));
-      setHasInitialized(true);
-    }
-  }, [hasInitialized, hasExistingConversation]);
-
-  // Handle returning from movie selection
-  useEffect(() => {
-    if (isReturningFromMovieSelection && !welcomeBackShown) {
-      setWelcomeBackShown(true);
-      
-      // If user came back WITHOUT selecting movies, show welcome back and continue
-      if (!incomingMovies || incomingMovies.length === 0) {
-        // Small delay to ensure messages state is ready
-        setTimeout(() => {
-          addMessage(`Welcome back, ${userName || 'there'}! 😊`, false);
-          setTimeout(() => {
-            addMessage("Let's continue where we left off...", false);
-            // Resume conversation from where it left
-            setTimeout(() => sendToTina(''), 1000);
-          }, 500);
-        }, 100);
+    if (messages.length > 0) {
+      if (onMessagesChange) {
+        onMessagesChange(messages);
       }
-      // If movies ARE selected, handleMoviesReceived will handle the flow
+      saveConversation(messages);
     }
-  }, [isReturningFromMovieSelection, welcomeBackShown]);
-
-  // Handle incoming movies from TopMoviesStep
+  }, [messages, onMessagesChange, saveConversation]);
+  
+  // Handle late-arriving movies from navigation (in case useEffect fires after init)
   useEffect(() => {
-    if (incomingMovies && incomingMovies.length > 0 && !pendingMoviesProcessed) {
+    if (isInitialized && incomingMovies && incomingMovies.length > 0 && !pendingMoviesProcessed) {
       setPendingMoviesProcessed(true);
-      // Clear the deep link CTA
       setCurrentDeepLink(null);
-      
-      // Add a small delay for smooth transition when returning
       setTimeout(() => {
-        // Show welcome back message first if returning
-        if (isReturningFromMovieSelection) {
-          addMessage(`Great picks, ${userName || 'there'}! 🎬`, false);
-          setTimeout(() => {
-            handleMoviesReceived(incomingMovies);
-          }, 300);
-        } else {
-          handleMoviesReceived(incomingMovies);
-        }
+        addMessage(`Great picks! 🎬`, false);
+        setTimeout(() => handleMoviesReceived(incomingMovies), 300);
       }, 100);
     }
-  }, [incomingMovies, pendingMoviesProcessed]);
-
-  // Save messages to parent whenever they change
+  }, [isInitialized, incomingMovies, pendingMoviesProcessed, addMessage]);
+  
+  // SAFETY NET: If somehow we end up with no messages after init, recover
   useEffect(() => {
-    if (onMessagesChange && messages.length > 0) {
-      onMessagesChange(messages);
+    if (isInitialized && !isLoading && messages.length === 0) {
+      console.warn('Safety net triggered: No messages after initialization');
+      const emergencyMessage = `Hey ${userName || 'there'}! 💫 Let's continue building your profile!`;
+      addMessage(emergencyMessage, false);
     }
-  }, [messages, onMessagesChange]);
+  }, [isInitialized, isLoading, messages.length, userName, addMessage]);
 
   const getMessageAnimation = (id: string) => {
     if (!messageAnimations.current[id]) {
       messageAnimations.current[id] = new Animated.Value(0);
     }
     return messageAnimations.current[id];
-  };
-
-  const addMessage = (text: string, isUser: boolean) => {
-    const msg: Message = {
-      id: `${isUser ? 'user' : 'tina'}_${Date.now()}_${Math.random()}`,
-      text,
-      isUser,
-      timestamp: new Date(),
-    };
-    setMessages(prev => {
-      const newMessages = [...prev, msg];
-      return newMessages;
-    });
-    
-    // Animate message entrance
-    const anim = getMessageAnimation(msg.id);
-    Animated.spring(anim, {
-      toValue: 1,
-      tension: 100,
-      friction: 8,
-      useNativeDriver: true,
-    }).start();
-    
-    return msg;
-  };
-
-  const initConversation = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/api/tina/greeting?user_name=${encodeURIComponent(userName)}`);
-      const data = await res.json();
-      
-      if (data.success) {
-        addMessage(data.greeting, false);
-        setTimeout(() => sendToTina(''), 1500);
-      }
-    } catch (error) {
-      console.error('Init error:', error);
-      addMessage(`Hey ${userName}! 💫`, false);
-      setTimeout(() => {
-        addMessage("I'm Tina, your personal matchmaker.", false);
-        setTimeout(() => sendToTina(''), 1000);
-      }, 800);
-    }
   };
 
   // Handle movies received from TopMoviesStep
@@ -515,15 +678,18 @@ export default function TinaChatScreen({
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={0}
       >
-        {/* Loading State */}
+        {/* Loading State - Shows animated indicator while initializing */}
         {isLoading && messages.length === 0 && (
           <View style={styles.loadingContainer}>
-            <Animated.View style={[styles.typingDots, { opacity: typingAnimation }]}>
-              <View style={styles.typingDot} />
-              <View style={styles.typingDot} />
-              <View style={styles.typingDot} />
-            </Animated.View>
-            <Text style={styles.loadingText}>Tina is getting ready...</Text>
+            <Image source={{ uri: TINA_AVATAR }} style={styles.loadingAvatar} />
+            <View style={styles.loadingContent}>
+              <Animated.View style={[styles.typingDotsContainer, { opacity: typingAnimation }]}>
+                <View style={styles.typingDot} />
+                <View style={[styles.typingDot, styles.typingDotMiddle]} />
+                <View style={styles.typingDot} />
+              </Animated.View>
+              <Text style={styles.loadingText}>Tina is getting ready...</Text>
+            </View>
           </View>
         )}
         
@@ -534,13 +700,18 @@ export default function TinaChatScreen({
           keyExtractor={item => item.id}
           contentContainerStyle={[
             styles.messageList,
-            { paddingBottom: currentOptions || currentDeepLink ? 200 : 100 }
+            { paddingBottom: currentOptions || currentDeepLink ? 200 : 100 },
+            messages.length === 0 && !isLoading && styles.emptyListContainer,
           ]}
           onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={!isLoading ? (
             <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>Starting conversation with Tina...</Text>
+              <Image source={{ uri: TINA_AVATAR }} style={styles.emptyAvatar} />
+              <Text style={styles.emptyTitle}>Hi there! 👋</Text>
+              <Text style={styles.emptyText}>I&apos;m Tina, your matchmaker.</Text>
+              <Text style={styles.emptySubtext}>Getting things ready for you...</Text>
+              <ActivityIndicator size="small" color="#FF6B6B" style={{ marginTop: 16 }} />
             </View>
           ) : null}
           ListFooterComponent={isTyping ? (
@@ -984,23 +1155,60 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 40,
+    paddingVertical: 60,
+    paddingHorizontal: 40,
+  },
+  loadingAvatar: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    marginBottom: 20,
+    borderWidth: 3,
+    borderColor: '#FF6B6B',
+  },
+  loadingContent: {
+    alignItems: 'center',
   },
   loadingText: {
     marginTop: 16,
-    fontSize: 15,
-    color: 'rgba(255,255,255,0.6)',
+    fontSize: 16,
+    color: 'rgba(255,255,255,0.7)',
     fontWeight: '500',
+  },
+  emptyListContainer: {
+    flexGrow: 1,
   },
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 40,
+    paddingVertical: 60,
+    paddingHorizontal: 40,
+  },
+  emptyAvatar: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    marginBottom: 20,
+    borderWidth: 3,
+    borderColor: '#FF6B6B',
+  },
+  emptyTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+    marginBottom: 8,
   },
   emptyText: {
-    fontSize: 15,
+    fontSize: 17,
+    color: 'rgba(255,255,255,0.8)',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  emptySubtext: {
+    fontSize: 14,
     color: 'rgba(255,255,255,0.5)',
+    textAlign: 'center',
     fontStyle: 'italic',
   },
 });
