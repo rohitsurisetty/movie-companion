@@ -7,8 +7,6 @@ import {
   Text,
   Dimensions,
   Animated,
-  Platform,
-  KeyboardAvoidingView,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -105,53 +103,48 @@ export default function TinaModal({ onNavigationRequest }: TinaModalProps) {
           },
         ]}
       >
-        <KeyboardAvoidingView
-          style={styles.keyboardAvoid}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        >
-          <SafeAreaView style={styles.safeArea} edges={['top']}>
-            {/* Header */}
-            <View style={styles.header}>
-              <View style={styles.headerLeft}>
-                <TouchableOpacity
-                  onPress={handleMinimize}
-                  style={styles.headerButton}
-                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                >
-                  <Ionicons name="chevron-down" size={28} color="#FFFFFF" />
-                </TouchableOpacity>
-              </View>
-              
-              <View style={styles.headerCenter}>
-                <Text style={styles.headerTitle}>Tina</Text>
-                <View style={styles.onlineDot} />
-              </View>
-              
-              <View style={styles.headerRight}>
-                <TouchableOpacity
-                  onPress={handleClose}
-                  style={styles.headerButton}
-                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                >
-                  <Ionicons name="close" size={24} color="#FFFFFF" />
-                </TouchableOpacity>
-              </View>
+        <SafeAreaView style={styles.safeArea} edges={['top']}>
+          {/* Header */}
+          <View style={styles.header}>
+            <View style={styles.headerLeft}>
+              <TouchableOpacity
+                onPress={handleMinimize}
+                style={styles.headerButton}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Ionicons name="chevron-down" size={28} color="#FFFFFF" />
+              </TouchableOpacity>
             </View>
+            
+            <View style={styles.headerCenter}>
+              <Text style={styles.headerTitle}>Tina</Text>
+              <View style={styles.onlineDot} />
+            </View>
+            
+            <View style={styles.headerRight}>
+              <TouchableOpacity
+                onPress={handleClose}
+                style={styles.headerButton}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Ionicons name="close" size={24} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
+          </View>
 
-            {/* Chat Content */}
-            <View style={styles.chatContainer}>
-              <GlobalTinaChatScreen
-                userId={userProfile?.userId || ''}
-                userName={userProfile?.name || ''}
-                existingMessages={state.messages}
-                onMessagesChange={handleMessagesChange}
-                onNavigationRequest={onNavigationRequest}
-                isOnboardingComplete={state.isOnboardingComplete}
-                userProfile={userProfile}
-              />
-            </View>
-          </SafeAreaView>
-        </KeyboardAvoidingView>
+          {/* Chat Content */}
+          <View style={styles.chatContainer}>
+            <GlobalTinaChatScreen
+              userId={userProfile?.userId || ''}
+              userName={userProfile?.name || ''}
+              existingMessages={state.messages}
+              onMessagesChange={handleMessagesChange}
+              onNavigationRequest={onNavigationRequest}
+              isOnboardingComplete={state.isOnboardingComplete}
+              userProfile={userProfile}
+            />
+          </View>
+        </SafeAreaView>
       </Animated.View>
     </Modal>
   );
@@ -172,9 +165,6 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     overflow: 'hidden',
-  },
-  keyboardAvoid: {
-    flex: 1,
   },
   safeArea: {
     flex: 1,

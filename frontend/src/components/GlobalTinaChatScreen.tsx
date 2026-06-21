@@ -392,7 +392,11 @@ export default function GlobalTinaChatScreen({
   };
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView 
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+    >
       {/* Loading State */}
       {isLoading && messages.length === 0 && (
         <View style={styles.loadingContainer}>
@@ -410,10 +414,12 @@ export default function GlobalTinaChatScreen({
         keyExtractor={item => item.id}
         contentContainerStyle={[
           styles.messageList,
-          { paddingBottom: currentOptions || currentDeepLink ? 200 : 100 },
+          { paddingBottom: currentOptions || currentDeepLink ? 200 : 20 },
         ]}
         onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
         ListFooterComponent={isTyping ? (
           <View style={[styles.messageRow, styles.tinaMessageRow]}>
             <Image source={{ uri: TINA_AVATAR }} style={styles.avatar} />
@@ -470,7 +476,7 @@ export default function GlobalTinaChatScreen({
       )}
 
       {/* Composer */}
-      <View style={[styles.composerContainer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+      <View style={[styles.composerContainer, { paddingBottom: Math.max(insets.bottom, 8) }]}>
         <View style={styles.composer}>
           <TextInput
             style={styles.input}
@@ -483,6 +489,8 @@ export default function GlobalTinaChatScreen({
             placeholderTextColor="rgba(255,255,255,0.4)"
             multiline
             maxLength={500}
+            returnKeyType="send"
+            onSubmitEditing={handleSend}
           />
           <TouchableOpacity
             style={[styles.sendBtn, showSendButton && styles.sendBtnActive]}
@@ -497,7 +505,7 @@ export default function GlobalTinaChatScreen({
           </TouchableOpacity>
         </View>
       </View>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
