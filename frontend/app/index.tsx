@@ -10,6 +10,7 @@ import * as WebBrowser from 'expo-web-browser';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, BORDER_RADIUS } from '../src/theme';
+import { useTina } from '../src/context/TinaContext';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 const { width } = Dimensions.get('window');
@@ -18,6 +19,7 @@ type AuthMode = 'main' | 'email' | 'phone' | 'email-otp' | 'phone-otp' | 'forgot
 
 export default function AuthScreen() {
   const router = useRouter();
+  const { resetTinaState, setOnboardingStage } = useTina();
   const [loading, setLoading] = useState(true);
   const [authLoading, setAuthLoading] = useState(false);
   const [authMode, setAuthMode] = useState<AuthMode>('main');
@@ -31,6 +33,7 @@ export default function AuthScreen() {
   const [otpSent, setOtpSent] = useState(false);
   
   const hasProcessed = useRef(false);
+  const hasResetTina = useRef(false);
 
   useEffect(() => {
     if (hasProcessed.current) return;
@@ -49,6 +52,17 @@ export default function AuthScreen() {
     }
     checkExistingAuth();
   }, []);
+
+  // Reset Tina state when showing login screen (user logged out or new user)
+  useEffect(() => {
+    if (!loading && !hasResetTina.current) {
+      hasResetTina.current = true;
+      // Reset Tina state so floating button doesn't show on login page
+      console.log('[AuthScreen] Resetting Tina state for login page');
+      setOnboardingStage('pre_decision');
+      resetTinaState();
+    }
+  }, [loading, setOnboardingStage, resetTinaState]);
 
   const checkExistingAuth = async () => {
     try {

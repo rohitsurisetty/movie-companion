@@ -105,6 +105,9 @@ type TinaContextType = {
   
   // Check if Tina is visible in any form
   isTinaVisible: () => boolean;
+  
+  // Reset state (for logout/re-signup)
+  resetTinaState: () => Promise<void>;
 };
 
 const defaultState: TinaState = {
@@ -458,6 +461,26 @@ export function TinaProvider({ children }: { children: React.ReactNode }) {
     return true;
   }, [state.onboardingStage, state.isOpen]);
 
+  // ========== RESET STATE (for logout/re-signup) ==========
+
+  const resetTinaState = useCallback(async () => {
+    console.log('[TinaContext] Resetting Tina state for new session');
+    
+    // Clear persisted state
+    try {
+      await Promise.all([
+        AsyncStorage.removeItem(TINA_STATE_KEY),
+        AsyncStorage.removeItem(TINA_MESSAGES_KEY),
+      ]);
+    } catch (error) {
+      console.error('[TinaContext] Error clearing persisted state:', error);
+    }
+    
+    // Reset to default state
+    setState(defaultState);
+    setUserProfileState(null);
+  }, []);
+
   const value: TinaContextType = {
     state,
     userProfile,
@@ -486,6 +509,7 @@ export function TinaProvider({ children }: { children: React.ReactNode }) {
     getMissingFields,
     shouldShowFloatingButton,
     isTinaVisible,
+    resetTinaState,
   };
 
   return (
