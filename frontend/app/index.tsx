@@ -209,12 +209,7 @@ export default function AuthScreen() {
       return;
     }
     
-    // For new users, name is required
-    if (isNewUser && !name.trim()) {
-      Alert.alert('Error', 'Please enter your name');
-      return;
-    }
-    
+    // Name is now optional - can be set during onboarding
     setAuthLoading(true);
     try {
       const isEmail = authMode === 'email-otp';
@@ -225,7 +220,7 @@ export default function AuthScreen() {
           type: isEmail ? 'email' : 'phone',
           identifier: isEmail ? email.trim().toLowerCase() : phone.trim(),
           otp: otp.trim(),
-          name: isNewUser ? name.trim() : undefined,
+          // Name is optional - will be collected in onboarding
         }),
       });
       const data = await resp.json();
