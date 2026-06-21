@@ -365,7 +365,7 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Tina as Persistent Floating AI Assistant - COMPLETED"
+    - "Tina State & UI Consistency Fixes"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -4321,6 +4321,271 @@ agent_communication:
       
       The Tina Floating AI Assistant is fully functional as a global persistent feature
       that appears on all screens and maintains conversation state across the app.
+      
+  - agent: "testing"
+    message: |
+      ✅ TINA STATE & UI CONSISTENCY FIXES TESTING - JUNE 21, 2026
+      
+      TESTING STATUS: PARTIAL SUCCESS WITH CRITICAL BUG FOUND ⚠️
+      
+      Test Environment:
+      - Frontend: https://showtime-setup.preview.emergentagent.com
+      - Viewport: iPhone 12 (390x844)
+      - Test Phone: +1112223344
+      - Test OTP: 123456
+      - Test Date: June 21, 2026
+      
+      ========================================
+      ISSUE 1: DUPLICATE TINA PRESENCE - ✅ VERIFIED WORKING
+      ========================================
+      
+      TEST RESULT: ✅ PASS
+      
+      Verification:
+      - Floating Tina button count while Tina chat active: 0 (CORRECT!)
+      - Screenshot: 03_tina_chat_active.png shows NO floating button
+      - Code review confirms: shouldShowFloatingButton() checks state.isOnboardingTinaActive
+      - When isOnboardingTinaActive is true, floating button is hidden
+      
+      Implementation Details:
+      - TinaContext.tsx line 454: `if (state.isOnboardingTinaActive) return false;`
+      - onboarding.tsx line 138: `setOnboardingTinaActive(showTinaChat)`
+      - FloatingTinaButton.tsx line 35: `const isVisible = visible && shouldShowFloatingButton()`
+      
+      CONCLUSION: ✅ No duplicate Tina presence. Floating button correctly hidden while Tina screen is active.
+      
+      ========================================
+      ISSUE 2: FLOATING BUTTON AFTER EXIT - ❌ CRITICAL BUG FOUND
+      ========================================
+      
+      TEST RESULT: ❌ FAIL
+      
+      Problem:
+      - Floating Tina button count after exiting Tina: 0 (SHOULD BE > 0)
+      - Screenshot: 07_floating_button_visible.png shows NO floating button after exit
+      - User exits Tina chat but floating button does NOT reappear
+      
+      Root Cause Analysis:
+      
+      File: /app/frontend/app/onboarding.tsx
+      
+      BUG LOCATION: handleTinaExit() function (lines 262-274)
+      
+      Current Code:
+      ```typescript
+      const handleTinaExit = (tinaData: Partial<ProfileData>) => {
+        mergeTinaData(tinaData);
+        setShowTinaChat(false);  // ✅ This sets isOnboardingTinaActive to false
+        
+        // Check if there are remaining fields
+        const nextStep = findNextStep(STEP_TINA_CHOICE);
+        if (nextStep < TOTAL_STEPS) {
+          setStep(nextStep);
+        } else {
+          handleFinish();
+        }
+        // ❌ MISSING: setOnboardingStage('manual_onboarding')
+      }
+      ```
+      
+      The Problem:
+      1. When user clicks "Chat with Tina", handleChatWithTina() sets onboardingStage to 'tina_onboarding' (line 239)
+      2. When user exits Tina, handleTinaExit() does NOT set onboardingStage back to 'manual_onboarding'
+      3. shouldShowFloatingButton() checks: `if (state.onboardingStage === 'pre_decision') return false;`
+      4. Since onboardingStage is still 'tina_onboarding', the floating button remains hidden
+      
+      REQUIRED FIX:
+      
+      Add this line to handleTinaExit() after line 264:
+      ```typescript
+      const handleTinaExit = (tinaData: Partial<ProfileData>) => {
+        mergeTinaData(tinaData);
+        setShowTinaChat(false);
+        setOnboardingStage('manual_onboarding'); // ← ADD THIS LINE
+        
+        // Check if there are remaining fields
+        const nextStep = findNextStep(STEP_TINA_CHOICE);
+        if (nextStep < TOTAL_STEPS) {
+          setStep(nextStep);
+        } else {
+          handleFinish();
+        }
+      }
+      ```
+      
+      Also add the same line to handleTinaComplete() after line 251:
+      ```typescript
+      const handleTinaComplete = (tinaData: Partial<ProfileData>) => {
+        mergeTinaData(tinaData);
+        setShowTinaChat(false);
+        setOnboardingStage('manual_onboarding'); // ← ADD THIS LINE
+        
+        // Jump to first uncollected step or finish
+        const nextStep = findNextStep(STEP_TINA_CHOICE);
+        if (nextStep >= TOTAL_STEPS) {
+          handleFinish();
+        } else {
+          setStep(nextStep);
+        }
+      }
+      ```
+      
+      ========================================
+      ISSUE 3: CORRECT CONVERSATION RECOVERY - ✅ BACKEND VERIFIED
+      ========================================
+      
+      TEST RESULT: ✅ BACKEND WORKING CORRECTLY
+      
+      Backend API Testing:
+      
+      Test 1: With collected fields (relationshipIntent, partnerPreference)
+      ```bash
+      curl -X POST /api/tina/welcome-back \
+        -d '{"user_id": "test", "user_name": "Alex", "collected_fields": ["relationshipIntent", "partnerPreference"]}'
+      ```
+      
+      Response:
+      ```json
+      {
+        "success": true,
+        "message": "Good to see you again! Let's pick up where we left off 💫",
+        "show_options": {
+          "field": "languagesSpoken",
+          "options": ["English", "Hindi", "Telugu", ...],
+          "multiSelect": true
+        },
+        "next_field": "languagesSpoken"
+      }
+      ```
+      
+      ✅ CORRECT: Backend skips relationshipIntent and partnerPreference, shows languagesSpoken
+      
+      Test 2: Without collected fields
+      ```bash
+      curl -X POST /api/tina/welcome-back \
+        -d '{"user_id": "test", "user_name": "Alex", "collected_fields": []}'
+      ```
+      
+      Response:
+      ```json
+      {
+        "success": true,
+        "message": "Hey Alex! 👋 Let's keep building your profile!",
+        "show_options": {
+          "field": "relationshipIntent",
+          "options": ["Casual", "Friendship", "Serious relationship", "Exploring"],
+          "multiSelect": true
+        },
+        "next_field": "relationshipIntent"
+      }
+      ```
+      
+      ✅ CORRECT: Backend shows relationshipIntent as first field when nothing collected
+      
+      Backend Implementation Verified:
+      - File: /app/backend/tina_service.py
+      - Function: generate_welcome_back_message() (lines 866-980)
+      - Line 896: `frontend_collected = set(collected_fields_list or [])`
+      - Line 898: `all_collected = frontend_collected | session_completed`
+      - Lines 924-933: Finds next field NOT in all_collected
+      - Line 970: Only shows options if field NOT collected
+      
+      CONCLUSION: ✅ Backend correctly skips already-collected fields and shows next unanswered question
+      
+      ========================================
+      FRONTEND INTEGRATION VERIFICATION
+      ========================================
+      
+      File: /app/frontend/src/components/GlobalTinaChatScreen.tsx
+      
+      ✅ Collected Fields Tracking:
+      - Line 52: `const { isFieldCollected, markFieldAsCollected, ... } = useTina()`
+      - Lines 180-182: Builds collectedFieldsList from getMissingFields()
+      - Line 197: Passes collected_fields to /api/tina/welcome-back
+      
+      ✅ Field Collection:
+      - Lines 158-162: Marks fields as collected when data received from backend
+      - TinaContext tracks collected fields in state.collectedFields
+      
+      File: /app/frontend/app/onboarding.tsx
+      
+      ✅ Manual Form Sync:
+      - Line 150: `markFieldsAsCollected([field])` when updateField() called
+      - Line 151: `updateUserProfile({ [field]: value })` syncs to TinaContext
+      - This ensures Tina knows about manually filled data
+      
+      CONCLUSION: ✅ Frontend correctly tracks and passes collected fields to backend
+      
+      ========================================
+      TESTING LIMITATIONS
+      ========================================
+      
+      ⚠️ Full E2E Test Not Completed:
+      - Test got stuck at OTP verification screen
+      - User +1112223344 already exists in system
+      - Existing user login doesn't go to onboarding
+      - Could not test full conversation recovery flow in UI
+      
+      However:
+      - ✅ Backend API verified working correctly via curl
+      - ✅ Code review confirms correct implementation
+      - ✅ Floating button visibility logic verified
+      - ❌ Critical bug found in handleTinaExit()
+      
+      ========================================
+      SUMMARY OF FINDINGS
+      ========================================
+      
+      ✅ WORKING:
+      1. No duplicate Tina presence - floating button hidden while Tina active
+      2. Backend conversation recovery - correctly skips collected fields
+      3. Frontend field tracking - correctly tracks and passes collected fields
+      4. Manual form sync - Tina knows about manually filled data
+      
+      ❌ CRITICAL BUG:
+      1. Floating button does NOT reappear after exiting Tina chat
+      2. Root cause: handleTinaExit() doesn't set onboardingStage to 'manual_onboarding'
+      3. Fix required: Add setOnboardingStage('manual_onboarding') to handleTinaExit() and handleTinaComplete()
+      
+      ========================================
+      RECOMMENDATIONS
+      ========================================
+      
+      IMMEDIATE ACTION REQUIRED:
+      1. Fix handleTinaExit() in /app/frontend/app/onboarding.tsx (line 264)
+      2. Fix handleTinaComplete() in /app/frontend/app/onboarding.tsx (line 251)
+      3. Add: `setOnboardingStage('manual_onboarding')` after `setShowTinaChat(false)`
+      
+      TESTING AFTER FIX:
+      1. Login with fresh phone number
+      2. Complete Basic Info and Photo Upload
+      3. Select "Chat with Tina"
+      4. Answer 2-3 questions
+      5. Click Skip or type "skip"
+      6. VERIFY: Floating button NOW appears
+      7. Click floating button
+      8. VERIFY: Tina does NOT ask already-answered questions
+      9. VERIFY: Tina shows next unanswered question
+      
+      ========================================
+      CONFIDENCE LEVEL
+      ========================================
+      
+      Backend: HIGH ✅
+      - API tested and working correctly
+      - Skips collected fields as expected
+      - Shows correct next field
+      
+      Frontend Field Tracking: HIGH ✅
+      - Code review confirms correct implementation
+      - TinaContext properly tracks collected fields
+      
+      Floating Button Visibility: MEDIUM ⚠️
+      - Logic is correct but has critical bug
+      - Bug is easy to fix (1 line of code)
+      - After fix, should work correctly
+      
+      Overall: READY FOR FIX AND RETEST
       
   - agent: "testing"
     message: |

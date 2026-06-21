@@ -47,8 +47,9 @@ export type OnboardingStage =
   | 'completed';        // Onboarding complete
 
 export type TinaState = {
-  isOpen: boolean;
+  isOpen: boolean;           // Floating modal is open
   isMinimized: boolean;
+  isOnboardingTinaActive: boolean;  // Full-screen onboarding Tina is active
   messages: Message[];
   hasUnreadMessage: boolean;
   lastInteractionTime: number;
@@ -71,6 +72,9 @@ type TinaContextType = {
   minimizeTina: () => void;
   restoreTina: () => void;
   toggleTina: () => void;
+  
+  // Onboarding Tina screen tracking
+  setOnboardingTinaActive: (active: boolean) => void;
   
   // Messages
   addMessage: (text: string, isUser: boolean) => Message;
@@ -98,11 +102,15 @@ type TinaContextType = {
   
   // Floating button visibility
   shouldShowFloatingButton: () => boolean;
+  
+  // Check if Tina is visible in any form
+  isTinaVisible: () => boolean;
 };
 
 const defaultState: TinaState = {
   isOpen: false,
   isMinimized: false,
+  isOnboardingTinaActive: false,
   messages: [],
   hasUnreadMessage: false,
   lastInteractionTime: Date.now(),
@@ -237,6 +245,20 @@ export function TinaProvider({ children }: { children: React.ReactNode }) {
       hasUnreadMessage: prev.isOpen ? prev.hasUnreadMessage : false,
     }));
   }, []);
+
+  // Track when onboarding Tina screen is active
+  const setOnboardingTinaActive = useCallback((active: boolean) => {
+    console.log('[TinaContext] Setting onboarding Tina active:', active);
+    setState(prev => ({
+      ...prev,
+      isOnboardingTinaActive: active,
+    }));
+  }, []);
+
+  // Check if Tina is visible in any form (modal OR onboarding screen)
+  const isTinaVisible = useCallback((): boolean => {
+    return state.isOpen || state.isOnboardingTinaActive;
+  }, [state.isOpen, state.isOnboardingTinaActive]);
 
   // ========== MESSAGES ==========
 
@@ -428,9 +450,13 @@ export function TinaProvider({ children }: { children: React.ReactNode }) {
     if (state.isOpen) {
       return false;
     }
+    // Hide when onboarding Tina screen is active (full-screen Tina chat)
+    if (state.isOnboardingTinaActive) {
+      return false;
+    }
     // Show in all other cases
     return true;
-  }, [state.onboardingStage, state.isOpen]);
+  }, [state.onboardingStage, state.isOpen, state.isOnboardingTinaActive]);
 
   const value: TinaContextType = {
     state,
@@ -441,6 +467,7 @@ export function TinaProvider({ children }: { children: React.ReactNode }) {
     minimizeTina,
     restoreTina,
     toggleTina,
+    setOnboardingTinaActive,
     addMessage,
     setMessages,
     clearMessages,
@@ -458,6 +485,7 @@ export function TinaProvider({ children }: { children: React.ReactNode }) {
     wasFieldAsked,
     getMissingFields,
     shouldShowFloatingButton,
+    isTinaVisible,
   };
 
   return (

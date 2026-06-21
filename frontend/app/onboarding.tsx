@@ -116,6 +116,7 @@ export default function OnboardingScreen() {
     state: tinaState,
     setMessages: setTinaMessages,
     setOnboardingStage,
+    setOnboardingTinaActive,
     markFieldsAsCollected,
     isFieldCollected,
     updateUserProfile,
@@ -131,6 +132,15 @@ export default function OnboardingScreen() {
       setUserId(id || '');
     })();
   }, []);
+
+  // Track when Tina screen is active (for floating button visibility)
+  useEffect(() => {
+    setOnboardingTinaActive(showTinaChat);
+    return () => {
+      // Cleanup when component unmounts
+      setOnboardingTinaActive(false);
+    };
+  }, [showTinaChat, setOnboardingTinaActive]);
 
   const updateField = useCallback((field: string, value: any) => {
     setData(prev => ({ ...prev, [field]: value }));

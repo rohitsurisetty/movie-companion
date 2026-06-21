@@ -15,6 +15,14 @@ const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || process.env.EXPO_PUBLIC_
 // Tina avatar
 const TINA_AVATAR = 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&h=200&fit=crop&crop=face';
 
+// All profile fields that can be collected (must match TinaContext)
+const ALL_PROFILE_FIELDS = [
+  'name', 'gender', 'dateOfBirth', 'location',
+  'relationshipIntent', 'partnerPreference', 'languagesSpoken',
+  'movieFrequency', 'ottTheatre', 'filmLanguages', 'genres', 'topMovies',
+  'height', 'drinking', 'smoking', 'zodiac', 'bio'
+];
+
 type DeepLinkAction = {
   type: 'movies' | 'music' | 'interests';
   label: string;
@@ -168,12 +176,17 @@ export default function GlobalTinaChatScreen({
     setIsLoading(true);
 
     try {
+      // Get collected fields from context to pass to backend
+      const collectedFieldsList = getMissingFields().length > 0 
+        ? ALL_PROFILE_FIELDS.filter(f => !getMissingFields().includes(f))
+        : [];
+      
       // If we have existing messages, just fetch a welcome back message
       if (existingMessages.length > 0) {
         setMessages(existingMessages);
         setIsLoading(false);
         
-        // Fetch contextual welcome back
+        // Fetch contextual welcome back with collected fields
         const welcomeResponse = await fetch(`${API_BASE}/api/tina/welcome-back`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -181,6 +194,7 @@ export default function GlobalTinaChatScreen({
             user_id: userId,
             user_name: userName,
             is_onboarding_complete: isOnboardingComplete,
+            collected_fields: collectedFieldsList,
           }),
         });
 

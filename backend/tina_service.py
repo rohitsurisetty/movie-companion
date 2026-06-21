@@ -869,9 +869,18 @@ async def generate_welcome_back_message(
     is_onboarding_complete: bool = False,
     conversation_history: List[Dict] = None,
     collected_fields: Dict = None,
+    collected_fields_list: List[str] = None,
 ) -> Dict[str, Any]:
     """
     Generate a contextual welcome-back message when user returns to Tina.
+    
+    Args:
+        user_id: User identifier
+        user_name: User's name
+        is_onboarding_complete: Whether onboarding is done
+        conversation_history: Previous messages (optional)
+        collected_fields: Dict of collected fields (deprecated)
+        collected_fields_list: List of field names already collected from frontend
     
     Returns:
         {
@@ -882,7 +891,15 @@ async def generate_welcome_back_message(
         }
     """
     session = await get_tina_session(user_id)
-    collected = session.get("collected_fields", {}) if collected_fields is None else collected_fields
+    
+    # Merge collected fields from frontend with session
+    frontend_collected = set(collected_fields_list or [])
+    session_completed = set(session.get("completed_fields", []))
+    all_collected = frontend_collected | session_completed
+    
+    # Update session with frontend data
+    session["completed_fields"] = list(all_collected)
+    await save_tina_session(session)
     
     # Track asked topics to avoid repetition
     asked_topics = session.get("asked_engagement_topics", [])
@@ -894,18 +911,34 @@ async def generate_welcome_back_message(
         "topic": None,
     }
     
-    name = user_name or collected.get("name", "there")
+    name = user_name or session.get("collected_fields", {}).get("name", "there")
     
-    if not is_onboarding_complete:
+    # Check if we should consider onboarding complete based on collected fields
+    mandatory_fields = [f for f, c in PROFILE_FIELDS.items() if not c.get("optional", False)]
+    mandatory_completed = len([f for f in mandatory_fields if f in all_collected])
+    actual_onboarding_complete = is_onboarding_complete or (mandatory_completed >= len(mandatory_fields))
+    
+    if not actual_onboarding_complete:
         # === ONBOARDING INCOMPLETE ===
-        next_field = get_next_field_to_collect(session)
-        completion = get_completion_percentage(session)
+        # Find next field NOT in collected fields
+        sorted_fields = sorted(
+            [(f, c.get("priority", 100)) for f, c in PROFILE_FIELDS.items() if not c.get("optional", False)],
+            key=lambda x: x[1]
+        )
+        
+        next_field = None
+        for field_name, _ in sorted_fields:
+            if field_name not in all_collected:
+                next_field = field_name
+                break
+        
+        completion = int((mandatory_completed / len(mandatory_fields)) * 100) if mandatory_fields else 100
         
         if next_field:
             result["next_field"] = next_field
             field_config = PROFILE_FIELDS.get(next_field, {})
             
-            # Generate contextual welcome back based on what's missing
+            # Generate contextual welcome back based on progress
             if completion < 30:
                 greetings = [
                     f"Hey {name}! 👋 Let's keep building your profile!",
@@ -933,7 +966,7 @@ async def generate_welcome_back_message(
             import random
             result["message"] = random.choice(greetings)
             
-            # Add options if the next field needs them
+            # Only add options if the next field needs them AND hasn't been collected
             if field_config.get("type") in ["single_select", "multi_select"]:
                 result["show_options"] = {
                     "field": next_field,
@@ -941,8 +974,8 @@ async def generate_welcome_back_message(
                     "multiSelect": field_config.get("type") == "multi_select"
                 }
         else:
-            # Somehow no next field but not complete?
-            result["message"] = f"Welcome back, {name}! Let's continue our chat 😊"
+            # All fields collected but not marked complete - just greet
+            result["message"] = f"Welcome back, {name}! Looks like your profile is ready 🎉"
     
     else:
         # === ONBOARDING COMPLETE - ENGAGEMENT MODE ===

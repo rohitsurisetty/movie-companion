@@ -3007,6 +3007,7 @@ class WelcomeBackRequest(BaseModel):
     user_id: str
     user_name: str = ""
     is_onboarding_complete: bool = False
+    collected_fields: List[str] = []  # Fields already collected from frontend
 
 
 @api_router.post("/tina/welcome-back")
@@ -3017,6 +3018,7 @@ async def tina_welcome_back_endpoint(req: WelcomeBackRequest):
             user_id=req.user_id,
             user_name=req.user_name,
             is_onboarding_complete=req.is_onboarding_complete,
+            collected_fields_list=req.collected_fields,
         )
         return {"success": True, **result}
     except Exception as e:
