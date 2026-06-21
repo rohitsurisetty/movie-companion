@@ -2785,7 +2785,11 @@ async def api_send_message(req: SendMessageRequest, background_tasks: Background
                 receiver_id=req.receiver_id
             )
         
-        return {"success": True, "message": message}
+        return {
+            "success": True, 
+            "message": message,
+            "conversation_status": message.get("conversation_status", "pending")
+        }
     except Exception as e:
         logger.error(f"Send message error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

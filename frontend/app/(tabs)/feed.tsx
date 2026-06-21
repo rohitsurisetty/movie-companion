@@ -28,6 +28,7 @@ const COLORS = {
   bg: '#0A0A0A',
   bgCard: '#1A1A1A',
   bgSheet: '#1C1C1E',
+  bgInput: '#2A2A2A',
   text: '#FFFFFF',
   textSecondary: '#B0B0B0',
   textMuted: '#666666',
@@ -379,6 +380,11 @@ export default function FeedScreen() {
   const [showMessageInput, setShowMessageInput] = useState(false);
   const [messageText, setMessageText] = useState('');
   const [sendingMessage, setSendingMessage] = useState(false);
+  const [showRequestSentToast, setShowRequestSentToast] = useState(false);
+  const [sentRequestUserIds, setSentRequestUserIds] = useState<Set<string>>(new Set());
+
+  // Check if we've already sent a request to this user
+  const hasAlreadySentRequest = (userId: string) => sentRequestUserIds.has(userId);
 
   const handleMessage = () => {
     // Show message input modal
@@ -403,11 +409,25 @@ export default function FeedScreen() {
       });
       
       if (response.ok) {
+        const data = await response.json();
         setMessageText('');
         setShowMessageInput(false);
+        
+        // Track that we sent a request to this user
+        setSentRequestUserIds(prev => new Set([...prev, selectedProfile.user_id]));
+        
+        // Show toast feedback
+        setShowRequestSentToast(true);
+        setTimeout(() => setShowRequestSentToast(false), 3000);
+        
         closeProfile();
-        // Navigate to chat tab
-        router.push('/(tabs)/chat');
+        
+        // If this was a new request (pending), don't navigate to chat yet
+        // If the conversation was already active, navigate to chat
+        if (data.conversation_status === 'active') {
+          router.push('/(tabs)/chat');
+        }
+        // For pending requests, just show the toast - don't navigate
       }
     } catch (error) {
       console.error('Error sending message:', error);
@@ -689,13 +709,20 @@ export default function FeedScreen() {
                 )}
 
                 {/* Message Button */}
-                <TouchableOpacity
-                  style={[styles.messageButton, { backgroundColor: mode === 'date' ? COLORS.primary : COLORS.buddy }]}
-                  onPress={handleMessage}
-                >
-                  <Ionicons name="chatbubble" size={20} color="#FFF" />
-                  <Text style={styles.messageButtonText}>Send Message</Text>
-                </TouchableOpacity>
+                {hasAlreadySentRequest(selectedProfile.user_id) ? (
+                  <View style={[styles.messageButton, styles.requestSentButton]}>
+                    <Ionicons name="checkmark-circle" size={20} color={COLORS.success} />
+                    <Text style={[styles.messageButtonText, { color: COLORS.success }]}>Request Sent</Text>
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    style={[styles.messageButton, { backgroundColor: mode === 'date' ? COLORS.primary : COLORS.buddy }]}
+                    onPress={handleMessage}
+                  >
+                    <Ionicons name="chatbubble" size={20} color="#FFF" />
+                    <Text style={styles.messageButtonText}>Send Message</Text>
+                  </TouchableOpacity>
+                )}
 
                 {/* Bottom spacing */}
                 <View style={{ height: 40 }} />
@@ -735,13 +762,26 @@ export default function FeedScreen() {
                 ) : (
                   <>
                     <Ionicons name="send" size={18} color="#FFF" />
-                    <Text style={styles.messageModalSendBtnText}>Send</Text>
+                    <Text style={styles.messageModalSendBtnText}>Send Request</Text>
                   </>
                 )}
               </TouchableOpacity>
             </View>
           </KeyboardAvoidingView>
         </Modal>
+
+        {/* Request Sent Toast */}
+        {showRequestSentToast && (
+          <View style={styles.toastContainer}>
+            <View style={styles.toast}>
+              <Ionicons name="checkmark-circle" size={24} color={COLORS.success} />
+              <View style={styles.toastTextContainer}>
+                <Text style={styles.toastTitle}>Message Request Sent!</Text>
+                <Text style={styles.toastSubtitle}>{"They'll see it in their requests"}</Text>
+              </View>
+            </View>
+          </View>
+        )}
       </SafeAreaView>
     </GestureHandlerRootView>
   );
@@ -1245,5 +1285,50 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#FFF',
+  },
+
+  // Request Sent Button
+  requestSentButton: {
+    backgroundColor: 'rgba(0, 210, 106, 0.1)',
+    borderWidth: 1,
+    borderColor: COLORS.success,
+  },
+
+  // Toast notification
+  toastContainer: {
+    position: 'absolute',
+    bottom: 100,
+    left: 16,
+    right: 16,
+    alignItems: 'center',
+  },
+  toast: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.bgCard,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderRadius: 16,
+    gap: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 210, 106, 0.3)',
+  },
+  toastTextContainer: {
+    flex: 1,
+  },
+  toastTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.text,
+  },
+  toastSubtitle: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    marginTop: 2,
   },
 });

@@ -1347,6 +1347,28 @@ export default function SwipeScreen() {
     }
   }, [pendingMovie, recordSwipe]);
 
+  // Handle "Not Watched" - skip movie without affecting recommendations
+  const handleNotWatched = useCallback((movie: FeedMovie) => {
+    // Clear any existing undo timeout
+    if (undoTimeoutRef.current) {
+      clearTimeout(undoTimeoutRef.current);
+      undoTimeoutRef.current = null;
+    }
+    
+    // Store for potential undo
+    setLastSwipedMovie(movie);
+    
+    // Remove from current deck
+    setMovies((prev) => prev.filter((m) => m.id !== movie.id));
+    
+    // Record as "not watched" - doesn't count for recommendations
+    recordSwipe(movie, 'left', 0, ['not_watched'], true);
+    
+    // Show brief toast
+    setShowUndoToast(true);
+    setTimeout(() => setShowUndoToast(false), 1500);
+  }, [recordSwipe]);
+
   const currentMovie = movies[0];
   const nextMovie = movies[1];
 
@@ -1357,6 +1379,7 @@ export default function SwipeScreen() {
     progressFill: { backgroundColor: colors.gold },
     likeBtn: { borderColor: `${colors.primary}60`, backgroundColor: `${colors.primary}15` },
     dislikeBtn: { borderColor: 'rgba(255,107,107,0.4)', backgroundColor: 'rgba(255,107,107,0.1)' },
+    notWatchedBtn: { borderColor: 'rgba(136,136,136,0.4)', backgroundColor: 'rgba(136,136,136,0.1)' },
   });
 
   return (
@@ -1439,6 +1462,15 @@ export default function SwipeScreen() {
           </TouchableOpacity>
 
           <TouchableOpacity
+            style={[styles.actionBtn, dynamicStyles.notWatchedBtn]}
+            onPress={() => currentMovie && handleNotWatched(currentMovie)}
+            testID="not-watched-btn"
+            activeOpacity={0.8}
+          >
+            <Ionicons name="eye-off-outline" size={26} color="#888" />
+          </TouchableOpacity>
+
+          <TouchableOpacity
             style={[styles.actionBtn, dynamicStyles.likeBtn]}
             onPress={() => currentMovie && handleSwipe('right', currentMovie)}
             testID="swipe-right-btn"
@@ -1453,7 +1485,11 @@ export default function SwipeScreen() {
       <View style={styles.instructionsContainer}>
         <View style={styles.instructionItem}>
           <Ionicons name="arrow-back" size={16} color={colors.textMuted} />
-          <Text style={[styles.instructionText, { color: colors.textMuted }]}>Not interested</Text>
+          <Text style={[styles.instructionText, { color: colors.textMuted }]}>Didn't like</Text>
+        </View>
+        <View style={styles.instructionItem}>
+          <Ionicons name="eye-off-outline" size={14} color={colors.textMuted} />
+          <Text style={[styles.instructionText, { color: colors.textMuted }]}>Not watched</Text>
         </View>
         <View style={styles.instructionItem}>
           <Text style={[styles.instructionText, { color: colors.textMuted }]}>Liked it!</Text>

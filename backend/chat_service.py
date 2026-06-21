@@ -85,6 +85,7 @@ async def send_message(
     """Send a message to another user"""
     conv = await get_or_create_conversation(sender_id, receiver_id)
     conv_id = conv["conversation_id"]
+    conv_status = conv["status"]
     
     message = {
         "message_id": f"msg_{datetime.utcnow().timestamp()}_{sender_id[:8]}",
@@ -97,6 +98,7 @@ async def send_message(
         "created_at": datetime.utcnow().isoformat(),
         "read": False,
         "delivered": True,
+        "conversation_status": conv_status,  # Include conversation status in response
     }
     
     # Insert message to MongoDB
@@ -117,8 +119,9 @@ async def send_message(
         {"$set": update_data}
     )
     
-    # If this is first message, add to message requests
-    if conv["status"] == "pending" and message_count == 1:
+    # If this is first message in a pending conversation, add to message requests
+    is_new_request = conv_status == "pending" and message_count == 1
+    if is_new_request:
         request = {
             "conversation_id": conv_id,
             "from_user_id": sender_id,
@@ -127,6 +130,7 @@ async def send_message(
             "created_at": message["created_at"],
         }
         await _db.chat_requests.insert_one(request)
+        logger.info(f"Created message request from {sender_id} to {receiver_id}")
     
     return message
 
@@ -183,25 +187,29 @@ async def get_user_info(user_id: str) -> Dict:
                 "user_id": "mock_user_001",
                 "name": "Priya Sharma",
                 "avatar": "https://images.unsplash.com/photo-1622207691293-5cd80466dab3?w=100&h=100&fit=crop",
-                "location": "Mumbai"
+                "location": "Mumbai",
+                "age": 28
             },
             "mock_user_002": {
                 "user_id": "mock_user_002",
                 "name": "Arjun Mehta",
                 "avatar": None,
-                "location": "Delhi"
+                "location": "Delhi",
+                "age": 30
             },
             "mock_user_003": {
                 "user_id": "mock_user_003",
                 "name": "Ananya Reddy",
                 "avatar": "https://images.unsplash.com/photo-1463335361701-e90f4c5045d0?w=100&h=100&fit=crop",
-                "location": "Bangalore"
+                "location": "Bangalore",
+                "age": 26
             },
             "mock_user_005": {
                 "user_id": "mock_user_005",
                 "name": "Neha Gupta",
                 "avatar": "https://images.unsplash.com/photo-1524502397800-2eeaad7c3fe5?w=100&h=100&fit=crop",
-                "location": "Pune"
+                "location": "Pune",
+                "age": 25
             },
             "mock_user_007": {
                 "user_id": "mock_user_007",
@@ -237,22 +245,54 @@ async def get_user_info(user_id: str) -> Dict:
                 "user_id": "mock_user_019",
                 "name": "Sneha Krishnan",
                 "avatar": "https://images.pexels.com/photos/37145167/pexels-photo-37145167.jpeg?auto=compress&w=100&h=100&fit=crop",
-                "location": "Hyderabad"
+                "location": "Hyderabad",
+                "age": 26
             },
         }
-        return mock_profiles.get(user_id, {"user_id": user_id, "name": "Unknown", "avatar": None, "location": "Unknown"})
+        return mock_profiles.get(user_id, {"user_id": user_id, "name": "Unknown", "avatar": None, "location": "Unknown", "age": None})
     
-    # Try to find in users collection
-    user = await _db.users.find_one({"user_id": user_id}, {"_id": 0, "user_id": 1, "name": 1, "picture": 1})
+    # Try to find in users collection - get more comprehensive info
+    user = await _db.users.find_one({"user_id": user_id}, {"_id": 0, "user_id": 1, "name": 1, "picture": 1, "dob": 1, "location": 1})
     if user:
+        # Calculate age from dob
+        age = None
+        if user.get("dob"):
+            try:
+                from datetime import datetime
+                dob = datetime.fromisoformat(user["dob"].replace("Z", "+00:00")) if isinstance(user["dob"], str) else user["dob"]
+                today = datetime.now()
+                age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+            except (ValueError, TypeError, AttributeError):
+                pass
+        
+        # Get profile picture from pictures collection
+        avatar = user.get("picture")
+        if not avatar:
+            # Try to get first picture from pictures collection
+            pics = await _db.user_pictures.find_one({"user_id": user_id}, {"_id": 0, "picture_1": 1})
+            if pics and pics.get("picture_1"):
+                avatar = pics["picture_1"]
+        
+        # Format location - only city, state, country for privacy
+        location = None
+        if user.get("location"):
+            loc = user["location"]
+            parts = []
+            if loc.get("city"):
+                parts.append(loc["city"])
+            if loc.get("state"):
+                parts.append(loc["state"])
+            location = ", ".join(parts) if parts else None
+        
         return {
             "user_id": user.get("user_id"),
             "name": user.get("name", "Unknown"),
-            "avatar": user.get("picture"),
-            "location": None
+            "avatar": avatar,
+            "location": location,
+            "age": age
         }
     
-    return {"user_id": user_id, "name": "Unknown", "avatar": None, "location": None}
+    return {"user_id": user_id, "name": "Unknown", "avatar": None, "location": None, "age": None}
 
 
 async def get_message_requests(user_id: str) -> List[Dict]:
