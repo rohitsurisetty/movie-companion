@@ -445,21 +445,18 @@ export function TinaProvider({ children }: { children: React.ReactNode }) {
   // ========== FLOATING BUTTON VISIBILITY ==========
 
   const shouldShowFloatingButton = useCallback((): boolean => {
-    // Hide during pre_decision stage (before user chooses Tina or Manual)
-    if (state.onboardingStage === 'pre_decision') {
+    // SIMPLE RULE: Only show after onboarding is complete
+    // During signup/onboarding, Tina is always hidden as floating button
+    if (state.onboardingStage !== 'completed') {
       return false;
     }
     // Hide when Tina modal is already open
     if (state.isOpen) {
       return false;
     }
-    // Hide when onboarding Tina screen is active (full-screen Tina chat)
-    if (state.isOnboardingTinaActive) {
-      return false;
-    }
-    // Show in all other cases
+    // Show in main app after onboarding is done
     return true;
-  }, [state.onboardingStage, state.isOpen, state.isOnboardingTinaActive]);
+  }, [state.onboardingStage, state.isOpen]);
 
   const value: TinaContextType = {
     state,
