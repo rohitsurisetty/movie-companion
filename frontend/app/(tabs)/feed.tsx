@@ -114,26 +114,12 @@ const ProfileTile = ({
   index: number;
   mode: string;
 }) => {
-  const [profilePicture, setProfilePicture] = useState<string | null>(null);
   const avatarColor = AVATAR_COLORS[index % AVATAR_COLORS.length];
 
-  // Fetch profile picture
-  useEffect(() => {
-    const fetchPicture = async () => {
-      try {
-        const response = await fetch(`${API_BASE}/api/user/pictures/${profile.user_id}`);
-        if (response.ok) {
-          const data = await response.json();
-          if (data.pictures?.picture_1) {
-            setProfilePicture(data.pictures.picture_1);
-          }
-        }
-      } catch (error) {
-        console.log('Error fetching picture:', error);
-      }
-    };
-    fetchPicture();
-  }, [profile.user_id]);
+  // Get profile picture from the profile data itself
+  // Fallback: profile_picture > pictures[0] > null (show initials)
+  const profilePicture = profile.profile_picture || 
+    (profile.pictures && profile.pictures.length > 0 ? profile.pictures[0] : null);
 
   return (
     <TouchableOpacity 
@@ -627,7 +613,7 @@ export default function FeedScreen() {
                   </View>
                   <View style={styles.locationRow}>
                     <Ionicons name="location" size={14} color={COLORS.textSecondary} />
-                    <Text style={styles.locationText}>{selectedProfile.location}</Text>
+                    <Text style={styles.locationText}>{formatLocationForPrivacy(selectedProfile.location)}</Text>
                     {selectedProfile.workProfile && (
                       <>
                         <Text style={styles.dotSeparator}>•</Text>

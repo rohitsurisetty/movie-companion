@@ -1,23 +1,61 @@
 // Location utility functions
 
 /**
- * Extracts partial location (City, State, Country) from a full address string.
+ * Extracts partial location (Area, City, State, Country) from a full address string.
  * This is used to protect user privacy by not displaying full addresses in the UI.
  * 
  * @param fullLocation - The complete location string (e.g., "123 Main St, Koramangala, Bangalore, Karnataka, India")
- * @returns Partial location showing only City, State, Country (e.g., "Bangalore, Karnataka, India")
+ * @returns Partial location showing only Area, City, State, Country (e.g., "Koramangala, Bangalore, Karnataka, India")
  */
 export const getPartialLocation = (fullLocation: string | undefined | null): string => {
   if (!fullLocation) return '';
   
   // Split by comma and trim each part
-  const parts = fullLocation.split(',').map(p => p.trim());
+  const parts = fullLocation.split(',').map(p => p.trim()).filter(Boolean);
   
-  // If 3 or fewer parts, return as is
-  if (parts.length <= 3) return fullLocation;
+  if (parts.length === 0) return fullLocation;
   
-  // Take last 3 parts (typically City, State, Country)
-  return parts.slice(-3).join(', ');
+  // Patterns to identify private info (house numbers, street names, etc.)
+  const privatePatterns = [
+    /^\\d+[\\s,]*/,           // Leading numbers (house numbers)
+    /^#\\d+/,                 // Apartment numbers like #123
+    /^flat\\s*\\d*/i,         // Flat numbers
+    /^apt\\.?\\s*\\d*/i,      // Apartment numbers
+    /^block\\s*[a-z0-9]*/i,   // Block names
+    /^tower\\s*[a-z0-9]*/i,   // Tower names
+    /^building\\s*[a-z0-9]*/i, // Building names
+    /^floor\\s*\\d*/i,        // Floor numbers
+    /\\d{5,6}/,               // Postal codes (5-6 digits)
+  ];
+  
+  const streetTerms = /\\b(street|st\\.|road|rd\\.|lane|ln\\.|avenue|ave\\.|drive|dr\\.|way|place|pl\\.|nagar|gali|marg|path|colony|society|complex|apartments?|residency|enclave|layout|sector|phase)\\b/i;
+  
+  // Filter out parts that contain private info
+  const filteredParts = parts.filter(part => {
+    // Skip parts that are just numbers
+    if (/^\\d+$/.test(part)) return false;
+    
+    // Skip parts containing street terms
+    if (streetTerms.test(part)) return false;
+    
+    // Check against removal patterns
+    for (const pattern of privatePatterns) {
+      if (pattern.test(part)) return false;
+    }
+    
+    // Skip very short parts (likely abbreviations)
+    if (part.length < 3) return false;
+    
+    return true;
+  });
+  
+  // If we filtered too much, take last 3-4 parts
+  if (filteredParts.length === 0) {
+    return parts.slice(-4).join(', ');
+  }
+  
+  // Return at most 4 parts: Area, City, State, Country
+  return filteredParts.slice(-4).join(', ');
 };
 
 /**

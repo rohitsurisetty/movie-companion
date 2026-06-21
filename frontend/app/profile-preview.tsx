@@ -9,6 +9,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COLORS, SPACING, BORDER_RADIUS } from '../src/theme';
 import { ProfileData, initialProfileData } from '../src/types';
 import { getProfile } from '../src/store';
+import { formatLocationForPrivacy } from '../src/utils/locationFormatter';
 
 const VISIBILITY_KEY = 'visibility_settings';
 
@@ -140,7 +141,7 @@ export default function ProfilePreviewScreen() {
             visibility.showLocation ? (
               <View style={styles.locationRow}>
                 <Ionicons name="location" size={16} color={COLORS.textMuted} />
-                <Text style={styles.locationText}>{profile.location}</Text>
+                <Text style={styles.locationText}>{formatLocationForPrivacy(profile.location)}</Text>
               </View>
             ) : (
               <View style={styles.locationRow}>

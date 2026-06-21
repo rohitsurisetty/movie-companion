@@ -585,16 +585,6 @@ function ProfileDrawer({
     []
   );
 
-  // Helper to extract partial location (City, State, Country)
-  const getPartialLocationLocal = (fullLocation: string | undefined) => {
-    if (!fullLocation) return '';
-    // Split by comma and take last 3 parts (typically City, State, Country)
-    const parts = fullLocation.split(',').map(p => p.trim());
-    if (parts.length <= 3) return fullLocation;
-    // Take last 3 parts
-    return parts.slice(-3).join(', ');
-  };
-
   const topMovies = profile?.topMovies || [];
 
   if (!visible) return null;
@@ -629,7 +619,7 @@ function ProfileDrawer({
             )}
             {profile?.location && (
               <Text style={[profileStyles.locationText, { color: colors.textMuted }]}>
-                {getPartialLocationLocal(profile.location)}
+                {formatLocationForPrivacy(profile.location)}
               </Text>
             )}
             <Text style={[profileStyles.viewProfileText, { color: colors.primary }]}>View & Edit Profile →</Text>

@@ -11,6 +11,7 @@ import { useRouter } from 'expo-router';
 import { GiftedChat, Bubble, InputToolbar, Send, Composer, IMessage, MessageImage } from 'react-native-gifted-chat';
 import { useAppMode } from '../../src/components/SharedHeader';
 import { getUserId } from '../../src/store';
+import { formatLocationForPrivacy } from '../../src/utils/locationFormatter';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
@@ -216,7 +217,7 @@ const ProfileBottomSheet = ({
               {profile?.location && (
                 <View style={styles.profileLocationRow}>
                   <Ionicons name="location-outline" size={16} color={COLORS.textSecondary} />
-                  <Text style={styles.profileLocation}>{profile.location}</Text>
+                  <Text style={styles.profileLocation}>{formatLocationForPrivacy(profile.location)}</Text>
                 </View>
               )}
 
