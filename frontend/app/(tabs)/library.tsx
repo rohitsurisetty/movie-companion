@@ -343,17 +343,34 @@ export default function LibraryScreen() {
   const handleRatingSubmit = async (rating: number, reasons: string[], isLike: boolean) => {
     if (!selectedMovie || !userId) return;
 
+    // Store the movie data before clearing state
+    const movieToRate = selectedMovie;
+    
+    // Close modal and clear state IMMEDIATELY for responsive UI
+    setShowRatingModal(false);
+    setSelectedMovie(null);
+    
+    // Optimistically update the local state
+    const newRatedMovie: RatedMovie = {
+      ...movieToRate,
+      isLike,
+      rating: isLike ? rating : 0,
+      reasons,
+      ratedAt: new Date().toISOString(),
+    };
+    setRatedMovies(prev => [newRatedMovie, ...prev.filter(m => m.id !== movieToRate.id)]);
+
+    // Send to backend asynchronously (non-blocking)
     try {
-      // Send to backend
       const response = await fetch(`${BACKEND_URL}/api/user/library/add`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user_id: userId,
-          movie_id: selectedMovie.id,
-          movie_title: selectedMovie.title,
-          poster_path: selectedMovie.poster_path,
-          release_date: selectedMovie.release_date,
+          movie_id: movieToRate.id,
+          movie_title: movieToRate.title,
+          poster_path: movieToRate.poster_path,
+          release_date: movieToRate.release_date,
           is_like: isLike,
           rating: isLike ? rating : 0,
           reasons: reasons,
@@ -361,22 +378,15 @@ export default function LibraryScreen() {
         }),
       });
 
-      if (response.ok) {
-        // Add to local state
-        const newRatedMovie: RatedMovie = {
-          ...selectedMovie,
-          isLike,
-          rating: isLike ? rating : 0,
-          reasons,
-          ratedAt: new Date().toISOString(),
-        };
-        setRatedMovies(prev => [newRatedMovie, ...prev.filter(m => m.id !== selectedMovie.id)]);
+      if (!response.ok) {
+        // Revert optimistic update if backend fails
+        console.error('Failed to save rating to backend');
+        setRatedMovies(prev => prev.filter(m => m.id !== movieToRate.id));
       }
-
-      setShowRatingModal(false);
-      setSelectedMovie(null);
     } catch (error) {
       console.error('Error saving rating:', error);
+      // Revert optimistic update on error
+      setRatedMovies(prev => prev.filter(m => m.id !== movieToRate.id));
     }
   };
 

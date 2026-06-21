@@ -1331,20 +1331,29 @@ export default function SwipeScreen() {
   }, [swipeState, userId]);
 
   const handleRatingSubmit = useCallback((rating: number, reasons: string[]) => {
-    if (pendingMovie) {
-      recordSwipe(pendingMovie, 'right', rating, reasons);
-      setPendingMovie(null);
-    }
+    // Close modal and clear pending state FIRST for immediate UI response
     setShowRatingModal(false);
+    const movieToRecord = pendingMovie;
+    setPendingMovie(null);
+    setLastSwipedMovie(null);
+    
+    // Then record the swipe asynchronously (non-blocking)
+    if (movieToRecord) {
+      recordSwipe(movieToRecord, 'right', rating, reasons);
+    }
   }, [pendingMovie, recordSwipe]);
 
   const handleLeftSubmit = useCallback((reasons: string[], didntWatch: boolean) => {
-    if (pendingMovie) {
-      // If user didn't watch the movie, don't count it for taste profiling
-      recordSwipe(pendingMovie, 'left', 0, reasons, didntWatch);
-      setPendingMovie(null);
-    }
+    // Close modal and clear pending state FIRST for immediate UI response
     setShowLeftModal(false);
+    const movieToRecord = pendingMovie;
+    setPendingMovie(null);
+    setLastSwipedMovie(null);
+    
+    // Then record the swipe asynchronously (non-blocking)
+    if (movieToRecord) {
+      recordSwipe(movieToRecord, 'left', 0, reasons, didntWatch);
+    }
   }, [pendingMovie, recordSwipe]);
 
   const currentMovie = movies[0];
