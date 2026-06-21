@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Image, TextInput,
-  FlatList, Platform,
+  FlatList, Platform, KeyboardAvoidingView,
   Dimensions, Animated, Easing, ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -402,7 +402,11 @@ export default function GlobalTinaChatScreen({
   };
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView 
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={0}
+    >
       {/* Loading State */}
       {isLoading && messages.length === 0 && (
         <View style={styles.loadingContainer}>
@@ -412,7 +416,6 @@ export default function GlobalTinaChatScreen({
         </View>
       )}
 
-      {/* Chat Area - NO KeyboardAvoidingView here, handled by parent modal */}
       <FlatList
         ref={flatListRef}
         data={messages}
@@ -424,9 +427,6 @@ export default function GlobalTinaChatScreen({
         ]}
         onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
         showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="interactive"
-        style={styles.chatArea}
         ListFooterComponent={isTyping ? (
           <View style={[styles.messageRow, styles.tinaMessageRow]}>
             <Image source={{ uri: TINA_AVATAR }} style={styles.avatar} />
@@ -518,7 +518,7 @@ export default function GlobalTinaChatScreen({
           </TouchableOpacity>
         </View>
       </View>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 

@@ -7,8 +7,6 @@ import {
   Text,
   Dimensions,
   Animated,
-  Platform,
-  KeyboardAvoidingView,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -110,64 +108,58 @@ export default function TinaModal({ onNavigationRequest }: TinaModalProps) {
       </Animated.View>
 
       {/* Modal Content */}
-      <KeyboardAvoidingView
-        style={styles.keyboardAvoid}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 10 : 0}
+      <Animated.View
+        style={[
+          styles.modalContainer,
+          {
+            transform: [{ translateY: slideAnim }],
+          },
+        ]}
       >
-        <Animated.View
-          style={[
-            styles.modalContainer,
-            {
-              transform: [{ translateY: slideAnim }],
-            },
-          ]}
-        >
-          <SafeAreaView style={styles.safeArea} edges={['top']}>
-            {/* Header */}
-            <View style={styles.header}>
-              <View style={styles.headerLeft}>
-                <TouchableOpacity
-                  onPress={handleMinimize}
-                  style={styles.headerButton}
-                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                >
-                  <Ionicons name="chevron-down" size={28} color="#FFFFFF" />
-                </TouchableOpacity>
-              </View>
-              
-              <View style={styles.headerCenter}>
-                <Text style={styles.headerTitle}>Tina</Text>
-                <View style={styles.onlineDot} />
-              </View>
-              
-              <View style={styles.headerRight}>
-                <TouchableOpacity
-                  onPress={handleClose}
-                  style={styles.headerButton}
-                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                >
-                  <Ionicons name="close" size={24} color="#FFFFFF" />
-                </TouchableOpacity>
-              </View>
+        <SafeAreaView style={styles.safeArea} edges={['top']}>
+          {/* Header */}
+          <View style={styles.header}>
+            <View style={styles.headerLeft}>
+              <TouchableOpacity
+                onPress={handleMinimize}
+                style={styles.headerButton}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Ionicons name="chevron-down" size={28} color="#FFFFFF" />
+              </TouchableOpacity>
             </View>
+            
+            <View style={styles.headerCenter}>
+              <Text style={styles.headerTitle}>Tina</Text>
+              <View style={styles.onlineDot} />
+            </View>
+            
+            <View style={styles.headerRight}>
+              <TouchableOpacity
+                onPress={handleClose}
+                style={styles.headerButton}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Ionicons name="close" size={24} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
+          </View>
 
-            {/* Chat Content */}
-            <View style={styles.chatContainer}>
-              <GlobalTinaChatScreen
-                userId={userProfile?.userId || ''}
-                userName={userProfile?.name || ''}
-                existingMessages={state.messages}
-                onMessagesChange={handleMessagesChange}
-                onNavigationRequest={onNavigationRequest}
-                isOnboardingComplete={state.isOnboardingComplete}
-                userProfile={userProfile}
-                sessionOpenCount={sessionOpenCount}
-              />
-            </View>
-          </SafeAreaView>
-        </Animated.View>
-      </KeyboardAvoidingView>
+          {/* Chat Content - NO KeyboardAvoidingView here, it's inside GlobalTinaChatScreen */}
+          <View style={styles.chatContainer}>
+            <GlobalTinaChatScreen
+              userId={userProfile?.userId || ''}
+              userName={userProfile?.name || ''}
+              existingMessages={state.messages}
+              onMessagesChange={handleMessagesChange}
+              onNavigationRequest={onNavigationRequest}
+              isOnboardingComplete={state.isOnboardingComplete}
+              userProfile={userProfile}
+              sessionOpenCount={sessionOpenCount}
+            />
+          </View>
+        </SafeAreaView>
+      </Animated.View>
     </Modal>
   );
 }
@@ -176,9 +168,6 @@ const styles = StyleSheet.create({
   backdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0, 0, 0, 0.6)',
-  },
-  keyboardAvoid: {
-    flex: 1,
   },
   modalContainer: {
     position: 'absolute',
