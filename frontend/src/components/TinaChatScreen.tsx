@@ -99,12 +99,23 @@ export default function TinaChatScreen({
   const insets = useSafeAreaInsets();
   
   // ========== CORE STATE ==========
-  const [messages, setMessages] = useState<Message[]>([]);
+  // CRITICAL: Initialize messages IMMEDIATELY from existingMessages if available
+  const [messages, setMessages] = useState<Message[]>(() => {
+    if (existingMessages && existingMessages.length > 0) {
+      console.log('[Tina] Initializing with existing messages:', existingMessages.length);
+      return existingMessages;
+    }
+    return [];
+  });
   const [inputText, setInputText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
-  const [isLoading, setIsLoading] = useState(true); // Start with loading state
-  const [isInitialized, setIsInitialized] = useState(false);
-  const [initializationAttempts, setInitializationAttempts] = useState(0);
+  // Start loading only if we don't have existing messages
+  const [isLoading, setIsLoading] = useState(() => {
+    return !(existingMessages && existingMessages.length > 0);
+  });
+  const [isInitialized, setIsInitialized] = useState(() => {
+    return existingMessages && existingMessages.length > 0;
+  });
   const [topicsCollected, setTopicsCollected] = useState(0);
   const [profileData, setProfileData] = useState<Partial<ProfileData>>({});
   const [currentOptions, setCurrentOptions] = useState<{
@@ -117,11 +128,13 @@ export default function TinaChatScreen({
   const [currentDeepLink, setCurrentDeepLink] = useState<DeepLinkAction | null>(null);
   const [isExiting, setIsExiting] = useState(false);
   const [pendingMoviesProcessed, setPendingMoviesProcessed] = useState(false);
+  const [welcomeBackShown, setWelcomeBackShown] = useState(false);
   
   const flatListRef = useRef<FlatList>(null);
   const typingAnimation = useRef(new Animated.Value(0)).current;
   const messageAnimations = useRef<{ [key: string]: Animated.Value }>({});
-  const initializationRef = useRef(false);
+  // Use a ref that tracks if THIS instance has initialized (reset on unmount)
+  const hasInitializedThisMount = useRef(false);
   
   // ========== HELPER FUNCTIONS ==========
   
@@ -226,29 +239,37 @@ export default function TinaChatScreen({
   // ========== GUARANTEED INITIALIZATION ==========
   // This function ALWAYS results in messages being displayed - NEVER a blank screen
   const initializeConversation = useCallback(async () => {
-    // Prevent double initialization
-    if (initializationRef.current) return;
-    initializationRef.current = true;
+    // Prevent double initialization within the same mount
+    if (hasInitializedThisMount.current) {
+      console.log('[Tina] Already initialized this mount, skipping');
+      return;
+    }
+    hasInitializedThisMount.current = true;
     
-    setIsLoading(true);
+    console.log('[Tina] Starting initialization...', {
+      hasExistingMessages: existingMessages?.length || 0,
+      currentMessages: messages.length,
+      isReturning: isReturningFromMovieSelection,
+      hasIncomingMovies: incomingMovies?.length || 0
+    });
     
-    try {
-      // PRIORITY 1: Use existing messages from props (navigation state)
-      if (existingMessages && existingMessages.length > 0) {
-        setMessages(existingMessages);
-        setIsInitialized(true);
-        setIsLoading(false);
-        
-        // If returning from movie selection with movies, handle that
-        if (isReturningFromMovieSelection && incomingMovies && incomingMovies.length > 0 && !pendingMoviesProcessed) {
+    // If we already have messages (from useState initializer), just handle special cases
+    if (messages.length > 0) {
+      console.log('[Tina] Already have messages, handling special cases');
+      setIsInitialized(true);
+      setIsLoading(false);
+      
+      // Handle returning from movie selection
+      if (isReturningFromMovieSelection && !welcomeBackShown) {
+        setWelcomeBackShown(true);
+        if (incomingMovies && incomingMovies.length > 0 && !pendingMoviesProcessed) {
           setPendingMoviesProcessed(true);
           setCurrentDeepLink(null);
           setTimeout(() => {
             addMessage(`Great picks! 🎬`, false);
             setTimeout(() => handleMoviesReceived(incomingMovies), 300);
           }, 100);
-        } else if (isReturningFromMovieSelection) {
-          // Returning without movies selected
+        } else {
           setTimeout(() => {
             addMessage(`Welcome back, ${userName || 'there'}! 😊`, false);
             setTimeout(() => {
@@ -257,12 +278,17 @@ export default function TinaChatScreen({
             }, 400);
           }, 100);
         }
-        return;
       }
-      
-      // PRIORITY 2: Try to load from AsyncStorage
+      return;
+    }
+    
+    setIsLoading(true);
+    
+    try {
+      // PRIORITY 1: Try to load from AsyncStorage (for app restarts)
       const savedMessages = await loadSavedConversation();
       if (savedMessages && savedMessages.length > 0) {
+        console.log('[Tina] Loaded from AsyncStorage:', savedMessages.length, 'messages');
         setMessages(savedMessages);
         setIsInitialized(true);
         setIsLoading(false);
@@ -275,8 +301,9 @@ export default function TinaChatScreen({
         return;
       }
       
-      // PRIORITY 3: Fetch greeting from API
+      // PRIORITY 2: Fetch greeting from API
       try {
+        console.log('[Tina] Fetching greeting from API...');
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 8000);
         
@@ -289,6 +316,7 @@ export default function TinaChatScreen({
         if (res.ok) {
           const data = await res.json();
           if (data.success && data.greeting) {
+            console.log('[Tina] Got greeting from API');
             addMessage(data.greeting, false);
             setIsInitialized(true);
             setIsLoading(false);
@@ -297,10 +325,11 @@ export default function TinaChatScreen({
           }
         }
       } catch (apiError) {
-        console.log('API greeting failed, using fallback:', apiError);
+        console.log('[Tina] API greeting failed, using fallback:', apiError);
       }
       
-      // PRIORITY 4: GUARANTEED FALLBACK - Always show something
+      // PRIORITY 3: GUARANTEED FALLBACK - Always show something
+      console.log('[Tina] Using fallback greeting');
       const fallbackMessages = getContextualFallbackGreeting();
       await addMessagesSequentially(fallbackMessages, 600);
       setIsInitialized(true);
@@ -308,7 +337,7 @@ export default function TinaChatScreen({
       setTimeout(() => sendToTina(''), 1000);
       
     } catch (error) {
-      console.error('Initialization error:', error);
+      console.error('[Tina] Initialization error:', error);
       
       // ULTIMATE FALLBACK - This MUST NEVER fail
       const emergencyMessage = `Hey ${userName || 'there'}! 💫 I'm Tina, your matchmaker. Let's get started!`;
@@ -318,9 +347,11 @@ export default function TinaChatScreen({
     }
   }, [
     existingMessages, 
+    messages.length,
     isReturningFromMovieSelection, 
     incomingMovies, 
     pendingMoviesProcessed,
+    welcomeBackShown,
     userName, 
     loadSavedConversation, 
     addMessage, 
@@ -346,27 +377,35 @@ export default function TinaChatScreen({
 
   // MAIN INITIALIZATION - Runs once on mount
   useEffect(() => {
+    console.log('[Tina] Component mounted, starting initialization');
     initializeConversation();
     
-    // Cleanup function
+    // Cleanup function - reset the ref when unmounting
     return () => {
-      initializationRef.current = false;
+      console.log('[Tina] Component unmounting');
+      hasInitializedThisMount.current = false;
     };
   }, []); // Empty deps - only run on mount
   
-  // Save messages to parent and AsyncStorage whenever they change
+  // Sync messages with parent whenever they change
+  useEffect(() => {
+    if (messages.length > 0 && onMessagesChange) {
+      console.log('[Tina] Syncing', messages.length, 'messages to parent');
+      onMessagesChange(messages);
+    }
+  }, [messages, onMessagesChange]);
+  
+  // Save to AsyncStorage periodically
   useEffect(() => {
     if (messages.length > 0) {
-      if (onMessagesChange) {
-        onMessagesChange(messages);
-      }
       saveConversation(messages);
     }
-  }, [messages, onMessagesChange, saveConversation]);
+  }, [messages, saveConversation]);
   
-  // Handle late-arriving movies from navigation (in case useEffect fires after init)
+  // Handle late-arriving movies from navigation
   useEffect(() => {
     if (isInitialized && incomingMovies && incomingMovies.length > 0 && !pendingMoviesProcessed) {
+      console.log('[Tina] Late-arriving movies detected');
       setPendingMoviesProcessed(true);
       setCurrentDeepLink(null);
       setTimeout(() => {
@@ -376,13 +415,21 @@ export default function TinaChatScreen({
     }
   }, [isInitialized, incomingMovies, pendingMoviesProcessed, addMessage]);
   
-  // SAFETY NET: If somehow we end up with no messages after init, recover
+  // SAFETY NET: If somehow we end up with no messages after init, recover immediately
   useEffect(() => {
-    if (isInitialized && !isLoading && messages.length === 0) {
-      console.warn('Safety net triggered: No messages after initialization');
-      const emergencyMessage = `Hey ${userName || 'there'}! 💫 Let's continue building your profile!`;
-      addMessage(emergencyMessage, false);
-    }
+    const checkAndRecover = () => {
+      if (isInitialized && !isLoading && messages.length === 0) {
+        console.warn('[Tina] SAFETY NET: No messages after init, recovering...');
+        const emergencyMessage = `Hey ${userName || 'there'}! 💫 Let's continue building your profile!`;
+        addMessage(emergencyMessage, false);
+      }
+    };
+    
+    // Check immediately and again after a short delay
+    checkAndRecover();
+    const timer = setTimeout(checkAndRecover, 500);
+    
+    return () => clearTimeout(timer);
   }, [isInitialized, isLoading, messages.length, userName, addMessage]);
 
   const getMessageAnimation = (id: string) => {

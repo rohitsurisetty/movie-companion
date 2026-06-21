@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -108,9 +108,23 @@ export default function OnboardingScreen() {
   // Track if we're selecting movies FOR Tina (vs manual onboarding)
   const [tinaMovieSelectionMode, setTinaMovieSelectionMode] = useState(false);
   const [moviesForTina, setMoviesForTina] = useState<any[]>([]);
-  // Preserve Tina messages across movie selection navigation
+  // Preserve Tina messages across movie selection navigation - using ref for immediate access
   const [tinaMessages, setTinaMessages] = useState<any[]>([]);
+  const tinaMessagesRef = useRef<any[]>([]);
   const [returningFromMovieSelection, setReturningFromMovieSelection] = useState(false);
+
+  // Keep ref in sync with state
+  useEffect(() => {
+    tinaMessagesRef.current = tinaMessages;
+    console.log('[Onboarding] Tina messages updated:', tinaMessages.length);
+  }, [tinaMessages]);
+
+  // Custom setter that updates both state and ref
+  const updateTinaMessages = useCallback((msgs: any[]) => {
+    console.log('[Onboarding] Updating Tina messages:', msgs.length);
+    tinaMessagesRef.current = msgs;
+    setTinaMessages(msgs);
+  }, []);
 
   // Get user ID on mount
   useEffect(() => {
@@ -310,6 +324,10 @@ export default function OnboardingScreen() {
 
   // If showing Tina chat, render it full-screen
   if (showTinaChat) {
+    // Use ref for immediate message access (state might be one render behind)
+    const messagesForTina = tinaMessagesRef.current.length > 0 ? tinaMessagesRef.current : tinaMessages;
+    console.log('[Onboarding] Rendering Tina with', messagesForTina.length, 'messages, returning:', returningFromMovieSelection);
+    
     return (
       <TinaChatScreen
         userId={userId}
@@ -318,8 +336,8 @@ export default function OnboardingScreen() {
         onExit={handleTinaExit}
         onRequestMovieSelection={handleTinaRequestMovieSelection}
         selectedMovies={moviesForTina.length > 0 ? moviesForTina : undefined}
-        existingMessages={tinaMessages}
-        onMessagesChange={setTinaMessages}
+        existingMessages={messagesForTina}
+        onMessagesChange={updateTinaMessages}
         isReturningFromMovieSelection={returningFromMovieSelection}
       />
     );
