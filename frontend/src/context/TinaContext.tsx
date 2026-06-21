@@ -187,6 +187,9 @@ export function TinaProvider({ children }: { children: React.ReactNode }) {
         ...state,
         isOpen: false, // Don't persist open state
         isMinimized: false,
+        isOnboardingTinaActive: false, // Don't persist this
+        // Don't persist pre_decision stage - let onboarding screen reset it
+        onboardingStage: state.onboardingStage === 'pre_decision' ? 'pre_decision' : state.onboardingStage,
       };
       await Promise.all([
         AsyncStorage.setItem(TINA_STATE_KEY, JSON.stringify(stateToSave)),

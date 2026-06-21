@@ -131,7 +131,11 @@ export default function OnboardingScreen() {
       const id = await getUserId();
       setUserId(id || '');
     })();
-  }, []);
+    
+    // Reset onboarding stage to pre_decision when this screen mounts
+    // This ensures floating Tina is hidden until user makes a choice
+    setOnboardingStage('pre_decision');
+  }, [setOnboardingStage]);
 
   // Track when Tina screen is active (for floating button visibility)
   useEffect(() => {
