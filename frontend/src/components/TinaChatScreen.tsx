@@ -177,10 +177,8 @@ export default function TinaChatScreen({
     
     setMessages(prev => [...prev, msg]);
     
-    // Animate message entrance
-    if (!messageAnimations.current[msg.id]) {
-      messageAnimations.current[msg.id] = new Animated.Value(0);
-    }
+    // Create animation starting at 0 for NEW messages and animate to 1
+    messageAnimations.current[msg.id] = new Animated.Value(0);
     Animated.spring(messageAnimations.current[msg.id], {
       toValue: 1,
       tension: 100,
@@ -434,7 +432,9 @@ export default function TinaChatScreen({
 
   const getMessageAnimation = (id: string) => {
     if (!messageAnimations.current[id]) {
-      messageAnimations.current[id] = new Animated.Value(0);
+      // Create animation and IMMEDIATELY set to 1 (fully visible)
+      // This ensures restored messages are visible
+      messageAnimations.current[id] = new Animated.Value(1);
     }
     return messageAnimations.current[id];
   };
