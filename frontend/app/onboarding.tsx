@@ -257,18 +257,27 @@ export default function OnboardingScreen() {
   };
 
   // Reset the returning flag and movies after Tina has processed them
-  // This happens implicitly through the TinaChatScreen's pendingMoviesProcessed state
-  // but we should also clear from parent after a short delay
+  // Only clear the movies data, keep the returning flag until Tina explicitly confirms
   useEffect(() => {
-    if (returningFromMovieSelection && showTinaChat) {
-      // Clear after Tina has had time to receive the data
+    if (returningFromMovieSelection && showTinaChat && moviesForTina.length > 0) {
+      // Clear movies after Tina has had time to receive the data (but keep the returning flag)
       const timer = setTimeout(() => {
-        setReturningFromMovieSelection(false);
         setMoviesForTina([]);
-      }, 2000);
+      }, 500); // Reduced timeout - just enough for Tina to grab the movies
       return () => clearTimeout(timer);
     }
-  }, [returningFromMovieSelection, showTinaChat]);
+  }, [returningFromMovieSelection, showTinaChat, moviesForTina.length]);
+  
+  // Clear returning flag after chat is fully mounted and displaying
+  useEffect(() => {
+    if (returningFromMovieSelection && showTinaChat && tinaMessages.length > 0) {
+      // Clear the flag after a longer delay once messages are confirmed
+      const timer = setTimeout(() => {
+        setReturningFromMovieSelection(false);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [returningFromMovieSelection, showTinaChat, tinaMessages.length]);
 
   // Validation function - all selection steps are mandatory
   const isSelectionValid = (stepIdx: number): boolean => {

@@ -57,15 +57,20 @@ export default function TinaChatScreen({
   isReturningFromMovieSelection,
 }: Props) {
   const insets = useSafeAreaInsets();
+  
+  // Track if this is a fresh mount or a return from navigation
+  const hasExistingConversation = existingMessages && existingMessages.length > 0;
+  
   // Initialize messages from existing if available
   const [messages, setMessages] = useState<Message[]>(() => {
-    if (existingMessages && existingMessages.length > 0) {
+    if (hasExistingConversation) {
       return existingMessages;
     }
     return [];
   });
   const [inputText, setInputText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [isLoading, setIsLoading] = useState(false); // Loading state for better UX
   const [topicsCollected, setTopicsCollected] = useState(0);
   const [profileData, setProfileData] = useState<Partial<ProfileData>>({});
   const [currentOptions, setCurrentOptions] = useState<{
@@ -77,9 +82,14 @@ export default function TinaChatScreen({
   const [showSendButton, setShowSendButton] = useState(false);
   const [currentDeepLink, setCurrentDeepLink] = useState<DeepLinkAction | null>(null);
   const [isExiting, setIsExiting] = useState(false);
-  // Only initialize if no existing messages (not returning from movie selection)
+  
+  // Track initialization - only init new conversation if no existing messages AND not returning
   const [hasInitialized, setHasInitialized] = useState(() => {
-    return (existingMessages && existingMessages.length > 0) || isReturningFromMovieSelection === true;
+    // If we have existing messages, we're already initialized
+    if (hasExistingConversation) return true;
+    // If returning from movie selection, we'll handle that separately
+    if (isReturningFromMovieSelection) return true;
+    return false;
   });
   const [pendingMoviesProcessed, setPendingMoviesProcessed] = useState(false);
   const [welcomeBackShown, setWelcomeBackShown] = useState(false);
@@ -102,13 +112,22 @@ export default function TinaChatScreen({
     }
   }, [isTyping]);
 
-  // Initialize conversation
+  // Restore messages from parent when component mounts with existing messages
   useEffect(() => {
-    if (!hasInitialized) {
-      initConversation();
+    if (hasExistingConversation && messages.length === 0) {
+      // Messages were lost during re-mount, restore them
+      setMessages(existingMessages);
+    }
+  }, []);
+
+  // Initialize conversation only for fresh starts (no existing messages)
+  useEffect(() => {
+    if (!hasInitialized && !hasExistingConversation) {
+      setIsLoading(true);
+      initConversation().finally(() => setIsLoading(false));
       setHasInitialized(true);
     }
-  }, [hasInitialized]);
+  }, [hasInitialized, hasExistingConversation]);
 
   // Handle returning from movie selection
   useEffect(() => {
@@ -496,6 +515,18 @@ export default function TinaChatScreen({
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={0}
       >
+        {/* Loading State */}
+        {isLoading && messages.length === 0 && (
+          <View style={styles.loadingContainer}>
+            <Animated.View style={[styles.typingDots, { opacity: typingAnimation }]}>
+              <View style={styles.typingDot} />
+              <View style={styles.typingDot} />
+              <View style={styles.typingDot} />
+            </Animated.View>
+            <Text style={styles.loadingText}>Tina is getting ready...</Text>
+          </View>
+        )}
+        
         <FlatList
           ref={flatListRef}
           data={messages}
@@ -507,6 +538,11 @@ export default function TinaChatScreen({
           ]}
           onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
           showsVerticalScrollIndicator={false}
+          ListEmptyComponent={!isLoading ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>Starting conversation with Tina...</Text>
+            </View>
+          ) : null}
           ListFooterComponent={isTyping ? (
             <View style={styles.typingRow}>
               <Image source={{ uri: TINA_AVATAR }} style={styles.msgAvatar} />
@@ -941,5 +977,30 @@ const styles = StyleSheet.create({
   },
   sendBtnActive: { 
     backgroundColor: '#FF6B6B',
+  },
+  
+  // Loading and Empty states
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 15,
+    color: 'rgba(255,255,255,0.6)',
+    fontWeight: '500',
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  emptyText: {
+    fontSize: 15,
+    color: 'rgba(255,255,255,0.5)',
+    fontStyle: 'italic',
   },
 });
