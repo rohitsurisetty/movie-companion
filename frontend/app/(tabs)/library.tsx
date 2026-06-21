@@ -134,18 +134,18 @@ function RatingModal({ visible, movie, onClose, onSubmit }: RatingModalProps) {
               <Text style={modalStyles.questionText}>Did you like this movie?</Text>
               <View style={modalStyles.buttonRow}>
                 <TouchableOpacity
-                  style={[modalStyles.choiceButton, modalStyles.likeButton]}
-                  onPress={() => setIsLike(true)}
-                >
-                  <Ionicons name="thumbs-up" size={28} color="#FFF" />
-                  <Text style={modalStyles.choiceText}>Liked It</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
                   style={[modalStyles.choiceButton, modalStyles.dislikeButton]}
                   onPress={() => setIsLike(false)}
                 >
                   <Ionicons name="thumbs-down" size={28} color="#FFF" />
                   <Text style={modalStyles.choiceText}>Didn't Like</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[modalStyles.choiceButton, modalStyles.likeButton]}
+                  onPress={() => setIsLike(true)}
+                >
+                  <Ionicons name="thumbs-up" size={28} color="#FFF" />
+                  <Text style={modalStyles.choiceText}>Liked It</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -172,7 +172,7 @@ function RatingModal({ visible, movie, onClose, onSubmit }: RatingModalProps) {
               {/* Reasons */}
               <View style={modalStyles.reasonsSection}>
                 <Text style={modalStyles.sectionLabel}>
-                  {isLike ? 'What did you like about it?' : 'What went wrong?'}
+                  {isLike ? 'What did you like about it? (Optional)' : 'What went wrong?'}
                 </Text>
                 <View style={modalStyles.reasonsGrid}>
                   {(isLike ? LIKE_REASONS : DISLIKE_REASONS).map((reason) => (
