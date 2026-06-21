@@ -57,12 +57,13 @@ async def get_or_create_conversation(user1_id: str, user2_id: str) -> Dict:
         existing.pop("_id", None)
         return existing
     
-    # Create new conversation
+    # Create new conversation - user1_id is the initiator (sender of first message)
     new_conv = {
         "conversation_id": conv_id,
         "participants": [user1_id, user2_id],
         "created_at": datetime.utcnow().isoformat(),
         "status": "pending",  # pending, active, unmatched, declined
+        "initiated_by": user1_id,  # Track who started the conversation
         "last_message": None,
         "last_message_at": None,
         "unread_count": {user1_id: 0, user2_id: 0},
@@ -149,8 +150,9 @@ async def get_messages(conversation_id: str, limit: int = 50, before: Optional[s
 
 
 async def get_conversations(user_id: str) -> List[Dict]:
-    """Get all active conversations for a user"""
-    cursor = _db.chat_conversations.find(
+    """Get all active conversations for a user, including pending ones where user is sender"""
+    # Find active conversations
+    active_cursor = _db.chat_conversations.find(
         {
             "participants": user_id,
             "status": "active"
@@ -158,11 +160,26 @@ async def get_conversations(user_id: str) -> List[Dict]:
         {"_id": 0}
     ).sort("last_message_at", -1)
     
-    conversations = await cursor.to_list(length=100)
+    active_conversations = await active_cursor.to_list(length=100)
     
-    # Enrich with other_user info
+    # Also find pending conversations where this user is the initiator (sender)
+    # These are message requests the user has sent but not yet accepted
+    pending_cursor = _db.chat_conversations.find(
+        {
+            "participants": user_id,
+            "status": "pending",
+            "initiated_by": user_id  # Only show pending convos the user initiated
+        },
+        {"_id": 0}
+    ).sort("last_message_at", -1)
+    
+    pending_conversations = await pending_cursor.to_list(length=50)
+    
+    # Combine and enrich all conversations
+    all_conversations = active_conversations + pending_conversations
+    
     result = []
-    for conv in conversations:
+    for conv in all_conversations:
         other_user_id = [p for p in conv["participants"] if p != user_id][0]
         
         # Get other user's basic info from mock profiles or users collection
@@ -172,8 +189,12 @@ async def get_conversations(user_id: str) -> List[Dict]:
             **conv,
             "other_user_id": other_user_id,
             "unread": conv.get("unread_count", {}).get(user_id, 0),
-            "other_user": other_user
+            "other_user": other_user,
+            "is_pending": conv.get("status") == "pending"  # Flag for UI to show "Pending" badge
         })
+    
+    # Sort by last_message_at
+    result.sort(key=lambda x: x.get("last_message_at", ""), reverse=True)
     
     return result
 

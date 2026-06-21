@@ -314,25 +314,33 @@ const ConversationItem = ({
 }) => {
   const user = conversation.other_user;
   const hasUnread = conversation.unread > 0;
+  const isPending = (conversation as any).is_pending === true;
   
   return (
     <TouchableOpacity style={styles.conversationItem} onPress={onPress} activeOpacity={0.7}>
       <View style={styles.conversationAvatar}>
         <Avatar name={user?.name || 'U'} size={56} imageUrl={user?.avatar} />
-        <View style={styles.onlineDot} />
+        {!isPending && <View style={styles.onlineDot} />}
       </View>
       <View style={styles.conversationContent}>
         <View style={styles.conversationHeader}>
-          <Text style={[styles.conversationName, hasUnread && styles.unreadName]} numberOfLines={1}>
-            {user?.name || 'Unknown'}
-          </Text>
+          <View style={styles.conversationNameRow}>
+            <Text style={[styles.conversationName, hasUnread && styles.unreadName]} numberOfLines={1}>
+              {user?.name || 'Unknown'}
+            </Text>
+            {isPending && (
+              <View style={styles.pendingBadge}>
+                <Text style={styles.pendingBadgeText}>Pending</Text>
+              </View>
+            )}
+          </View>
           <Text style={styles.conversationTime}>{formatTime(conversation.last_message_at)}</Text>
         </View>
-        <Text style={[styles.conversationPreview, hasUnread && styles.unreadPreview]} numberOfLines={1}>
-          {conversation.last_message || 'Start a conversation'}
+        <Text style={[styles.conversationPreview, hasUnread && styles.unreadPreview, isPending && styles.pendingPreview]} numberOfLines={1}>
+          {isPending ? 'Waiting for response...' : (conversation.last_message || 'Start a conversation')}
         </Text>
       </View>
-      {hasUnread ? (
+      {hasUnread && !isPending ? (
         <View style={styles.unreadBadge}>
           <Text style={styles.unreadBadgeText}>{conversation.unread}</Text>
         </View>
@@ -924,13 +932,17 @@ const styles = StyleSheet.create({
   onlineDot: { position: 'absolute', bottom: 2, right: 2, width: 14, height: 14, borderRadius: 7, backgroundColor: COLORS.online, borderWidth: 2, borderColor: COLORS.bg },
   conversationContent: { flex: 1, marginLeft: 14 },
   conversationHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  conversationName: { fontSize: 16, fontWeight: '500', color: COLORS.text, flex: 1 },
+  conversationNameRow: { flexDirection: 'row', alignItems: 'center', flex: 1, gap: 8 },
+  conversationName: { fontSize: 16, fontWeight: '500', color: COLORS.text },
   unreadName: { fontWeight: '700' },
   conversationTime: { fontSize: 12, color: COLORS.textMuted },
   conversationPreview: { fontSize: 14, color: COLORS.textSecondary, marginTop: 4 },
   unreadPreview: { color: COLORS.text, fontWeight: '500' },
+  pendingPreview: { color: COLORS.textMuted, fontStyle: 'italic' },
   unreadBadge: { backgroundColor: COLORS.primary, borderRadius: 12, paddingHorizontal: 8, paddingVertical: 4, minWidth: 24, alignItems: 'center' },
   unreadBadgeText: { color: '#FFF', fontSize: 12, fontWeight: '600' },
+  pendingBadge: { backgroundColor: 'rgba(255, 165, 0, 0.15)', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255, 165, 0, 0.5)' },
+  pendingBadgeText: { fontSize: 10, fontWeight: '600', color: '#FFA500' },
   
   // Request Card
   requestCard: { backgroundColor: COLORS.bgCard, borderRadius: 16, padding: 16, marginVertical: 8 },

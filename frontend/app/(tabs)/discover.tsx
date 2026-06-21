@@ -404,7 +404,7 @@ function LeftSwipeModal({
 
           {didntWatch && (
             <Text style={[modalStyles.didntWatchNote, { color: colors.textMuted }]}>
-              This movie won't affect your taste profile
+              {"This movie won't affect your taste profile"}
             </Text>
           )}
 
@@ -957,6 +957,7 @@ export default function SwipeScreen() {
   // Track last swiped movie for undo functionality
   const [lastSwipedMovie, setLastSwipedMovie] = useState<FeedMovie | null>(null);
   const [showUndoToast, setShowUndoToast] = useState(false);
+  const [showSkippedToast, setShowSkippedToast] = useState(false);
   const undoTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const isProfileComplete = swipeState.totalSwipes >= REQUIRED_SWIPES;
@@ -1364,9 +1365,9 @@ export default function SwipeScreen() {
     // Record as "not watched" - doesn't count for recommendations
     recordSwipe(movie, 'left', 0, ['not_watched'], true);
     
-    // Show brief toast
-    setShowUndoToast(true);
-    setTimeout(() => setShowUndoToast(false), 1500);
+    // Show "Movie skipped" toast (not undo toast)
+    setShowSkippedToast(true);
+    setTimeout(() => setShowSkippedToast(false), 1500);
   }, [recordSwipe]);
 
   const currentMovie = movies[0];
@@ -1485,7 +1486,7 @@ export default function SwipeScreen() {
       <View style={styles.instructionsContainer}>
         <View style={styles.instructionItem}>
           <Ionicons name="arrow-back" size={16} color={colors.textMuted} />
-          <Text style={[styles.instructionText, { color: colors.textMuted }]}>Didn't like</Text>
+          <Text style={[styles.instructionText, { color: colors.textMuted }]}>{"Didn't like"}</Text>
         </View>
         <View style={styles.instructionItem}>
           <Ionicons name="eye-off-outline" size={14} color={colors.textMuted} />
@@ -1547,6 +1548,14 @@ export default function SwipeScreen() {
         <View style={[styles.undoToast, { backgroundColor: colors.bgCard }]}>
           <Ionicons name="checkmark-circle" size={20} color={colors.primary} />
           <Text style={[styles.undoToastText, { color: colors.text }]}>Swipe undone!</Text>
+        </View>
+      )}
+      
+      {/* Movie Skipped Toast */}
+      {showSkippedToast && (
+        <View style={[styles.undoToast, { backgroundColor: colors.bgCard }]}>
+          <Ionicons name="eye-off" size={20} color={colors.textMuted} />
+          <Text style={[styles.undoToastText, { color: colors.text }]}>Movie skipped</Text>
         </View>
       )}
     </SafeAreaView>

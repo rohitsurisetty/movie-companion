@@ -66,7 +66,6 @@ export const BORDER_RADIUS = {
 
 // Swipe reasons for left swipe (dislike/skip)
 export const LEFT_SWIPE_REASONS = [
-  { id: 'not_watched', label: "Haven't watched it", icon: 'eye-off-outline' },
   { id: 'not_interested', label: 'Not my type', icon: 'thumbs-down-outline' },
   { id: 'bad_acting', label: "Didn't like acting", icon: 'person-outline' },
   { id: 'bad_story', label: 'Boring story', icon: 'book-outline' },
