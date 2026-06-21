@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Image, TextInput,
-  FlatList, Platform, KeyboardAvoidingView,
+  FlatList, Platform, Keyboard, 
   Dimensions, Animated, Easing, ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -9,7 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTina, UserProfileData, Message } from '../context/TinaContext';
 
-const { width } = Dimensions.get('window');
+const { width, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || process.env.EXPO_PUBLIC_API_URL || '';
 
 // Tina avatar
@@ -69,11 +69,39 @@ export default function GlobalTinaChatScreen({
   const [showSendButton, setShowSendButton] = useState(false);
   const [currentDeepLink, setCurrentDeepLink] = useState<DeepLinkAction | null>(null);
   const [hasGreetedThisSession, setHasGreetedThisSession] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   
   const flatListRef = useRef<FlatList>(null);
   const typingAnimation = useRef(new Animated.Value(0)).current;
   const messageAnimations = useRef<{ [key: string]: Animated.Value }>({});
   const mountedRef = useRef(true);
+
+  // ========== KEYBOARD HANDLING ==========
+  
+  useEffect(() => {
+    const keyboardWillShow = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      (e) => {
+        setKeyboardHeight(e.endCoordinates.height);
+        // Scroll to end when keyboard opens
+        setTimeout(() => {
+          flatListRef.current?.scrollToEnd({ animated: true });
+        }, 100);
+      }
+    );
+    
+    const keyboardWillHide = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => {
+        setKeyboardHeight(0);
+      }
+    );
+    
+    return () => {
+      keyboardWillShow.remove();
+      keyboardWillHide.remove();
+    };
+  }, []);
 
   // ========== HELPER FUNCTIONS ==========
 
@@ -402,11 +430,7 @@ export default function GlobalTinaChatScreen({
   };
 
   return (
-    <KeyboardAvoidingView 
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={0}
-    >
+    <View style={styles.container}>
       {/* Loading State */}
       {isLoading && messages.length === 0 && (
         <View style={styles.loadingContainer}>
@@ -423,10 +447,13 @@ export default function GlobalTinaChatScreen({
         keyExtractor={item => item.id}
         contentContainerStyle={[
           styles.messageList,
-          { paddingBottom: currentOptions || currentDeepLink ? 200 : 100 },
+          { paddingBottom: 20 },
         ]}
         onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+        onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
         ListFooterComponent={isTyping ? (
           <View style={[styles.messageRow, styles.tinaMessageRow]}>
             <Image source={{ uri: TINA_AVATAR }} style={styles.avatar} />
@@ -487,8 +514,14 @@ export default function GlobalTinaChatScreen({
         </View>
       )}
 
-      {/* Composer */}
-      <View style={[styles.composerContainer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+      {/* Composer - positioned above keyboard */}
+      <View style={[
+        styles.composerContainer, 
+        { 
+          paddingBottom: Math.max(insets.bottom, 8),
+          marginBottom: keyboardHeight > 0 ? keyboardHeight - insets.bottom : 0,
+        }
+      ]}>
         <View style={styles.composer}>
           <TextInput
             style={styles.input}
@@ -518,7 +551,7 @@ export default function GlobalTinaChatScreen({
           </TouchableOpacity>
         </View>
       </View>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
