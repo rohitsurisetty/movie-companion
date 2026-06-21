@@ -82,11 +82,17 @@ export default function GlobalTinaChatScreen({
     const keyboardWillShow = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
       (e) => {
-        setKeyboardHeight(e.endCoordinates.height);
-        // When keyboard opens, scroll to show latest message in visible area
+        const kbHeight = e.endCoordinates.height;
+        setKeyboardHeight(kbHeight);
+        
+        // When keyboard opens, scroll to position latest message in visible area
+        // Wait for keyboard animation to complete
         setTimeout(() => {
-          scrollToLatestMessage();
-        }, 150);
+          if (messages.length > 0 && flatListRef.current) {
+            // Scroll to end first, then the extra padding will position the message
+            flatListRef.current.scrollToEnd({ animated: true });
+          }
+        }, 250);
       }
     );
     
@@ -101,28 +107,18 @@ export default function GlobalTinaChatScreen({
       keyboardWillShow.remove();
       keyboardWillHide.remove();
     };
-  }, [scrollToLatestMessage]);
+  }, [messages.length]);
 
-  // Scroll to show the latest message - positioned so it's fully visible above keyboard
+  // Scroll to show the latest message centered in visible area
   const scrollToLatestMessage = useCallback(() => {
     if (messages.length > 0 && flatListRef.current) {
-      // Small delay to ensure layout is complete
       setTimeout(() => {
-        try {
-          flatListRef.current?.scrollToIndex({
-            index: messages.length - 1,
-            animated: true,
-            viewPosition: 0.3, // Position at 30% from top (visible above keyboard)
-          });
-        } catch (e) {
-          // Fallback
-          flatListRef.current?.scrollToEnd({ animated: true });
-        }
-      }, 50);
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 100);
     }
   }, [messages.length]);
 
-  // Handle scroll failures (fallback to scrollToEnd)
+  // Handle scroll failures
   const onScrollToIndexFailed = useCallback((info: { index: number }) => {
     setTimeout(() => {
       flatListRef.current?.scrollToEnd({ animated: true });
@@ -473,7 +469,11 @@ export default function GlobalTinaChatScreen({
         keyExtractor={item => item.id}
         contentContainerStyle={[
           styles.messageList,
-          { paddingBottom: 150 }, // Extra padding so last message can scroll to center
+          { 
+            // Large bottom padding so last message can be centered when keyboard is open
+            // This creates space below the last message so it appears in the middle
+            paddingBottom: 300,
+          },
         ]}
         onContentSizeChange={() => scrollToLatestMessage()}
         onLayout={() => scrollToLatestMessage()}
