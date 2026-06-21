@@ -249,6 +249,8 @@ export default function OnboardingScreen() {
   const handleTinaComplete = (tinaData: Partial<ProfileData>) => {
     mergeTinaData(tinaData);
     setShowTinaChat(false);
+    // User is exiting Tina, set stage to manual (enables floating button)
+    setOnboardingStage('manual_onboarding');
     
     // Jump to first uncollected step or finish
     const nextStep = findNextStep(STEP_TINA_CHOICE);
@@ -262,6 +264,8 @@ export default function OnboardingScreen() {
   const handleTinaExit = (tinaData: Partial<ProfileData>) => {
     mergeTinaData(tinaData);
     setShowTinaChat(false);
+    // User is exiting Tina, set stage to manual (enables floating button)
+    setOnboardingStage('manual_onboarding');
     
     // Check if there are remaining fields
     const nextStep = findNextStep(STEP_TINA_CHOICE);
