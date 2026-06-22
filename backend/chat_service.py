@@ -164,16 +164,37 @@ async def get_conversations(user_id: str) -> List[Dict]:
     
     # Also find pending conversations where this user is the initiator (sender)
     # These are message requests the user has sent but not yet accepted
+    # Check both initiated_by field OR if the first message was sent by this user
     pending_cursor = _db.chat_conversations.find(
         {
             "participants": user_id,
-            "status": "pending",
-            "initiated_by": user_id  # Only show pending convos the user initiated
+            "status": "pending"
         },
         {"_id": 0}
     ).sort("last_message_at", -1)
     
-    pending_conversations = await pending_cursor.to_list(length=50)
+    all_pending = await pending_cursor.to_list(length=50)
+    
+    # Filter pending conversations to only include ones this user initiated
+    pending_conversations = []
+    for conv in all_pending:
+        # Check if initiated_by field exists and matches user
+        if conv.get("initiated_by") == user_id:
+            pending_conversations.append(conv)
+        elif not conv.get("initiated_by"):
+            # For older conversations without initiated_by, check first message sender
+            first_msg = await _db.chat_messages.find_one(
+                {"conversation_id": conv["conversation_id"]},
+                {"_id": 0, "sender_id": 1},
+                sort=[("created_at", 1)]
+            )
+            if first_msg and first_msg.get("sender_id") == user_id:
+                pending_conversations.append(conv)
+                # Backfill the initiated_by field
+                await _db.chat_conversations.update_one(
+                    {"conversation_id": conv["conversation_id"]},
+                    {"$set": {"initiated_by": user_id}}
+                )
     
     # Combine and enrich all conversations
     all_conversations = active_conversations + pending_conversations
