@@ -426,19 +426,13 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
     >
       <StatusBar barStyle="light-content" />
 
-      {/* Drag indicator at very top */}
-      <View style={[styles.dragIndicatorContainer, { top: insets.top + 8 }]}>
-        <View style={styles.dragIndicator} />
-      </View>
-
       {/* Floating Header (always visible on photos) */}
-      <View style={[styles.floatingHeader, { top: insets.top + 24 }]}>
+      <View style={[styles.floatingHeader, { top: insets.top + 12 }]}>
         <TouchableOpacity style={styles.headerButton} onPress={onClose}>
           <Ionicons name="chevron-down" size={26} color="#FFF" />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.headerButton}>
-          <Ionicons name="ellipsis-horizontal" size={22} color="#FFF" />
-        </TouchableOpacity>
+        {/* Empty view for spacing - no three dots since no actions */}
+        <View style={{ width: 40 }} />
       </View>
 
       {/* Sticky Header (appears on scroll) */}
@@ -658,19 +652,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.bg,
-  },
-  dragIndicatorContainer: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    zIndex: 102,
-  },
-  dragIndicator: {
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.5)',
   },
   floatingHeader: {
     position: 'absolute',
