@@ -307,6 +307,8 @@ const MessageRequestDetailView = ({
 
   useEffect(() => {
     if (visible && request) {
+      setActiveView('messages'); // Reset to messages tab
+      setCurrentPicIndex(0);
       fetchRequestData();
     }
   }, [visible, request]);
@@ -346,22 +348,38 @@ const MessageRequestDetailView = ({
   };
 
   const formatTime = (dateStr: string) => {
-    const date = new Date(dateStr);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    try {
+      const date = new Date(dateStr);
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch {
+      return '';
+    }
   };
 
   const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr);
-    const today = new Date();
-    if (date.toDateString() === today.toDateString()) {
-      return 'Today';
+    try {
+      const date = new Date(dateStr);
+      const today = new Date();
+      if (date.toDateString() === today.toDateString()) {
+        return 'Today';
+      }
+      return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    } catch {
+      return '';
     }
-    return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
   };
 
   if (!request) return null;
 
   const user = request.from_user;
+  const displayName = profile?.name || user?.name || 'Someone';
+  const displayAge = profile?.age || user?.age;
+  const displayLocation = profile?.location 
+    ? (typeof profile.location === 'object' 
+        ? `${profile.location.city || ''}, ${profile.location.state || ''}`.replace(/^, |, $/g, '')
+        : profile.location)
+    : (user?.location || '');
+  const displayAvatar = pictures[0] || user?.avatar;
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
@@ -396,25 +414,49 @@ const MessageRequestDetailView = ({
         {loading ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color={COLORS.primary} />
+            <Text style={styles.loadingText}>Loading...</Text>
           </View>
         ) : (
           <>
             {activeView === 'messages' ? (
               /* Messages View */
-              <ScrollView style={styles.requestMessagesContainer} contentContainerStyle={{ paddingBottom: 120 }}>
-                {/* Sender Info Header */}
-                <View style={styles.requestSenderHeader}>
-                  <Avatar name={user?.name || 'U'} size={60} imageUrl={user?.avatar} />
-                  <View style={styles.requestSenderInfo}>
-                    <Text style={styles.requestSenderName}>{user?.name || 'Unknown'}{user?.age ? `, ${user.age}` : ''}</Text>
-                    <Text style={styles.requestSenderLocation}>{user?.location || 'Unknown location'}</Text>
+              <ScrollView 
+                style={styles.requestMessagesContainer} 
+                contentContainerStyle={styles.requestMessagesContent}
+                showsVerticalScrollIndicator={false}
+              >
+                {/* Sender Card */}
+                <View style={styles.requestSenderCard}>
+                  <View style={styles.requestSenderAvatarContainer}>
+                    {displayAvatar ? (
+                      <Image source={{ uri: displayAvatar }} style={styles.requestSenderAvatar} />
+                    ) : (
+                      <View style={styles.requestSenderAvatarPlaceholder}>
+                        <Text style={styles.requestSenderAvatarText}>{displayName.charAt(0).toUpperCase()}</Text>
+                      </View>
+                    )}
                   </View>
+                  <Text style={styles.requestSenderCardName}>{displayName}{displayAge ? `, ${displayAge}` : ''}</Text>
+                  {displayLocation ? (
+                    <View style={styles.requestSenderCardLocation}>
+                      <Ionicons name="location-outline" size={14} color={COLORS.textMuted} />
+                      <Text style={styles.requestSenderCardLocationText}>{displayLocation}</Text>
+                    </View>
+                  ) : null}
                   <TouchableOpacity 
-                    style={styles.viewProfileBtn}
+                    style={styles.viewFullProfileBtn}
                     onPress={() => setActiveView('profile')}
                   >
-                    <Text style={styles.viewProfileBtnText}>View Profile</Text>
+                    <Text style={styles.viewFullProfileBtnText}>View Full Profile</Text>
+                    <Ionicons name="chevron-forward" size={16} color={COLORS.primary} />
                   </TouchableOpacity>
+                </View>
+
+                {/* Messages Section Title */}
+                <View style={styles.messagesSectionHeader}>
+                  <View style={styles.messagesSectionLine} />
+                  <Text style={styles.messagesSectionTitle}>Messages</Text>
+                  <View style={styles.messagesSectionLine} />
                 </View>
 
                 {/* Messages */}
@@ -431,15 +473,22 @@ const MessageRequestDetailView = ({
                       </View>
                     ))
                   ) : (
-                    <Text style={styles.noMessagesText}>No messages yet</Text>
+                    <View style={styles.noMessagesContainer}>
+                      <Ionicons name="chatbubble-ellipses-outline" size={48} color={COLORS.textMuted} />
+                      <Text style={styles.noMessagesText}>No messages yet</Text>
+                    </View>
                   )}
                 </View>
               </ScrollView>
             ) : (
               /* Profile View */
-              <ScrollView style={styles.requestProfileContainer} contentContainerStyle={{ paddingBottom: 120 }}>
-                {/* Photos */}
-                {pictures.length > 0 && (
+              <ScrollView 
+                style={styles.requestProfileContainer} 
+                contentContainerStyle={styles.requestProfileContent}
+                showsVerticalScrollIndicator={false}
+              >
+                {/* Photos Section */}
+                {pictures.length > 0 ? (
                   <View style={styles.requestPhotoSection}>
                     <Image 
                       source={{ uri: pictures[currentPicIndex] }} 
@@ -447,81 +496,95 @@ const MessageRequestDetailView = ({
                       resizeMode="cover"
                     />
                     {pictures.length > 1 && (
-                      <View style={styles.requestPhotoIndicators}>
-                        {pictures.map((_, idx) => (
+                      <>
+                        <View style={styles.requestPhotoIndicators}>
+                          {pictures.map((_, idx) => (
+                            <TouchableOpacity 
+                              key={idx} 
+                              style={[styles.requestPhotoIndicator, idx === currentPicIndex && styles.requestPhotoIndicatorActive]}
+                              onPress={() => setCurrentPicIndex(idx)}
+                            />
+                          ))}
+                        </View>
+                        <View style={styles.requestPhotoNav}>
                           <TouchableOpacity 
-                            key={idx} 
-                            style={[styles.requestPhotoIndicator, idx === currentPicIndex && styles.requestPhotoIndicatorActive]}
-                            onPress={() => setCurrentPicIndex(idx)}
-                          />
-                        ))}
-                      </View>
+                            style={[styles.requestPhotoNavBtn, currentPicIndex === 0 && styles.requestPhotoNavBtnDisabled]} 
+                            onPress={() => setCurrentPicIndex(prev => Math.max(0, prev - 1))}
+                            disabled={currentPicIndex === 0}
+                          >
+                            <Ionicons name="chevron-back" size={24} color="#FFF" />
+                          </TouchableOpacity>
+                          <TouchableOpacity 
+                            style={[styles.requestPhotoNavBtn, currentPicIndex === pictures.length - 1 && styles.requestPhotoNavBtnDisabled]} 
+                            onPress={() => setCurrentPicIndex(prev => Math.min(pictures.length - 1, prev + 1))}
+                            disabled={currentPicIndex === pictures.length - 1}
+                          >
+                            <Ionicons name="chevron-forward" size={24} color="#FFF" />
+                          </TouchableOpacity>
+                        </View>
+                      </>
                     )}
-                    {pictures.length > 1 && (
-                      <View style={styles.requestPhotoNav}>
-                        <TouchableOpacity 
-                          style={styles.requestPhotoNavBtn} 
-                          onPress={() => setCurrentPicIndex(prev => Math.max(0, prev - 1))}
-                          disabled={currentPicIndex === 0}
-                        >
-                          <Ionicons name="chevron-back" size={24} color={currentPicIndex === 0 ? COLORS.textMuted : COLORS.text} />
-                        </TouchableOpacity>
-                        <TouchableOpacity 
-                          style={styles.requestPhotoNavBtn} 
-                          onPress={() => setCurrentPicIndex(prev => Math.min(pictures.length - 1, prev + 1))}
-                          disabled={currentPicIndex === pictures.length - 1}
-                        >
-                          <Ionicons name="chevron-forward" size={24} color={currentPicIndex === pictures.length - 1 ? COLORS.textMuted : COLORS.text} />
-                        </TouchableOpacity>
+                    {/* Gradient overlay for name */}
+                    <LinearGradient
+                      colors={['transparent', 'rgba(0,0,0,0.8)']}
+                      style={styles.requestPhotoGradient}
+                    >
+                      <Text style={styles.requestPhotoName}>{displayName}{displayAge ? `, ${displayAge}` : ''}</Text>
+                      {displayLocation ? (
+                        <View style={styles.requestPhotoLocation}>
+                          <Ionicons name="location" size={14} color="#FFF" />
+                          <Text style={styles.requestPhotoLocationText}>{displayLocation}</Text>
+                        </View>
+                      ) : null}
+                    </LinearGradient>
+                  </View>
+                ) : (
+                  /* No Photos - Show Avatar Placeholder */
+                  <View style={styles.requestNoPhotoSection}>
+                    <View style={styles.requestNoPhotoAvatar}>
+                      <Text style={styles.requestNoPhotoAvatarText}>{displayName.charAt(0).toUpperCase()}</Text>
+                    </View>
+                    <Text style={styles.requestNoPhotoName}>{displayName}{displayAge ? `, ${displayAge}` : ''}</Text>
+                    {displayLocation ? (
+                      <View style={styles.requestNoPhotoLocation}>
+                        <Ionicons name="location-outline" size={16} color={COLORS.textSecondary} />
+                        <Text style={styles.requestNoPhotoLocationText}>{displayLocation}</Text>
                       </View>
-                    )}
+                    ) : null}
                   </View>
                 )}
 
-                {/* Profile Info */}
-                <View style={styles.requestProfileInfo}>
-                  <Text style={styles.requestProfileName}>{profile?.name || user?.name || 'Unknown'}</Text>
-                  <View style={styles.requestProfileBasics}>
-                    {profile?.age && (
-                      <View style={styles.requestProfileBasicItem}>
-                        <Ionicons name="calendar-outline" size={16} color={COLORS.textSecondary} />
-                        <Text style={styles.requestProfileBasicText}>{profile.age} years old</Text>
+                {/* Profile Details */}
+                <View style={styles.requestProfileDetails}>
+                  {/* Gender */}
+                  {profile?.gender && (
+                    <View style={styles.requestProfileDetailItem}>
+                      <View style={styles.requestProfileDetailIcon}>
+                        <Ionicons name="person" size={18} color={COLORS.primary} />
                       </View>
-                    )}
-                    {profile?.gender && (
-                      <View style={styles.requestProfileBasicItem}>
-                        <Ionicons name="person-outline" size={16} color={COLORS.textSecondary} />
-                        <Text style={styles.requestProfileBasicText}>{profile.gender}</Text>
+                      <View>
+                        <Text style={styles.requestProfileDetailLabel}>Gender</Text>
+                        <Text style={styles.requestProfileDetailValue}>{profile.gender}</Text>
                       </View>
-                    )}
-                    {(profile?.location || user?.location) && (
-                      <View style={styles.requestProfileBasicItem}>
-                        <Ionicons name="location-outline" size={16} color={COLORS.textSecondary} />
-                        <Text style={styles.requestProfileBasicText}>
-                          {typeof profile?.location === 'object' 
-                            ? formatLocationForPrivacy(`${profile.location.city || ''}, ${profile.location.state || ''}, ${profile.location.country || ''}`)
-                            : (user?.location || 'Unknown')}
-                        </Text>
-                      </View>
-                    )}
-                  </View>
+                    </View>
+                  )}
 
                   {/* Bio */}
                   {profile?.bio && (
-                    <View style={styles.requestProfileSection}>
+                    <View style={styles.requestProfileBioSection}>
                       <Text style={styles.requestProfileSectionTitle}>About</Text>
-                      <Text style={styles.requestProfileBio}>{profile.bio}</Text>
+                      <Text style={styles.requestProfileBioText}>{profile.bio}</Text>
                     </View>
                   )}
 
                   {/* Genres */}
                   {Array.isArray(profile?.genres) && profile.genres.length > 0 && (
-                    <View style={styles.requestProfileSection}>
+                    <View style={styles.requestProfileTagsSection}>
                       <Text style={styles.requestProfileSectionTitle}>Favorite Genres</Text>
-                      <View style={styles.tagsContainer}>
+                      <View style={styles.requestProfileTags}>
                         {profile.genres.map((genre: string, idx: number) => (
-                          <View key={idx} style={styles.tag}>
-                            <Text style={styles.tagText}>{genre}</Text>
+                          <View key={idx} style={styles.requestProfileTag}>
+                            <Text style={styles.requestProfileTagText}>{genre}</Text>
                           </View>
                         ))}
                       </View>
@@ -530,12 +593,14 @@ const MessageRequestDetailView = ({
 
                   {/* Top Movies */}
                   {Array.isArray(profile?.topMovies) && profile.topMovies.length > 0 && (
-                    <View style={styles.requestProfileSection}>
-                      <Text style={styles.requestProfileSectionTitle}>Favorite Movies</Text>
+                    <View style={styles.requestProfileMoviesSection}>
+                      <Text style={styles.requestProfileSectionTitle}>Top Movies</Text>
                       {profile.topMovies.slice(0, 5).map((movie: any, idx: number) => (
-                        <View key={idx} style={styles.movieItem}>
-                          <Ionicons name="film-outline" size={18} color={COLORS.primary} />
-                          <Text style={styles.movieTitle}>{movie.title}</Text>
+                        <View key={idx} style={styles.requestProfileMovieItem}>
+                          <View style={styles.requestProfileMovieNumber}>
+                            <Text style={styles.requestProfileMovieNumberText}>{idx + 1}</Text>
+                          </View>
+                          <Text style={styles.requestProfileMovieTitle}>{movie.title}</Text>
                         </View>
                       ))}
                     </View>
@@ -1526,7 +1591,7 @@ const styles = StyleSheet.create({
   // Request Card - Updated
   requestHint: { fontSize: 12, color: COLORS.textMuted, textAlign: 'center', marginTop: 12, fontStyle: 'italic' },
 
-  // Message Request Detail View
+  // Message Request Detail View - Improved
   requestDetailContainer: { flex: 1, backgroundColor: COLORS.bg },
   requestDetailHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 8, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: COLORS.border },
   requestDetailTitle: { fontSize: 18, fontWeight: '600', color: COLORS.text },
@@ -1535,40 +1600,91 @@ const styles = StyleSheet.create({
   requestDetailTabActive: { borderBottomWidth: 2, borderBottomColor: COLORS.primary },
   requestDetailTabText: { fontSize: 14, color: COLORS.textSecondary },
   requestDetailTabTextActive: { color: COLORS.primary, fontWeight: '600' },
-  requestMessagesContainer: { flex: 1, padding: 16 },
+  
+  // Messages Tab - Improved
+  requestMessagesContainer: { flex: 1 },
+  requestMessagesContent: { padding: 16, paddingBottom: 130 },
+  requestSenderCard: { backgroundColor: COLORS.bgCard, borderRadius: 20, padding: 24, alignItems: 'center', marginBottom: 24 },
+  requestSenderAvatarContainer: { marginBottom: 12 },
+  requestSenderAvatar: { width: 90, height: 90, borderRadius: 45, borderWidth: 3, borderColor: COLORS.primary },
+  requestSenderAvatarPlaceholder: { width: 90, height: 90, borderRadius: 45, backgroundColor: COLORS.primary, justifyContent: 'center', alignItems: 'center' },
+  requestSenderAvatarText: { fontSize: 36, fontWeight: 'bold', color: '#FFF' },
+  requestSenderCardName: { fontSize: 22, fontWeight: 'bold', color: COLORS.text },
+  requestSenderCardLocation: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6 },
+  requestSenderCardLocationText: { fontSize: 14, color: COLORS.textMuted },
+  viewFullProfileBtn: { flexDirection: 'row', alignItems: 'center', marginTop: 16, paddingHorizontal: 16, paddingVertical: 10, backgroundColor: 'rgba(229,9,20,0.1)', borderRadius: 20 },
+  viewFullProfileBtnText: { fontSize: 14, fontWeight: '600', color: COLORS.primary, marginRight: 4 },
+  messagesSectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
+  messagesSectionLine: { flex: 1, height: 1, backgroundColor: COLORS.border },
+  messagesSectionTitle: { fontSize: 12, color: COLORS.textMuted, marginHorizontal: 12, fontWeight: '600', letterSpacing: 1 },
+  requestMessagesList: { gap: 12 },
+  requestMessageItem: { alignItems: 'flex-start' },
+  requestMessageBubble: { backgroundColor: COLORS.bgCard, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 18, borderBottomLeftRadius: 4, maxWidth: '85%' },
+  requestMessageText: { fontSize: 16, color: COLORS.text, lineHeight: 24 },
+  requestMessageTime: { fontSize: 11, color: COLORS.textMuted, marginTop: 6 },
+  noMessagesContainer: { alignItems: 'center', paddingVertical: 40 },
+  noMessagesText: { fontSize: 14, color: COLORS.textMuted, marginTop: 12 },
+  
+  // Profile Tab - Improved
+  requestProfileContainer: { flex: 1 },
+  requestProfileContent: { paddingBottom: 130 },
+  requestPhotoSection: { position: 'relative' },
+  requestMainPhoto: { width: SCREEN_WIDTH, height: SCREEN_HEIGHT * 0.45 },
+  requestPhotoIndicators: { position: 'absolute', top: 12, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', gap: 4 },
+  requestPhotoIndicator: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.4)' },
+  requestPhotoIndicatorActive: { backgroundColor: '#FFF', width: 20 },
+  requestPhotoNav: { position: 'absolute', top: '40%', left: 8, right: 8, flexDirection: 'row', justifyContent: 'space-between' },
+  requestPhotoNavBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
+  requestPhotoNavBtnDisabled: { opacity: 0.3 },
+  requestPhotoGradient: { position: 'absolute', bottom: 0, left: 0, right: 0, paddingHorizontal: 20, paddingVertical: 20, paddingTop: 60 },
+  requestPhotoName: { fontSize: 28, fontWeight: 'bold', color: '#FFF' },
+  requestPhotoLocation: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6 },
+  requestPhotoLocationText: { fontSize: 14, color: 'rgba(255,255,255,0.9)' },
+  requestNoPhotoSection: { backgroundColor: COLORS.bgCard, paddingVertical: 50, alignItems: 'center' },
+  requestNoPhotoAvatar: { width: 120, height: 120, borderRadius: 60, backgroundColor: COLORS.primary, justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
+  requestNoPhotoAvatarText: { fontSize: 48, fontWeight: 'bold', color: '#FFF' },
+  requestNoPhotoName: { fontSize: 26, fontWeight: 'bold', color: COLORS.text },
+  requestNoPhotoLocation: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
+  requestNoPhotoLocationText: { fontSize: 15, color: COLORS.textSecondary },
+  requestProfileDetails: { padding: 20 },
+  requestProfileDetailItem: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  requestProfileDetailIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(229,9,20,0.1)', justifyContent: 'center', alignItems: 'center' },
+  requestProfileDetailLabel: { fontSize: 12, color: COLORS.textMuted, marginBottom: 2 },
+  requestProfileDetailValue: { fontSize: 16, color: COLORS.text, fontWeight: '500' },
+  requestProfileBioSection: { marginTop: 20, paddingTop: 20, borderTopWidth: 1, borderTopColor: COLORS.border },
+  requestProfileSectionTitle: { fontSize: 14, fontWeight: '600', color: COLORS.textMuted, marginBottom: 12, letterSpacing: 0.5 },
+  requestProfileBioText: { fontSize: 16, color: COLORS.text, lineHeight: 24 },
+  requestProfileTagsSection: { marginTop: 24 },
+  requestProfileTags: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  requestProfileTag: { backgroundColor: 'rgba(229,9,20,0.1)', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: 'rgba(229,9,20,0.3)' },
+  requestProfileTagText: { fontSize: 14, color: COLORS.primary, fontWeight: '500' },
+  requestProfileMoviesSection: { marginTop: 24 },
+  requestProfileMovieItem: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10 },
+  requestProfileMovieNumber: { width: 28, height: 28, borderRadius: 14, backgroundColor: COLORS.primary, justifyContent: 'center', alignItems: 'center' },
+  requestProfileMovieNumberText: { fontSize: 14, fontWeight: 'bold', color: '#FFF' },
+  requestProfileMovieTitle: { fontSize: 16, color: COLORS.text, flex: 1 },
+  
+  // Action Buttons
+  requestDetailActions: { position: 'absolute', bottom: 0, left: 0, right: 0, flexDirection: 'row', padding: 16, paddingBottom: 32, gap: 12, backgroundColor: COLORS.bg, borderTopWidth: 1, borderTopColor: COLORS.border },
+  requestDeclineBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 14, borderRadius: 24, borderWidth: 1, borderColor: COLORS.border, gap: 8 },
+  requestDeclineBtnText: { fontSize: 16, fontWeight: '600', color: COLORS.textSecondary },
+  requestAcceptBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 14, borderRadius: 24, backgroundColor: COLORS.success, gap: 8 },
+  requestAcceptBtnText: { fontSize: 16, fontWeight: '600', color: '#FFF' },
+
+  // Legacy styles (kept for backwards compatibility)
   requestSenderHeader: { flexDirection: 'row', alignItems: 'center', paddingBottom: 20, borderBottomWidth: 1, borderBottomColor: COLORS.border, marginBottom: 16 },
   requestSenderInfo: { flex: 1, marginLeft: 14 },
   requestSenderName: { fontSize: 18, fontWeight: '600', color: COLORS.text },
   requestSenderLocation: { fontSize: 14, color: COLORS.textSecondary, marginTop: 2 },
   viewProfileBtn: { backgroundColor: COLORS.bgCard, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 16, borderWidth: 1, borderColor: COLORS.border },
   viewProfileBtnText: { fontSize: 13, color: COLORS.text, fontWeight: '500' },
-  requestMessagesList: { gap: 12 },
-  requestMessageItem: { alignItems: 'flex-start' },
-  requestMessageBubble: { backgroundColor: COLORS.bgCard, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 16, borderTopLeftRadius: 4, maxWidth: '85%' },
-  requestMessageText: { fontSize: 15, color: COLORS.text, lineHeight: 22 },
-  requestMessageTime: { fontSize: 11, color: COLORS.textMuted, marginTop: 6 },
-  noMessagesText: { fontSize: 14, color: COLORS.textMuted, textAlign: 'center', marginTop: 40 },
-  requestProfileContainer: { flex: 1 },
-  requestPhotoSection: { position: 'relative' },
-  requestMainPhoto: { width: SCREEN_WIDTH, height: SCREEN_HEIGHT * 0.4 },
-  requestPhotoIndicators: { position: 'absolute', bottom: 16, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', gap: 6 },
-  requestPhotoIndicator: { width: 8, height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.4)' },
-  requestPhotoIndicatorActive: { backgroundColor: '#FFF', width: 24 },
-  requestPhotoNav: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 8 },
-  requestPhotoNavBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' },
   requestProfileInfo: { padding: 20 },
   requestProfileName: { fontSize: 26, fontWeight: 'bold', color: COLORS.text },
   requestProfileBasics: { marginTop: 12, gap: 8 },
   requestProfileBasicItem: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   requestProfileBasicText: { fontSize: 14, color: COLORS.textSecondary },
   requestProfileSection: { marginTop: 24 },
-  requestProfileSectionTitle: { fontSize: 16, fontWeight: '600', color: COLORS.text, marginBottom: 12 },
   requestProfileBio: { fontSize: 15, color: COLORS.textSecondary, lineHeight: 22 },
-  requestDetailActions: { position: 'absolute', bottom: 0, left: 0, right: 0, flexDirection: 'row', padding: 16, paddingBottom: 32, gap: 12, backgroundColor: COLORS.bg, borderTopWidth: 1, borderTopColor: COLORS.border },
-  requestDeclineBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 14, borderRadius: 24, borderWidth: 1, borderColor: COLORS.border, gap: 8 },
-  requestDeclineBtnText: { fontSize: 16, fontWeight: '600', color: COLORS.textSecondary },
-  requestAcceptBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 14, borderRadius: 24, backgroundColor: COLORS.success, gap: 8 },
-  requestAcceptBtnText: { fontSize: 16, fontWeight: '600', color: '#FFF' },
 
   // Did You Meet Modal
   meetModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center', padding: 24 },
