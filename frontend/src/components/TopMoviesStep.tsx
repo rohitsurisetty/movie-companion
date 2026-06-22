@@ -250,6 +250,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     textAlign: 'left',
     textAlignVertical: 'center',
+    letterSpacing: 0,
   },
   resultsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.m },
   resultCard: { width: '30%', alignItems: 'center', marginBottom: SPACING.s },
