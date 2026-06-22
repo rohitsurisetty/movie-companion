@@ -10,9 +10,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useAppMode } from '../../src/components/SharedHeader';
 import { getUserId } from '../../src/store';
-import BottomSheet, { BottomSheetScrollView, BottomSheetBackdrop } from '@gorhom/bottom-sheet';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { formatLocationForPrivacy } from '../../src/utils/locationFormatter';
+import { PremiumProfileView } from '../../src/components/PremiumProfileView';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const TILE_GAP = 12;
@@ -346,9 +346,7 @@ export default function FeedScreen() {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [emptyReason, setEmptyReason] = useState<EmptyStateReason>({ type: 'no_matches' });
   const [userProfile, setUserProfile] = useState<any>(null);
-  
-  const bottomSheetRef = useRef<BottomSheet>(null);
-  const snapPoints = useMemo(() => ['85%'], []);
+  const [showProfileModal, setShowProfileModal] = useState(false);
 
   // Fetch user profile to determine empty state reason
   const fetchUserProfile = async () => {
@@ -491,11 +489,11 @@ export default function FeedScreen() {
       setSelectedProfilePhotos(testPhotos);
     }
     
-    bottomSheetRef.current?.expand();
+    setShowProfileModal(true);
   };
 
   const closeProfile = () => {
-    bottomSheetRef.current?.close();
+    setShowProfileModal(false);
     setSelectedProfile(null);
   };
 
@@ -557,19 +555,6 @@ export default function FeedScreen() {
       setSendingMessage(false);
     }
   };
-
-  // Render backdrop
-  const renderBackdrop = useCallback(
-    (props: any) => (
-      <BottomSheetBackdrop
-        {...props}
-        disappearsOnIndex={-1}
-        appearsOnIndex={0}
-        opacity={0.7}
-      />
-    ),
-    []
-  );
 
   // Loading state
   if (loading) {
@@ -678,186 +663,52 @@ export default function FeedScreen() {
           </ScrollView>
         )}
 
-        {/* Bottom Sheet for expanded profile */}
-        <BottomSheet
-          ref={bottomSheetRef}
-          index={-1}
-          snapPoints={snapPoints}
-          enablePanDownToClose
-          backdropComponent={renderBackdrop}
-          backgroundStyle={styles.bottomSheetBackground}
-          handleIndicatorStyle={styles.bottomSheetHandle}
-          onChange={(index) => {
-            if (index === -1) {
-              setSelectedProfile(null);
-            }
-          }}
+        {/* Premium Profile View Modal */}
+        <Modal 
+          visible={showProfileModal} 
+          animationType="slide" 
+          onRequestClose={closeProfile}
+          statusBarTranslucent
         >
           {selectedProfile && (
-            <BottomSheetScrollView style={styles.sheetContent} showsVerticalScrollIndicator={false}>
-              {/* Header with Mode Toggle (top left) and Back Button */}
-              <View style={styles.sheetHeader}>
-                {/* Mode Toggle - Top Left */}
-                <View style={styles.modeToggleContainer}>
-                  <TouchableOpacity
-                    style={[
-                      styles.modeToggleButton,
-                      mode === 'buddy' && styles.modeToggleButtonActive,
-                    ]}
-                    onPress={() => {/* Mode is controlled by shared header */}}
-                  >
-                    <Ionicons 
-                      name="people" 
-                      size={14} 
-                      color={mode === 'buddy' ? '#FFF' : COLORS.textSecondary} 
-                    />
-                    <Text style={[
-                      styles.modeToggleText,
-                      mode === 'buddy' && styles.modeToggleTextActive,
-                    ]}>Buddy</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[
-                      styles.modeToggleButton,
-                      mode === 'date' && styles.modeToggleButtonActiveDate,
-                    ]}
-                    onPress={() => {/* Mode is controlled by shared header */}}
-                  >
-                    <Ionicons 
-                      name="heart" 
-                      size={14} 
-                      color={mode === 'date' ? '#FFF' : COLORS.textSecondary} 
-                    />
-                    <Text style={[
-                      styles.modeToggleText,
-                      mode === 'date' && styles.modeToggleTextActive,
-                    ]}>Date</Text>
-                  </TouchableOpacity>
-                </View>
-                
-                {/* Back Button - Top Right */}
-                <TouchableOpacity style={styles.backButton} onPress={closeProfile}>
-                  <Ionicons name="close" size={24} color={COLORS.text} />
-                </TouchableOpacity>
-              </View>
-
-              {/* Photo Carousel */}
-              <ExpandedPhotoCarousel
-                photos={selectedProfilePhotos}
-                name={selectedProfile.name}
-                avatarColor={avatarColor}
-              />
-
-              {/* Profile Info */}
-              <View style={styles.profileInfo}>
-                {/* Name & Basic Info */}
-                <View style={styles.nameSection}>
-                  <View style={styles.nameRow}>
-                    <Text style={styles.profileName}>{selectedProfile.name}</Text>
-                    <Text style={styles.profileAge}>, {selectedProfile.age}</Text>
-                    {selectedProfile.workProfile && (
-                      <Ionicons name="checkmark-circle" size={20} color={COLORS.buddy} style={{ marginLeft: 6 }} />
-                    )}
-                  </View>
-                  <View style={styles.locationRow}>
-                    <Ionicons name="location" size={14} color={COLORS.textSecondary} />
-                    <Text style={styles.locationText}>{formatLocationForPrivacy(selectedProfile.location)}</Text>
-                    {selectedProfile.workProfile && (
-                      <>
-                        <Text style={styles.dotSeparator}>•</Text>
-                        <Ionicons name="briefcase-outline" size={14} color={COLORS.textSecondary} />
-                        <Text style={styles.locationText}>{selectedProfile.workProfile}</Text>
-                      </>
-                    )}
-                  </View>
-                </View>
-
-                {/* Match Badge - without percentage */}
-                <View style={styles.matchSection}>
-                  <MatchBadge level={selectedProfile.match_level} score={selectedProfile.compatibility_score} />
-                </View>
-
-                {/* Bio */}
-                {selectedProfile.bio && (
-                  <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>About</Text>
-                    <Text style={styles.bioText}>{selectedProfile.bio}</Text>
-                  </View>
-                )}
-
-                {/* AI Match Explanation */}
-                {selectedProfile.explanation && (
-                  <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Why You Match</Text>
-                    <View style={styles.explanationCard}>
-                      <Ionicons name="sparkles" size={16} color={COLORS.gold} />
-                      <Text style={styles.explanationText}>{selectedProfile.explanation}</Text>
-                    </View>
-                  </View>
-                )}
-
-                {/* Shared Interests */}
-                {selectedProfile.shared_interests && selectedProfile.shared_interests.length > 0 && (
-                  <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Shared Interests</Text>
-                    <View style={styles.tagsContainer}>
-                      {selectedProfile.shared_interests.map((interest, idx) => (
-                        <View key={idx} style={styles.tag}>
-                          <Ionicons name="heart" size={12} color={COLORS.primary} />
-                          <Text style={styles.tagText}>{interest}</Text>
-                        </View>
-                      ))}
-                    </View>
-                  </View>
-                )}
-
-                {/* Movie Preferences */}
-                <View style={styles.section}>
-                  <Text style={styles.sectionTitle}>Movie Taste</Text>
-                  <View style={styles.tagsContainer}>
-                    {selectedProfile.genres?.slice(0, 5).map((genre, idx) => (
-                      <View key={idx} style={styles.genreTag}>
-                        <Text style={styles.genreTagText}>{genre}</Text>
-                      </View>
-                    ))}
-                  </View>
-                </View>
-
-                {/* Top Movies */}
-                {Array.isArray(selectedProfile?.topMovies) && selectedProfile.topMovies.length > 0 && (
-                  <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Favorite Movies</Text>
-                    {selectedProfile.topMovies.slice(0, 3).map((movie, idx) => (
-                      <View key={idx} style={styles.movieItem}>
-                        <Ionicons name="film-outline" size={16} color={COLORS.textSecondary} />
-                        <Text style={styles.movieTitle}>{movie.title}</Text>
-                      </View>
-                    ))}
-                  </View>
-                )}
-
-                {/* Message Button */}
-                {hasAlreadySentRequest(selectedProfile.user_id) ? (
-                  <View style={[styles.messageButton, styles.requestSentButton]}>
-                    <Ionicons name="checkmark-circle" size={20} color={COLORS.success} />
-                    <Text style={[styles.messageButtonText, { color: COLORS.success }]}>Request Sent</Text>
-                  </View>
-                ) : (
-                  <TouchableOpacity
-                    style={[styles.messageButton, { backgroundColor: mode === 'date' ? COLORS.primary : COLORS.buddy }]}
-                    onPress={handleMessage}
-                  >
-                    <Ionicons name="chatbubble" size={20} color="#FFF" />
-                    <Text style={styles.messageButtonText}>Send Message</Text>
-                  </TouchableOpacity>
-                )}
-
-                {/* Bottom spacing */}
-                <View style={{ height: 40 }} />
-              </View>
-            </BottomSheetScrollView>
+            <PremiumProfileView
+              visible={showProfileModal}
+              profile={{
+                user_id: selectedProfile.user_id,
+                name: selectedProfile.name,
+                age: selectedProfile.age,
+                gender: selectedProfile.gender || '',
+                location: selectedProfile.location || '',
+                bio: selectedProfile.bio,
+                genres: selectedProfile.genres,
+                topMovies: selectedProfile.topMovies,
+                filmLanguages: selectedProfile.filmLanguages,
+                languagesSpoken: selectedProfile.languagesSpoken,
+                movieFrequency: selectedProfile.movieFrequency,
+                ottTheatre: selectedProfile.ottTheatre,
+                match_level: selectedProfile.match_level,
+                explanation: selectedProfile.explanation,
+                shared_interests: selectedProfile.shared_interests,
+                compatibility_score: selectedProfile.compatibility_score,
+                relationshipIntent: selectedProfile.relationshipIntent,
+                zodiac: selectedProfile.zodiac,
+                smoking: selectedProfile.smoking,
+                drinking: selectedProfile.drinking,
+                exercise: selectedProfile.exercise,
+                education: selectedProfile.education,
+                workProfile: selectedProfile.workProfile,
+                height: selectedProfile.height,
+                religion: selectedProfile.religion,
+                personality: selectedProfile.personality,
+              }}
+              photos={selectedProfilePhotos}
+              mode={mode}
+              onClose={closeProfile}
+              onMessage={handleMessage}
+              hasAlreadySentRequest={hasAlreadySentRequest(selectedProfile.user_id)}
+            />
           )}
-        </BottomSheet>
+        </Modal>
 
         {/* Message Input Modal */}
         <Modal visible={showMessageInput} transparent animationType="slide" onRequestClose={() => setShowMessageInput(false)}>
