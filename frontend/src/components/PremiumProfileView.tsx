@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   StatusBar,
   NativeScrollEvent,
   NativeSyntheticEvent,
+  PanResponder,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -18,9 +19,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { formatLocationForPrivacy } from '../utils/locationFormatter';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
-const PHOTO_HEIGHT = SCREEN_HEIGHT * 0.55;
-const HEADER_HEIGHT = 60;
-const STICKY_HEADER_HEIGHT = 56;
+const PHOTO_HEIGHT = SCREEN_HEIGHT * 0.5;
+const STICKY_HEADER_HEIGHT = 52;
+const SWIPE_THRESHOLD = 100;
+const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w185';
 
 const COLORS = {
   primary: '#E50914',
@@ -81,11 +83,9 @@ interface PremiumProfileViewProps {
 const PhotoCarousel = ({
   photos,
   name,
-  onIndexChange,
 }: {
   photos: string[];
   name: string;
-  onIndexChange?: (index: number) => void;
 }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const scrollViewRef = useRef<ScrollView>(null);
@@ -93,9 +93,8 @@ const PhotoCarousel = ({
   const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const contentOffset = event.nativeEvent.contentOffset.x;
     const index = Math.round(contentOffset / SCREEN_WIDTH);
-    if (index !== currentIndex) {
+    if (index !== currentIndex && index >= 0 && index < photos.length) {
       setCurrentIndex(index);
-      onIndexChange?.(index);
     }
   };
 
@@ -132,7 +131,7 @@ const PhotoCarousel = ({
         ))}
       </ScrollView>
 
-      {/* Photo Indicators */}
+      {/* Photo Indicators - Top bar style */}
       {photoList.length > 1 && (
         <View style={carouselStyles.indicatorsContainer}>
           {photoList.map((_, index) => (
@@ -149,7 +148,7 @@ const PhotoCarousel = ({
 
       {/* Bottom Gradient */}
       <LinearGradient
-        colors={['transparent', 'rgba(0,0,0,0.3)', 'rgba(10,10,10,0.95)']}
+        colors={['transparent', 'rgba(0,0,0,0.4)', 'rgba(10,10,10,1)']}
         style={carouselStyles.gradient}
         pointerEvents="none"
       />
@@ -177,32 +176,30 @@ const carouselStyles = StyleSheet.create({
     backgroundColor: COLORS.bgCard,
   },
   placeholderGradient: {
-    width: 150,
-    height: 150,
-    borderRadius: 75,
+    width: 120,
+    height: 120,
+    borderRadius: 60,
     justifyContent: 'center',
     alignItems: 'center',
   },
   placeholderText: {
-    fontSize: 64,
+    fontSize: 48,
     fontWeight: 'bold',
     color: '#FFF',
   },
   indicatorsContainer: {
     position: 'absolute',
-    top: 16,
-    left: 0,
-    right: 0,
+    top: 12,
+    left: 16,
+    right: 16,
     flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 6,
+    gap: 4,
   },
   indicator: {
-    width: (SCREEN_WIDTH - 48) / 5,
-    maxWidth: 60,
+    flex: 1,
     height: 3,
     borderRadius: 1.5,
-    backgroundColor: 'rgba(255,255,255,0.3)',
+    backgroundColor: 'rgba(255,255,255,0.35)',
   },
   indicatorActive: {
     backgroundColor: '#FFFFFF',
@@ -212,21 +209,20 @@ const carouselStyles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: 120,
+    height: 100,
   },
 });
 
 // ============ SECTION COMPONENTS ============
-const SectionHeader = ({ title, icon }: { title: string; icon?: string }) => (
+const SectionHeader = ({ title }: { title: string }) => (
   <View style={sectionStyles.header}>
-    {icon && <Ionicons name={icon as any} size={18} color={COLORS.primary} style={{ marginRight: 8 }} />}
     <Text style={sectionStyles.headerText}>{title}</Text>
   </View>
 );
 
-const InfoTag = ({ icon, text, color }: { icon: string; text: string; color?: string }) => (
+const InfoTag = ({ icon, text }: { icon: string; text: string }) => (
   <View style={sectionStyles.infoTag}>
-    <Ionicons name={icon as any} size={16} color={color || COLORS.textSecondary} />
+    <Ionicons name={icon as any} size={14} color={COLORS.textSecondary} />
     <Text style={sectionStyles.infoTagText}>{text}</Text>
   </View>
 );
@@ -239,51 +235,56 @@ const GenreChip = ({ genre, highlight }: { genre: string; highlight?: boolean })
   </View>
 );
 
-const MovieCard = ({ movie, index }: { movie: { title: string; poster_path?: string }; index: number }) => (
-  <View style={sectionStyles.movieCard}>
-    <View style={sectionStyles.movieRank}>
-      <Text style={sectionStyles.movieRankText}>{index + 1}</Text>
+// Movie poster in horizontal scroll
+const MoviePoster = ({ movie }: { movie: { title: string; poster_path?: string; tmdb_id?: number } }) => {
+  const posterUrl = movie.poster_path 
+    ? (movie.poster_path.startsWith('http') ? movie.poster_path : `${TMDB_IMAGE_BASE}${movie.poster_path}`)
+    : null;
+
+  return (
+    <View style={sectionStyles.moviePosterContainer}>
+      {posterUrl ? (
+        <Image source={{ uri: posterUrl }} style={sectionStyles.moviePoster} resizeMode="cover" />
+      ) : (
+        <View style={sectionStyles.moviePosterPlaceholder}>
+          <Ionicons name="film" size={24} color={COLORS.textMuted} />
+        </View>
+      )}
+      <Text style={sectionStyles.moviePosterTitle} numberOfLines={2}>{movie.title}</Text>
     </View>
-    <View style={sectionStyles.movieInfo}>
-      <Text style={sectionStyles.movieTitle} numberOfLines={1}>{movie.title}</Text>
-    </View>
-  </View>
-);
+  );
+};
 
 const sectionStyles = StyleSheet.create({
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-    paddingBottom: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
+    marginBottom: 12,
+    paddingBottom: 6,
   },
   headerText: {
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '600',
     color: COLORS.textMuted,
-    letterSpacing: 1.5,
+    letterSpacing: 1.2,
     textTransform: 'uppercase',
   },
   infoTag: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.bgSection,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 12,
-    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    gap: 6,
   },
   infoTagText: {
-    fontSize: 14,
+    fontSize: 13,
     color: COLORS.text,
   },
   genreChip: {
     backgroundColor: COLORS.bgSection,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: COLORS.border,
   },
@@ -292,42 +293,36 @@ const sectionStyles = StyleSheet.create({
     borderColor: COLORS.primary,
   },
   genreChipText: {
-    fontSize: 14,
+    fontSize: 13,
     color: COLORS.text,
     fontWeight: '500',
   },
   genreChipTextHighlight: {
     color: COLORS.primary,
   },
-  movieCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.bgSection,
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 10,
+  moviePosterContainer: {
+    width: 80,
+    marginRight: 12,
   },
-  movieRank: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: COLORS.primary,
+  moviePoster: {
+    width: 80,
+    height: 120,
+    borderRadius: 8,
+    backgroundColor: COLORS.bgSection,
+  },
+  moviePosterPlaceholder: {
+    width: 80,
+    height: 120,
+    borderRadius: 8,
+    backgroundColor: COLORS.bgSection,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 14,
   },
-  movieRankText: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#FFF',
-  },
-  movieInfo: {
-    flex: 1,
-  },
-  movieTitle: {
-    fontSize: 16,
-    color: COLORS.text,
-    fontWeight: '500',
+  moviePosterTitle: {
+    fontSize: 11,
+    color: COLORS.textSecondary,
+    marginTop: 6,
+    textAlign: 'center',
   },
 });
 
@@ -343,13 +338,54 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
 }) => {
   const insets = useSafeAreaInsets();
   const scrollY = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(0)).current;
   const [showStickyHeader, setShowStickyHeader] = useState(false);
+  const [isAtTop, setIsAtTop] = useState(true);
 
-  // Reset scroll position when profile changes
+  // Reset state when profile changes
   useEffect(() => {
     scrollY.setValue(0);
+    translateY.setValue(0);
     setShowStickyHeader(false);
+    setIsAtTop(true);
   }, [profile?.user_id]);
+
+  // Pan responder for swipe-down-to-dismiss
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        // Only activate if at top of scroll and swiping down
+        return isAtTop && gestureState.dy > 10 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx);
+      },
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dy > 0) {
+          translateY.setValue(gestureState.dy);
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > SWIPE_THRESHOLD) {
+          // Dismiss
+          Animated.timing(translateY, {
+            toValue: SCREEN_HEIGHT,
+            duration: 200,
+            useNativeDriver: true,
+          }).start(() => {
+            onClose();
+            translateY.setValue(0);
+          });
+        } else {
+          // Snap back
+          Animated.spring(translateY, {
+            toValue: 0,
+            useNativeDriver: true,
+            tension: 100,
+            friction: 10,
+          }).start();
+        }
+      },
+    })
+  ).current;
 
   const handleScroll = Animated.event(
     [{ nativeEvent: { contentOffset: { y: scrollY } } }],
@@ -357,7 +393,8 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
       useNativeDriver: false,
       listener: (event: NativeSyntheticEvent<NativeScrollEvent>) => {
         const y = event.nativeEvent.contentOffset.y;
-        setShowStickyHeader(y > PHOTO_HEIGHT - STICKY_HEADER_HEIGHT - 40);
+        setShowStickyHeader(y > PHOTO_HEIGHT - STICKY_HEADER_HEIGHT - 60);
+        setIsAtTop(y <= 5);
       },
     }
   );
@@ -366,25 +403,41 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
 
   const accentColor = mode === 'date' ? COLORS.primary : COLORS.buddy;
   const formattedLocation = formatLocationForPrivacy(profile.location);
+  const locationParts = formattedLocation.split(',').map(s => s.trim()).filter(Boolean);
+  const shortLocation = locationParts[0] || formattedLocation;
 
-  // Sticky header opacity animation
+  // Sticky header opacity
   const stickyHeaderOpacity = scrollY.interpolate({
-    inputRange: [PHOTO_HEIGHT - 150, PHOTO_HEIGHT - 80],
+    inputRange: [PHOTO_HEIGHT - 120, PHOTO_HEIGHT - 60],
     outputRange: [0, 1],
     extrapolate: 'clamp',
   });
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
+    <Animated.View 
+      style={[
+        styles.container, 
+        { 
+          paddingTop: insets.top,
+          transform: [{ translateY }],
+        }
+      ]}
+      {...panResponder.panHandlers}
+    >
       <StatusBar barStyle="light-content" />
 
-      {/* Floating Header */}
-      <View style={[styles.floatingHeader, { top: insets.top }]}>
+      {/* Drag indicator at very top */}
+      <View style={[styles.dragIndicatorContainer, { top: insets.top + 8 }]}>
+        <View style={styles.dragIndicator} />
+      </View>
+
+      {/* Floating Header (always visible on photos) */}
+      <View style={[styles.floatingHeader, { top: insets.top + 24 }]}>
         <TouchableOpacity style={styles.headerButton} onPress={onClose}>
-          <Ionicons name="chevron-down" size={28} color="#FFF" />
+          <Ionicons name="chevron-down" size={26} color="#FFF" />
         </TouchableOpacity>
         <TouchableOpacity style={styles.headerButton}>
-          <Ionicons name="share-outline" size={24} color="#FFF" />
+          <Ionicons name="ellipsis-horizontal" size={22} color="#FFF" />
         </TouchableOpacity>
       </View>
 
@@ -392,22 +445,26 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
       <Animated.View
         style={[
           styles.stickyHeader,
-          { top: insets.top, opacity: stickyHeaderOpacity },
+          { 
+            top: insets.top, 
+            opacity: stickyHeaderOpacity,
+            backgroundColor: COLORS.bg,
+          },
         ]}
         pointerEvents={showStickyHeader ? 'auto' : 'none'}
       >
         <TouchableOpacity style={styles.stickyBackBtn} onPress={onClose}>
-          <Ionicons name="chevron-down" size={24} color="#FFF" />
+          <Ionicons name="chevron-down" size={22} color={COLORS.text} />
         </TouchableOpacity>
         <View style={styles.stickyInfo}>
-          <Text style={styles.stickyName} numberOfLines={1}>{profile.name}</Text>
-          <Text style={styles.stickyDetails}>{profile.age} • {formattedLocation.split(',')[0]}</Text>
+          <Text style={styles.stickyName} numberOfLines={1}>{profile.name}, {profile.age}</Text>
+          <Text style={styles.stickyDetails}>{shortLocation}</Text>
         </View>
         <TouchableOpacity
           style={[styles.stickyMessageBtn, { backgroundColor: accentColor }]}
           onPress={onMessage}
         >
-          <Ionicons name="chatbubble" size={18} color="#FFF" />
+          <Ionicons name="chatbubble" size={16} color="#FFF" />
         </TouchableOpacity>
       </Animated.View>
 
@@ -417,32 +474,30 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
         showsVerticalScrollIndicator={false}
         onScroll={handleScroll}
         scrollEventThrottle={16}
-        contentContainerStyle={{ paddingBottom: 120 }}
+        contentContainerStyle={{ paddingBottom: 100 }}
+        bounces={true}
       >
         {/* Photo Carousel */}
         <PhotoCarousel photos={photos} name={profile.name} />
 
         {/* Profile Content */}
         <View style={styles.content}>
-          {/* Drag Handle */}
-          <View style={styles.dragHandle} />
-
           {/* Name & Basic Info */}
           <View style={styles.heroSection}>
             <View style={styles.nameRow}>
               <Text style={styles.name}>{profile.name}</Text>
               <Text style={styles.age}>, {profile.age}</Text>
               {profile.workProfile && (
-                <Ionicons name="checkmark-circle" size={22} color={COLORS.buddy} style={{ marginLeft: 8 }} />
+                <Ionicons name="checkmark-circle" size={18} color={COLORS.buddy} style={{ marginLeft: 6 }} />
               )}
             </View>
             <View style={styles.locationRow}>
-              <Ionicons name="location" size={16} color={COLORS.textSecondary} />
+              <Ionicons name="location" size={14} color={COLORS.textSecondary} />
               <Text style={styles.locationText}>{formattedLocation}</Text>
             </View>
             {profile.workProfile && (
               <View style={styles.workRow}>
-                <Ionicons name="briefcase-outline" size={16} color={COLORS.textSecondary} />
+                <Ionicons name="briefcase-outline" size={14} color={COLORS.textSecondary} />
                 <Text style={styles.workText}>{profile.workProfile}</Text>
               </View>
             )}
@@ -450,9 +505,9 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
 
           {/* Match Compatibility */}
           {profile.match_level && (
-            <View style={[styles.matchCard, { borderColor: accentColor }]}>
+            <View style={[styles.matchCard, { borderColor: 'rgba(255, 215, 0, 0.3)' }]}>
               <View style={styles.matchCardHeader}>
-                <Ionicons name="sparkles" size={20} color={COLORS.gold} />
+                <Ionicons name="sparkles" size={16} color={COLORS.gold} />
                 <Text style={styles.matchCardTitle}>
                   {profile.match_level.charAt(0).toUpperCase() + profile.match_level.slice(1)} Match
                 </Text>
@@ -487,13 +542,13 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
           {/* Movie Personality */}
           {(profile.movieFrequency || profile.ottTheatre) && (
             <View style={styles.section}>
-              <SectionHeader title="Movie Personality" icon="film" />
+              <SectionHeader title="Movie Personality" />
               <View style={styles.infoTagsRow}>
                 {profile.movieFrequency && (
-                  <InfoTag icon="calendar" text={profile.movieFrequency} color={accentColor} />
+                  <InfoTag icon="calendar" text={profile.movieFrequency} />
                 )}
                 {profile.ottTheatre && (
-                  <InfoTag icon="tv" text={profile.ottTheatre} color={accentColor} />
+                  <InfoTag icon="tv" text={profile.ottTheatre} />
                 )}
               </View>
             </View>
@@ -502,7 +557,7 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
           {/* Shared Interests */}
           {profile.shared_interests && profile.shared_interests.length > 0 && (
             <View style={styles.section}>
-              <SectionHeader title="Things in Common" icon="heart" />
+              <SectionHeader title="Things in Common" />
               <View style={styles.tagsGrid}>
                 {profile.shared_interests.map((interest, idx) => (
                   <GenreChip key={idx} genre={interest} highlight />
@@ -523,17 +578,23 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
             </View>
           )}
 
-          {/* Top Movies */}
+          {/* Top Movies - Horizontal Posters */}
           {profile.topMovies && profile.topMovies.length > 0 && (
             <View style={styles.section}>
-              <SectionHeader title="Top Movies" icon="star" />
-              {profile.topMovies.slice(0, 5).map((movie, idx) => (
-                <MovieCard key={idx} movie={movie} index={idx} />
-              ))}
+              <SectionHeader title="Top Movies" />
+              <ScrollView 
+                horizontal 
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.moviesScrollContent}
+              >
+                {profile.topMovies.slice(0, 5).map((movie, idx) => (
+                  <MoviePoster key={idx} movie={movie} />
+                ))}
+              </ScrollView>
             </View>
           )}
 
-          {/* Languages */}
+          {/* Languages Watched */}
           {profile.filmLanguages && profile.filmLanguages.length > 0 && (
             <View style={styles.section}>
               <SectionHeader title="Languages Watched" />
@@ -572,10 +633,10 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
       </Animated.ScrollView>
 
       {/* Fixed Bottom CTA */}
-      <View style={[styles.bottomCTA, { paddingBottom: insets.bottom + 16 }]}>
+      <View style={[styles.bottomCTA, { paddingBottom: insets.bottom + 12 }]}>
         {hasAlreadySentRequest ? (
           <View style={[styles.messageBtn, styles.messageBtnSent]}>
-            <Ionicons name="checkmark-circle" size={22} color={COLORS.success} />
+            <Ionicons name="checkmark-circle" size={20} color={COLORS.success} />
             <Text style={[styles.messageBtnText, { color: COLORS.success }]}>Request Sent</Text>
           </View>
         ) : (
@@ -584,12 +645,12 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
             onPress={onMessage}
             activeOpacity={0.9}
           >
-            <Ionicons name="chatbubble" size={22} color="#FFF" />
+            <Ionicons name="chatbubble" size={20} color="#FFF" />
             <Text style={styles.messageBtnText}>Message</Text>
           </TouchableOpacity>
         )}
       </View>
-    </View>
+    </Animated.View>
   );
 };
 
@@ -598,6 +659,19 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.bg,
   },
+  dragIndicatorContainer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 102,
+  },
+  dragIndicator: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.5)',
+  },
   floatingHeader: {
     position: 'absolute',
     left: 0,
@@ -605,13 +679,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 8,
     zIndex: 100,
   },
   headerButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: COLORS.overlay,
     justifyContent: 'center',
     alignItems: 'center',
@@ -621,7 +694,6 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: STICKY_HEADER_HEIGHT,
-    backgroundColor: COLORS.bg,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
@@ -631,24 +703,25 @@ const styles = StyleSheet.create({
   },
   stickyBackBtn: {
     marginRight: 12,
+    padding: 4,
   },
   stickyInfo: {
     flex: 1,
   },
   stickyName: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '600',
     color: COLORS.text,
   },
   stickyDetails: {
-    fontSize: 13,
+    fontSize: 12,
     color: COLORS.textSecondary,
-    marginTop: 2,
+    marginTop: 1,
   },
   stickyMessageBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -657,103 +730,94 @@ const styles = StyleSheet.create({
   },
   content: {
     backgroundColor: COLORS.bg,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    marginTop: -24,
-    paddingTop: 12,
-    paddingHorizontal: 20,
-  },
-  dragHandle: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: COLORS.textMuted,
-    alignSelf: 'center',
-    marginBottom: 20,
+    paddingTop: 16,
+    paddingHorizontal: 18,
   },
   heroSection: {
-    marginBottom: 24,
+    marginBottom: 20,
   },
   nameRow: {
     flexDirection: 'row',
     alignItems: 'baseline',
-    marginBottom: 8,
+    marginBottom: 6,
   },
   name: {
-    fontSize: 32,
+    fontSize: 26,
     fontWeight: 'bold',
     color: COLORS.text,
   },
   age: {
-    fontSize: 28,
+    fontSize: 24,
     fontWeight: '300',
     color: COLORS.textSecondary,
   },
   locationRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 5,
   },
   locationText: {
-    fontSize: 15,
+    fontSize: 14,
     color: COLORS.textSecondary,
   },
   workRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    marginTop: 6,
+    gap: 5,
+    marginTop: 4,
   },
   workText: {
-    fontSize: 15,
+    fontSize: 14,
     color: COLORS.textSecondary,
   },
   matchCard: {
     backgroundColor: 'rgba(255, 215, 0, 0.08)',
-    borderRadius: 16,
-    padding: 18,
-    marginBottom: 24,
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 20,
     borderWidth: 1,
-    borderColor: 'rgba(255, 215, 0, 0.3)',
   },
   matchCardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    marginBottom: 10,
+    gap: 8,
+    marginBottom: 8,
   },
   matchCardTitle: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
     color: COLORS.gold,
   },
   matchCardText: {
-    fontSize: 14,
+    fontSize: 13,
     color: COLORS.textSecondary,
-    lineHeight: 22,
+    lineHeight: 20,
   },
   section: {
-    marginBottom: 28,
+    marginBottom: 22,
   },
   bioText: {
-    fontSize: 16,
+    fontSize: 14,
     color: COLORS.text,
-    lineHeight: 26,
+    lineHeight: 22,
   },
   infoTagsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
+    gap: 8,
   },
   infoTagsRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
+    gap: 8,
   },
   tagsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
+    gap: 8,
+  },
+  moviesScrollContent: {
+    paddingRight: 18,
   },
   bottomCTA: {
     position: 'absolute',
@@ -761,8 +825,8 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     backgroundColor: COLORS.bg,
-    paddingTop: 12,
-    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingHorizontal: 18,
     borderTopWidth: 1,
     borderTopColor: COLORS.border,
   },
@@ -770,9 +834,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    height: 56,
-    borderRadius: 28,
-    gap: 10,
+    height: 52,
+    borderRadius: 26,
+    gap: 8,
   },
   messageBtnSent: {
     backgroundColor: 'rgba(0, 210, 106, 0.1)',
@@ -780,7 +844,7 @@ const styles = StyleSheet.create({
     borderColor: COLORS.success,
   },
   messageBtnText: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
     color: '#FFF',
   },
