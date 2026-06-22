@@ -509,6 +509,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     textAlign: 'left',
     textAlignVertical: 'center',
+    letterSpacing: 0,
   },
   charCount: { fontSize: 11, color: COLORS.textMuted, textAlign: 'right', marginTop: 4 },
   dropdown: {
