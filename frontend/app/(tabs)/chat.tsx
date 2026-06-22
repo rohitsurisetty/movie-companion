@@ -57,9 +57,25 @@ interface MessageRequest {
     age?: number;
     location?: string;
     bio?: string;
+    gender?: string;
+    genres?: string[];
+    topMovies?: { title: string }[];
   };
   preview: string;
   created_at: string;
+}
+
+// Full profile data for request viewing
+interface FullUserProfile {
+  user_id: string;
+  name: string;
+  age?: number;
+  gender?: string;
+  location?: any;
+  bio?: string;
+  genres?: string[];
+  topMovies?: { title: string; poster?: string }[];
+  pictures?: string[];
 }
 
 interface BackendMessage {
@@ -268,39 +284,483 @@ const ProfileBottomSheet = ({
   );
 };
 
+// ============ MESSAGE REQUEST DETAIL VIEW ============
+const MessageRequestDetailView = ({
+  visible,
+  request,
+  onAccept,
+  onDecline,
+  onClose,
+}: {
+  visible: boolean;
+  request: MessageRequest | null;
+  onAccept: () => void;
+  onDecline: () => void;
+  onClose: () => void;
+}) => {
+  const [profile, setProfile] = useState<FullUserProfile | null>(null);
+  const [pictures, setPictures] = useState<string[]>([]);
+  const [messages, setMessages] = useState<BackendMessage[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [currentPicIndex, setCurrentPicIndex] = useState(0);
+  const [activeView, setActiveView] = useState<'messages' | 'profile'>('messages');
+
+  useEffect(() => {
+    if (visible && request) {
+      fetchRequestData();
+    }
+  }, [visible, request]);
+
+  const fetchRequestData = async () => {
+    if (!request) return;
+    setLoading(true);
+    try {
+      // Fetch messages for this conversation
+      const messagesRes = await fetch(`${API_BASE}/api/chat/messages/${request.conversation_id}`);
+      if (messagesRes.ok) {
+        const data = await messagesRes.json();
+        setMessages(data.messages || []);
+      }
+
+      // Fetch sender's profile
+      const profileRes = await fetch(`${API_BASE}/api/user/profile/${request.from_user_id}`);
+      if (profileRes.ok) {
+        const data = await profileRes.json();
+        setProfile(data.profile);
+      }
+
+      // Fetch sender's pictures
+      const picsRes = await fetch(`${API_BASE}/api/user/pictures/${request.from_user_id}`);
+      if (picsRes.ok) {
+        const data = await picsRes.json();
+        const pics = data.pictures || {};
+        const photoArray = [pics.picture_1, pics.picture_2, pics.picture_3, pics.picture_4, pics.picture_5]
+          .filter(Boolean);
+        setPictures(photoArray);
+      }
+    } catch (error) {
+      console.error('Error fetching request data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const formatTime = (dateStr: string) => {
+    const date = new Date(dateStr);
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const formatDate = (dateStr: string) => {
+    const date = new Date(dateStr);
+    const today = new Date();
+    if (date.toDateString() === today.toDateString()) {
+      return 'Today';
+    }
+    return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  };
+
+  if (!request) return null;
+
+  const user = request.from_user;
+
+  return (
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+      <SafeAreaView style={styles.requestDetailContainer}>
+        {/* Header */}
+        <View style={styles.requestDetailHeader}>
+          <TouchableOpacity onPress={onClose} style={styles.backBtn}>
+            <Ionicons name="chevron-back" size={28} color={COLORS.text} />
+          </TouchableOpacity>
+          <Text style={styles.requestDetailTitle}>Message Request</Text>
+          <View style={{ width: 40 }} />
+        </View>
+
+        {/* Tab Switcher */}
+        <View style={styles.requestDetailTabs}>
+          <TouchableOpacity 
+            style={[styles.requestDetailTab, activeView === 'messages' && styles.requestDetailTabActive]}
+            onPress={() => setActiveView('messages')}
+          >
+            <Ionicons name="chatbubbles-outline" size={18} color={activeView === 'messages' ? COLORS.primary : COLORS.textSecondary} />
+            <Text style={[styles.requestDetailTabText, activeView === 'messages' && styles.requestDetailTabTextActive]}>Messages</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={[styles.requestDetailTab, activeView === 'profile' && styles.requestDetailTabActive]}
+            onPress={() => setActiveView('profile')}
+          >
+            <Ionicons name="person-outline" size={18} color={activeView === 'profile' ? COLORS.primary : COLORS.textSecondary} />
+            <Text style={[styles.requestDetailTabText, activeView === 'profile' && styles.requestDetailTabTextActive]}>Profile</Text>
+          </TouchableOpacity>
+        </View>
+
+        {loading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={COLORS.primary} />
+          </View>
+        ) : (
+          <>
+            {activeView === 'messages' ? (
+              /* Messages View */
+              <ScrollView style={styles.requestMessagesContainer} contentContainerStyle={{ paddingBottom: 120 }}>
+                {/* Sender Info Header */}
+                <View style={styles.requestSenderHeader}>
+                  <Avatar name={user?.name || 'U'} size={60} imageUrl={user?.avatar} />
+                  <View style={styles.requestSenderInfo}>
+                    <Text style={styles.requestSenderName}>{user?.name || 'Unknown'}{user?.age ? `, ${user.age}` : ''}</Text>
+                    <Text style={styles.requestSenderLocation}>{user?.location || 'Unknown location'}</Text>
+                  </View>
+                  <TouchableOpacity 
+                    style={styles.viewProfileBtn}
+                    onPress={() => setActiveView('profile')}
+                  >
+                    <Text style={styles.viewProfileBtnText}>View Profile</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Messages */}
+                <View style={styles.requestMessagesList}>
+                  {messages.length > 0 ? (
+                    messages.map((msg, idx) => (
+                      <View key={msg.message_id || idx} style={styles.requestMessageItem}>
+                        <View style={styles.requestMessageBubble}>
+                          <Text style={styles.requestMessageText}>{msg.content}</Text>
+                          <Text style={styles.requestMessageTime}>
+                            {formatDate(msg.created_at)} • {formatTime(msg.created_at)}
+                          </Text>
+                        </View>
+                      </View>
+                    ))
+                  ) : (
+                    <Text style={styles.noMessagesText}>No messages yet</Text>
+                  )}
+                </View>
+              </ScrollView>
+            ) : (
+              /* Profile View */
+              <ScrollView style={styles.requestProfileContainer} contentContainerStyle={{ paddingBottom: 120 }}>
+                {/* Photos */}
+                {pictures.length > 0 && (
+                  <View style={styles.requestPhotoSection}>
+                    <Image 
+                      source={{ uri: pictures[currentPicIndex] }} 
+                      style={styles.requestMainPhoto}
+                      resizeMode="cover"
+                    />
+                    {pictures.length > 1 && (
+                      <View style={styles.requestPhotoIndicators}>
+                        {pictures.map((_, idx) => (
+                          <TouchableOpacity 
+                            key={idx} 
+                            style={[styles.requestPhotoIndicator, idx === currentPicIndex && styles.requestPhotoIndicatorActive]}
+                            onPress={() => setCurrentPicIndex(idx)}
+                          />
+                        ))}
+                      </View>
+                    )}
+                    {pictures.length > 1 && (
+                      <View style={styles.requestPhotoNav}>
+                        <TouchableOpacity 
+                          style={styles.requestPhotoNavBtn} 
+                          onPress={() => setCurrentPicIndex(prev => Math.max(0, prev - 1))}
+                          disabled={currentPicIndex === 0}
+                        >
+                          <Ionicons name="chevron-back" size={24} color={currentPicIndex === 0 ? COLORS.textMuted : COLORS.text} />
+                        </TouchableOpacity>
+                        <TouchableOpacity 
+                          style={styles.requestPhotoNavBtn} 
+                          onPress={() => setCurrentPicIndex(prev => Math.min(pictures.length - 1, prev + 1))}
+                          disabled={currentPicIndex === pictures.length - 1}
+                        >
+                          <Ionicons name="chevron-forward" size={24} color={currentPicIndex === pictures.length - 1 ? COLORS.textMuted : COLORS.text} />
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </View>
+                )}
+
+                {/* Profile Info */}
+                <View style={styles.requestProfileInfo}>
+                  <Text style={styles.requestProfileName}>{profile?.name || user?.name || 'Unknown'}</Text>
+                  <View style={styles.requestProfileBasics}>
+                    {profile?.age && (
+                      <View style={styles.requestProfileBasicItem}>
+                        <Ionicons name="calendar-outline" size={16} color={COLORS.textSecondary} />
+                        <Text style={styles.requestProfileBasicText}>{profile.age} years old</Text>
+                      </View>
+                    )}
+                    {profile?.gender && (
+                      <View style={styles.requestProfileBasicItem}>
+                        <Ionicons name="person-outline" size={16} color={COLORS.textSecondary} />
+                        <Text style={styles.requestProfileBasicText}>{profile.gender}</Text>
+                      </View>
+                    )}
+                    {(profile?.location || user?.location) && (
+                      <View style={styles.requestProfileBasicItem}>
+                        <Ionicons name="location-outline" size={16} color={COLORS.textSecondary} />
+                        <Text style={styles.requestProfileBasicText}>
+                          {typeof profile?.location === 'object' 
+                            ? formatLocationForPrivacy(`${profile.location.city || ''}, ${profile.location.state || ''}, ${profile.location.country || ''}`)
+                            : (user?.location || 'Unknown')}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+
+                  {/* Bio */}
+                  {profile?.bio && (
+                    <View style={styles.requestProfileSection}>
+                      <Text style={styles.requestProfileSectionTitle}>About</Text>
+                      <Text style={styles.requestProfileBio}>{profile.bio}</Text>
+                    </View>
+                  )}
+
+                  {/* Genres */}
+                  {Array.isArray(profile?.genres) && profile.genres.length > 0 && (
+                    <View style={styles.requestProfileSection}>
+                      <Text style={styles.requestProfileSectionTitle}>Favorite Genres</Text>
+                      <View style={styles.tagsContainer}>
+                        {profile.genres.map((genre: string, idx: number) => (
+                          <View key={idx} style={styles.tag}>
+                            <Text style={styles.tagText}>{genre}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
+                  )}
+
+                  {/* Top Movies */}
+                  {Array.isArray(profile?.topMovies) && profile.topMovies.length > 0 && (
+                    <View style={styles.requestProfileSection}>
+                      <Text style={styles.requestProfileSectionTitle}>Favorite Movies</Text>
+                      {profile.topMovies.slice(0, 5).map((movie: any, idx: number) => (
+                        <View key={idx} style={styles.movieItem}>
+                          <Ionicons name="film-outline" size={18} color={COLORS.primary} />
+                          <Text style={styles.movieTitle}>{movie.title}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              </ScrollView>
+            )}
+
+            {/* Action Buttons - Fixed at Bottom */}
+            <View style={styles.requestDetailActions}>
+              <TouchableOpacity style={styles.requestDeclineBtn} onPress={() => { onDecline(); onClose(); }}>
+                <Ionicons name="close" size={22} color={COLORS.textSecondary} />
+                <Text style={styles.requestDeclineBtnText}>Decline</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.requestAcceptBtn} onPress={() => { onAccept(); onClose(); }}>
+                <Ionicons name="checkmark" size={22} color="#FFF" />
+                <Text style={styles.requestAcceptBtnText}>Accept</Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
+      </SafeAreaView>
+    </Modal>
+  );
+};
+
+// ============ "DID YOU MEET?" MODAL ============
+const DidYouMeetModal = ({
+  visible,
+  onClose,
+  otherUserName,
+  conversationId,
+  userId,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  otherUserName: string;
+  conversationId: string;
+  userId: string;
+}) => {
+  const [step, setStep] = useState<'initial' | 'verification'>('initial');
+  const [didMeet, setDidMeet] = useState<boolean | null>(null);
+
+  const handleInitialResponse = async (met: boolean) => {
+    setDidMeet(met);
+    if (met) {
+      setStep('verification');
+    } else {
+      // Save "didn't meet" response
+      await saveMeetingResponse(false, null);
+      Alert.alert('Got it!', 'Thanks for letting us know. Hope you get to meet soon!');
+      resetAndClose();
+    }
+  };
+
+  const handleVerificationResponse = async (samePerson: 'yes' | 'no' | 'partially') => {
+    await saveMeetingResponse(true, samePerson);
+    
+    if (samePerson === 'yes') {
+      Alert.alert('Great! 🎉', 'Glad you had a good experience meeting in person!');
+    } else if (samePerson === 'no') {
+      Alert.alert('Thanks for reporting', 'This helps us keep the community safe. You can report this user if needed.');
+    } else {
+      Alert.alert('Thanks!', 'We appreciate your feedback.');
+    }
+    resetAndClose();
+  };
+
+  const saveMeetingResponse = async (met: boolean, verification: string | null) => {
+    try {
+      await fetch(`${API_BASE}/api/chat/meeting-report`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversation_id: conversationId,
+          user_id: userId,
+          did_meet: met,
+          verification_result: verification,
+          reported_at: new Date().toISOString(),
+        }),
+      });
+    } catch (error) {
+      console.error('Error saving meeting response:', error);
+    }
+  };
+
+  const resetAndClose = () => {
+    setStep('initial');
+    setDidMeet(null);
+    onClose();
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={resetAndClose}>
+      <Pressable style={styles.meetModalOverlay} onPress={resetAndClose}>
+        <View style={styles.meetModalContainer}>
+          {step === 'initial' ? (
+            <>
+              <View style={styles.meetModalIcon}>
+                <Ionicons name="cafe" size={40} color={COLORS.primary} />
+              </View>
+              <Text style={styles.meetModalTitle}>Did you meet {otherUserName}?</Text>
+              <Text style={styles.meetModalSubtitle}>This helps us improve safety and trust</Text>
+              
+              <View style={styles.meetModalActions}>
+                <TouchableOpacity 
+                  style={styles.meetModalBtn} 
+                  onPress={() => handleInitialResponse(false)}
+                >
+                  <Ionicons name="close-circle-outline" size={24} color={COLORS.textSecondary} />
+                  <Text style={styles.meetModalBtnText}>Not Yet</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.meetModalBtn, styles.meetModalBtnPrimary]} 
+                  onPress={() => handleInitialResponse(true)}
+                >
+                  <Ionicons name="checkmark-circle-outline" size={24} color="#FFF" />
+                  <Text style={[styles.meetModalBtnText, { color: '#FFF' }]}>Yes!</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          ) : (
+            <>
+              <View style={styles.meetModalIcon}>
+                <Ionicons name="shield-checkmark" size={40} color={COLORS.success} />
+              </View>
+              <Text style={styles.meetModalTitle}>Was it the same person?</Text>
+              <Text style={styles.meetModalSubtitle}>Did they match their profile photos?</Text>
+              
+              <View style={styles.meetVerificationOptions}>
+                <TouchableOpacity 
+                  style={styles.meetVerificationBtn} 
+                  onPress={() => handleVerificationResponse('yes')}
+                >
+                  <Ionicons name="checkmark-circle" size={28} color={COLORS.success} />
+                  <Text style={styles.meetVerificationBtnText}>Yes, same person</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={styles.meetVerificationBtn} 
+                  onPress={() => handleVerificationResponse('partially')}
+                >
+                  <Ionicons name="help-circle" size={28} color={COLORS.warning} />
+                  <Text style={styles.meetVerificationBtnText}>Partially different</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={styles.meetVerificationBtn} 
+                  onPress={() => handleVerificationResponse('no')}
+                >
+                  <Ionicons name="close-circle" size={28} color={COLORS.primary} />
+                  <Text style={styles.meetVerificationBtnText}>No, different person</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
+        </View>
+      </Pressable>
+    </Modal>
+  );
+};
+
+// ============ COMING SOON MODAL ============
+const ComingSoonModal = ({
+  visible,
+  onClose,
+  featureName,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  featureName: string;
+}) => (
+  <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Pressable style={styles.comingSoonOverlay} onPress={onClose}>
+      <View style={styles.comingSoonContainer}>
+        <View style={styles.comingSoonIcon}>
+          <Text style={styles.comingSoonEmoji}>🚀</Text>
+        </View>
+        <Text style={styles.comingSoonTitle}>Coming Soon</Text>
+        <Text style={styles.comingSoonText}>
+          {featureName} is currently under development and will be available in a future update.
+        </Text>
+        <TouchableOpacity style={styles.comingSoonBtn} onPress={onClose}>
+          <Text style={styles.comingSoonBtnText}>Got it</Text>
+        </TouchableOpacity>
+      </View>
+    </Pressable>
+  </Modal>
+);
+
 // ============ MESSAGE REQUEST CARD ============
 const MessageRequestCard = ({ 
   request, 
+  onPress,
   onAccept, 
   onDecline 
 }: { 
   request: MessageRequest; 
+  onPress: () => void;
   onAccept: () => void; 
   onDecline: () => void;
 }) => {
   const user = request.from_user;
   
   return (
-    <View style={styles.requestCard}>
+    <TouchableOpacity style={styles.requestCard} onPress={onPress} activeOpacity={0.8}>
       <View style={styles.requestHeader}>
         <Avatar name={user?.name || 'U'} size={60} imageUrl={user?.avatar} />
         <View style={styles.requestInfo}>
           <Text style={styles.requestName}>{user?.name || 'Unknown'}{user?.age ? `, ${user.age}` : ''}</Text>
           <Text style={styles.requestLocation}>{user?.location || 'Unknown location'}</Text>
         </View>
+        <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
       </View>
       <Text style={styles.requestPreview} numberOfLines={2}>&quot;{request.preview}&quot;</Text>
       <View style={styles.requestActions}>
-        <TouchableOpacity style={styles.declineBtn} onPress={onDecline}>
+        <TouchableOpacity style={styles.declineBtn} onPress={(e) => { e.stopPropagation(); onDecline(); }}>
           <Ionicons name="close" size={20} color={COLORS.textSecondary} />
           <Text style={styles.declineBtnText}>Decline</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.acceptBtn} onPress={onAccept}>
+        <TouchableOpacity style={styles.acceptBtn} onPress={(e) => { e.stopPropagation(); onAccept(); }}>
           <Ionicons name="checkmark" size={20} color="#FFF" />
           <Text style={styles.acceptBtnText}>Accept</Text>
         </TouchableOpacity>
       </View>
-    </View>
+      <Text style={styles.requestHint}>Tap to view full conversation & profile</Text>
+    </TouchableOpacity>
   );
 };
 
@@ -358,9 +818,17 @@ const GiftedChatScreen = ({
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
+  const [showDidYouMeet, setShowDidYouMeet] = useState(false);
+  const [showComingSoon, setShowComingSoon] = useState(false);
+  const [comingSoonFeature, setComingSoonFeature] = useState('');
   
   const otherUser = conversation.other_user;
   const otherUserId = conversation.other_user_id;
+
+  const showComingSoonModal = (feature: string) => {
+    setComingSoonFeature(feature);
+    setShowComingSoon(true);
+  };
 
   // Convert backend messages to GiftedChat format
   const convertToGiftedMessages = (backendMessages: BackendMessage[]): IMessage[] => {
@@ -605,10 +1073,10 @@ const GiftedChatScreen = ({
         </TouchableOpacity>
         
         <View style={styles.chatHeaderActions}>
-          <TouchableOpacity style={styles.headerActionBtn} onPress={() => Alert.alert('Voice Call', 'Coming soon!')}>
+          <TouchableOpacity style={styles.headerActionBtn} onPress={() => showComingSoonModal('Voice Calls')}>
             <Ionicons name="call-outline" size={22} color={COLORS.text} />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.headerActionBtn} onPress={() => Alert.alert('Video Call', 'Coming soon!')}>
+          <TouchableOpacity style={styles.headerActionBtn} onPress={() => showComingSoonModal('Video Calls')}>
             <Ionicons name="videocam-outline" size={22} color={COLORS.text} />
           </TouchableOpacity>
           <TouchableOpacity style={styles.headerActionBtn} onPress={() => setShowMenu(true)}>
@@ -680,9 +1148,22 @@ const GiftedChatScreen = ({
               <Ionicons name="person-outline" size={22} color={COLORS.text} />
               <Text style={styles.menuItemText}>View Profile</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); Alert.alert('Did you meet?', 'Verification coming soon!'); }}>
+            <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); setShowDidYouMeet(true); }}>
               <Ionicons name="cafe-outline" size={22} color={COLORS.text} />
               <Text style={styles.menuItemText}>Did you meet?</Text>
+            </TouchableOpacity>
+            <View style={styles.menuDivider} />
+            <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); showComingSoonModal('Media Attachments'); }}>
+              <Ionicons name="image-outline" size={22} color={COLORS.text} />
+              <Text style={styles.menuItemText}>Send Photo</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); showComingSoonModal('GIFs'); }}>
+              <Ionicons name="happy-outline" size={22} color={COLORS.text} />
+              <Text style={styles.menuItemText}>Send GIF</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); showComingSoonModal('Voice Notes'); }}>
+              <Ionicons name="mic-outline" size={22} color={COLORS.text} />
+              <Text style={styles.menuItemText}>Voice Note</Text>
             </TouchableOpacity>
             <View style={styles.menuDivider} />
             <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); handleUnmatch(); }}>
@@ -704,6 +1185,22 @@ const GiftedChatScreen = ({
         userId={otherUserId}
         userName={otherUser?.name || 'Unknown'}
       />
+
+      {/* Did You Meet Modal */}
+      <DidYouMeetModal
+        visible={showDidYouMeet}
+        onClose={() => setShowDidYouMeet(false)}
+        otherUserName={otherUser?.name || 'this person'}
+        conversationId={conversation.conversation_id}
+        userId={userId}
+      />
+
+      {/* Coming Soon Modal */}
+      <ComingSoonModal
+        visible={showComingSoon}
+        onClose={() => setShowComingSoon(false)}
+        featureName={comingSoonFeature}
+      />
     </KeyboardAvoidingView>
   );
 };
@@ -718,6 +1215,8 @@ export default function ChatTab() {
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState('');
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
+  const [selectedRequest, setSelectedRequest] = useState<MessageRequest | null>(null);
+  const [showRequestDetail, setShowRequestDetail] = useState(false);
 
   useEffect(() => {
     initializeChat();
@@ -865,6 +1364,7 @@ export default function ChatTab() {
               <MessageRequestCard
                 key={req.conversation_id}
                 request={req}
+                onPress={() => { setSelectedRequest(req); setShowRequestDetail(true); }}
                 onAccept={() => handleAcceptRequest(req.conversation_id)}
                 onDecline={() => handleDeclineRequest(req.conversation_id)}
               />
@@ -872,6 +1372,23 @@ export default function ChatTab() {
           )}
         </ScrollView>
       )}
+
+      {/* Message Request Detail View */}
+      <MessageRequestDetailView
+        visible={showRequestDetail}
+        request={selectedRequest}
+        onAccept={() => { 
+          if (selectedRequest) handleAcceptRequest(selectedRequest.conversation_id);
+          setShowRequestDetail(false);
+          setSelectedRequest(null);
+        }}
+        onDecline={() => { 
+          if (selectedRequest) handleDeclineRequest(selectedRequest.conversation_id);
+          setShowRequestDetail(false);
+          setSelectedRequest(null);
+        }}
+        onClose={() => { setShowRequestDetail(false); setSelectedRequest(null); }}
+      />
     </SafeAreaView>
   );
 }
@@ -1005,4 +1522,75 @@ const styles = StyleSheet.create({
   tagText: { fontSize: 13, color: COLORS.text },
   movieItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.border },
   movieTitle: { fontSize: 15, color: COLORS.text },
+
+  // Request Card - Updated
+  requestHint: { fontSize: 12, color: COLORS.textMuted, textAlign: 'center', marginTop: 12, fontStyle: 'italic' },
+
+  // Message Request Detail View
+  requestDetailContainer: { flex: 1, backgroundColor: COLORS.bg },
+  requestDetailHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 8, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  requestDetailTitle: { fontSize: 18, fontWeight: '600', color: COLORS.text },
+  requestDetailTabs: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  requestDetailTab: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 14, gap: 8 },
+  requestDetailTabActive: { borderBottomWidth: 2, borderBottomColor: COLORS.primary },
+  requestDetailTabText: { fontSize: 14, color: COLORS.textSecondary },
+  requestDetailTabTextActive: { color: COLORS.primary, fontWeight: '600' },
+  requestMessagesContainer: { flex: 1, padding: 16 },
+  requestSenderHeader: { flexDirection: 'row', alignItems: 'center', paddingBottom: 20, borderBottomWidth: 1, borderBottomColor: COLORS.border, marginBottom: 16 },
+  requestSenderInfo: { flex: 1, marginLeft: 14 },
+  requestSenderName: { fontSize: 18, fontWeight: '600', color: COLORS.text },
+  requestSenderLocation: { fontSize: 14, color: COLORS.textSecondary, marginTop: 2 },
+  viewProfileBtn: { backgroundColor: COLORS.bgCard, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 16, borderWidth: 1, borderColor: COLORS.border },
+  viewProfileBtnText: { fontSize: 13, color: COLORS.text, fontWeight: '500' },
+  requestMessagesList: { gap: 12 },
+  requestMessageItem: { alignItems: 'flex-start' },
+  requestMessageBubble: { backgroundColor: COLORS.bgCard, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 16, borderTopLeftRadius: 4, maxWidth: '85%' },
+  requestMessageText: { fontSize: 15, color: COLORS.text, lineHeight: 22 },
+  requestMessageTime: { fontSize: 11, color: COLORS.textMuted, marginTop: 6 },
+  noMessagesText: { fontSize: 14, color: COLORS.textMuted, textAlign: 'center', marginTop: 40 },
+  requestProfileContainer: { flex: 1 },
+  requestPhotoSection: { position: 'relative' },
+  requestMainPhoto: { width: SCREEN_WIDTH, height: SCREEN_HEIGHT * 0.4 },
+  requestPhotoIndicators: { position: 'absolute', bottom: 16, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', gap: 6 },
+  requestPhotoIndicator: { width: 8, height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.4)' },
+  requestPhotoIndicatorActive: { backgroundColor: '#FFF', width: 24 },
+  requestPhotoNav: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 8 },
+  requestPhotoNavBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' },
+  requestProfileInfo: { padding: 20 },
+  requestProfileName: { fontSize: 26, fontWeight: 'bold', color: COLORS.text },
+  requestProfileBasics: { marginTop: 12, gap: 8 },
+  requestProfileBasicItem: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  requestProfileBasicText: { fontSize: 14, color: COLORS.textSecondary },
+  requestProfileSection: { marginTop: 24 },
+  requestProfileSectionTitle: { fontSize: 16, fontWeight: '600', color: COLORS.text, marginBottom: 12 },
+  requestProfileBio: { fontSize: 15, color: COLORS.textSecondary, lineHeight: 22 },
+  requestDetailActions: { position: 'absolute', bottom: 0, left: 0, right: 0, flexDirection: 'row', padding: 16, paddingBottom: 32, gap: 12, backgroundColor: COLORS.bg, borderTopWidth: 1, borderTopColor: COLORS.border },
+  requestDeclineBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 14, borderRadius: 24, borderWidth: 1, borderColor: COLORS.border, gap: 8 },
+  requestDeclineBtnText: { fontSize: 16, fontWeight: '600', color: COLORS.textSecondary },
+  requestAcceptBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 14, borderRadius: 24, backgroundColor: COLORS.success, gap: 8 },
+  requestAcceptBtnText: { fontSize: 16, fontWeight: '600', color: '#FFF' },
+
+  // Did You Meet Modal
+  meetModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center', padding: 24 },
+  meetModalContainer: { backgroundColor: COLORS.bgCard, borderRadius: 24, padding: 24, width: '100%', maxWidth: 340, alignItems: 'center' },
+  meetModalIcon: { width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(229,9,20,0.15)', justifyContent: 'center', alignItems: 'center', marginBottom: 20 },
+  meetModalTitle: { fontSize: 20, fontWeight: 'bold', color: COLORS.text, textAlign: 'center' },
+  meetModalSubtitle: { fontSize: 14, color: COLORS.textSecondary, textAlign: 'center', marginTop: 8 },
+  meetModalActions: { flexDirection: 'row', gap: 12, marginTop: 24, width: '100%' },
+  meetModalBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 14, borderRadius: 20, borderWidth: 1, borderColor: COLORS.border, gap: 6 },
+  meetModalBtnPrimary: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+  meetModalBtnText: { fontSize: 15, fontWeight: '600', color: COLORS.text },
+  meetVerificationOptions: { marginTop: 24, width: '100%', gap: 12 },
+  meetVerificationBtn: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 16, borderRadius: 16, backgroundColor: COLORS.bgInput, gap: 12 },
+  meetVerificationBtnText: { fontSize: 15, color: COLORS.text, fontWeight: '500' },
+
+  // Coming Soon Modal
+  comingSoonOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center', padding: 24 },
+  comingSoonContainer: { backgroundColor: COLORS.bgCard, borderRadius: 24, padding: 28, width: '100%', maxWidth: 320, alignItems: 'center' },
+  comingSoonIcon: { marginBottom: 16 },
+  comingSoonEmoji: { fontSize: 48 },
+  comingSoonTitle: { fontSize: 22, fontWeight: 'bold', color: COLORS.text },
+  comingSoonText: { fontSize: 14, color: COLORS.textSecondary, textAlign: 'center', marginTop: 12, lineHeight: 20 },
+  comingSoonBtn: { marginTop: 24, backgroundColor: COLORS.primary, paddingHorizontal: 32, paddingVertical: 14, borderRadius: 24 },
+  comingSoonBtnText: { fontSize: 16, fontWeight: '600', color: '#FFF' },
 });

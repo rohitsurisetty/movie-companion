@@ -251,25 +251,88 @@ const LoadingState = ({ mode }: { mode: string }) => (
 );
 
 // ============ EMPTY STATE ============
-const EmptyState = ({ mode, onRefresh }: { mode: string; onRefresh: () => void }) => (
-  <View style={styles.emptyContainer}>
-    <Ionicons 
-      name={mode === 'date' ? 'heart-outline' : 'people-outline'} 
-      size={64} 
-      color={COLORS.textMuted} 
-    />
-    <Text style={styles.emptyTitle}>No matches yet</Text>
-    <Text style={styles.emptySubtitle}>
-      Complete your profile and movie preferences to get better matches
-    </Text>
-    <TouchableOpacity 
-      style={[styles.refreshButton, { backgroundColor: mode === 'date' ? COLORS.primary : COLORS.buddy }]}
-      onPress={onRefresh}
-    >
-      <Text style={styles.refreshButtonText}>Refresh Matches</Text>
-    </TouchableOpacity>
-  </View>
-);
+interface EmptyStateReason {
+  type: 'filters_restrictive' | 'insufficient_movies' | 'no_matches';
+}
+
+const EmptyState = ({ 
+  mode, 
+  onRefresh, 
+  reason,
+  onGoToFilters,
+  onGoToLibrary
+}: { 
+  mode: string; 
+  onRefresh: () => void;
+  reason: EmptyStateReason;
+  onGoToFilters: () => void;
+  onGoToLibrary: () => void;
+}) => {
+  const getEmptyStateContent = () => {
+    switch (reason.type) {
+      case 'filters_restrictive':
+        return {
+          icon: 'options-outline' as const,
+          title: 'Filters too restrictive',
+          subtitle: "We couldn't find enough compatible profiles based on your current filters. Try expanding your preferences to discover more people.",
+          ctaText: 'Filters & Preferences',
+          ctaAction: onGoToFilters,
+          ctaIcon: 'settings-outline' as const,
+        };
+      case 'insufficient_movies':
+        return {
+          icon: 'film-outline' as const,
+          title: 'Help us know you better',
+          subtitle: 'Add more movies you\'ve watched so we can improve your recommendations and find better matches for you.',
+          ctaText: 'Go to Library',
+          ctaAction: onGoToLibrary,
+          ctaIcon: 'library-outline' as const,
+        };
+      default:
+        return {
+          icon: mode === 'date' ? 'heart-outline' : 'people-outline',
+          title: 'No matches yet',
+          subtitle: 'Complete your profile and movie preferences to get better matches',
+          ctaText: 'Refresh Matches',
+          ctaAction: onRefresh,
+          ctaIcon: 'refresh-outline' as const,
+        };
+    }
+  };
+
+  const content = getEmptyStateContent();
+
+  return (
+    <View style={styles.emptyContainer}>
+      <View style={styles.emptyIconContainer}>
+        <Ionicons 
+          name={content.icon as any} 
+          size={48} 
+          color={COLORS.textMuted} 
+        />
+      </View>
+      <Text style={styles.emptyTitle}>{content.title}</Text>
+      <Text style={styles.emptySubtitle}>{content.subtitle}</Text>
+      
+      <TouchableOpacity 
+        style={[styles.emptyCTAButton, { backgroundColor: mode === 'date' ? COLORS.primary : COLORS.buddy }]}
+        onPress={content.ctaAction}
+      >
+        <Ionicons name={content.ctaIcon as any} size={20} color="#FFF" />
+        <Text style={styles.emptyCTAButtonText}>{content.ctaText}</Text>
+      </TouchableOpacity>
+
+      {reason.type !== 'no_matches' && (
+        <TouchableOpacity 
+          style={styles.emptySecondaryButton}
+          onPress={onRefresh}
+        >
+          <Text style={styles.emptySecondaryButtonText}>Refresh anyway</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+};
 
 // ============ MAIN FEED SCREEN ============
 export default function FeedScreen() {
@@ -281,9 +344,50 @@ export default function FeedScreen() {
   const [selectedProfile, setSelectedProfile] = useState<MatchProfile | null>(null);
   const [selectedProfilePhotos, setSelectedProfilePhotos] = useState<string[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [emptyReason, setEmptyReason] = useState<EmptyStateReason>({ type: 'no_matches' });
+  const [userProfile, setUserProfile] = useState<any>(null);
   
   const bottomSheetRef = useRef<BottomSheet>(null);
   const snapPoints = useMemo(() => ['85%'], []);
+
+  // Fetch user profile to determine empty state reason
+  const fetchUserProfile = async () => {
+    try {
+      const userId = await getUserId();
+      const response = await fetch(`${API_BASE}/api/user/profile/${userId}`);
+      if (response.ok) {
+        const data = await response.json();
+        setUserProfile(data.profile);
+      }
+    } catch (error) {
+      console.error('Error fetching user profile:', error);
+    }
+  };
+
+  // Determine the reason for empty state
+  const determineEmptyReason = (matchCount: number, profile: any): EmptyStateReason => {
+    if (matchCount > 0) return { type: 'no_matches' };
+    
+    // Check if user has enough movie data
+    const topMovies = profile?.topMovies || [];
+    const ratedMovies = profile?.library?.length || 0;
+    
+    if (topMovies.length < 3 && ratedMovies < 5) {
+      return { type: 'insufficient_movies' };
+    }
+    
+    // Check if filters might be too restrictive
+    const preferences = profile?.preferences || {};
+    const hasRestrictiveFilters = 
+      (preferences.ageRange && (preferences.ageRange.max - preferences.ageRange.min) < 10) ||
+      (preferences.distance && preferences.distance < 50);
+    
+    if (hasRestrictiveFilters) {
+      return { type: 'filters_restrictive' };
+    }
+    
+    return { type: 'no_matches' };
+  };
 
   // Fetch matches from API
   const fetchMatches = async (forceRefresh = false) => {
@@ -302,7 +406,13 @@ export default function FeedScreen() {
 
       if (response.ok) {
         const data = await response.json();
-        setMatches(data.matches || []);
+        const matchList = data.matches || [];
+        setMatches(matchList);
+        
+        // Determine empty state reason if no matches
+        if (matchList.length === 0) {
+          setEmptyReason(determineEmptyReason(matchList.length, userProfile));
+        }
       }
     } catch (error) {
       console.error('Error fetching matches:', error);
@@ -313,6 +423,10 @@ export default function FeedScreen() {
   };
 
   useEffect(() => {
+    fetchUserProfile();
+  }, []);
+
+  useEffect(() => {
     fetchMatches();
   }, [mode]); // Re-fetch when mode changes
 
@@ -320,6 +434,14 @@ export default function FeedScreen() {
     setRefreshing(true);
     fetchMatches(true); // Force refresh to bypass cache
   }, []);
+
+  const handleGoToFilters = () => {
+    router.push('/(tabs)/profile');
+  };
+
+  const handleGoToLibrary = () => {
+    router.push('/(tabs)/library');
+  };
 
   // Open profile in bottom sheet
   const openProfile = async (profile: MatchProfile, index: number) => {
@@ -523,7 +645,13 @@ export default function FeedScreen() {
 
         {/* Grid of profile tiles */}
         {matches.length === 0 ? (
-          <EmptyState mode={mode} onRefresh={handleRefresh} />
+          <EmptyState 
+            mode={mode} 
+            onRefresh={handleRefresh}
+            reason={emptyReason}
+            onGoToFilters={handleGoToFilters}
+            onGoToLibrary={handleGoToLibrary}
+          />
         ) : (
           <ScrollView
             contentContainerStyle={styles.gridContainer}
@@ -870,18 +998,52 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 40,
   },
+  emptyIconContainer: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: COLORS.bgCard,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
   emptyTitle: {
     fontSize: 22,
     fontWeight: 'bold',
     color: COLORS.text,
     marginTop: 16,
+    textAlign: 'center',
   },
   emptySubtitle: {
     fontSize: 14,
     color: COLORS.textSecondary,
     textAlign: 'center',
-    marginTop: 8,
-    lineHeight: 20,
+    marginTop: 12,
+    lineHeight: 22,
+    paddingHorizontal: 8,
+  },
+  emptyCTAButton: {
+    marginTop: 28,
+    paddingHorizontal: 28,
+    paddingVertical: 14,
+    borderRadius: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  emptyCTAButtonText: {
+    color: '#FFF',
+    fontWeight: '600',
+    fontSize: 16,
+  },
+  emptySecondaryButton: {
+    marginTop: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+  },
+  emptySecondaryButtonText: {
+    color: COLORS.textSecondary,
+    fontSize: 14,
   },
   refreshButton: {
     marginTop: 24,

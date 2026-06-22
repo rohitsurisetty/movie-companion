@@ -2652,6 +2652,13 @@ class MeetingStatusRequest(BaseModel):
     did_meet: bool
     was_same_person: Optional[bool] = None
 
+class MeetingReportRequest(BaseModel):
+    conversation_id: str
+    user_id: str
+    did_meet: bool
+    verification_result: Optional[str] = None  # 'yes', 'no', 'partially'
+    reported_at: str
+
 class IceBreakerRequest(BaseModel):
     user_id: str
     match_user_id: str
@@ -2659,6 +2666,39 @@ class IceBreakerRequest(BaseModel):
 class ReplySuggestionsRequest(BaseModel):
     user_id: str
     conversation_id: str
+
+
+@api_router.post("/chat/meeting-report")
+async def api_meeting_report(req: MeetingReportRequest):
+    """Record a meeting verification report"""
+    try:
+        report = {
+            "conversation_id": req.conversation_id,
+            "user_id": req.user_id,
+            "did_meet": req.did_meet,
+            "verification_result": req.verification_result,
+            "reported_at": req.reported_at,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+        
+        # Store in MongoDB
+        await db.meeting_reports.insert_one(report)
+        
+        # Update conversation with meeting status if they met
+        if req.did_meet:
+            await db.chat_conversations.update_one(
+                {"conversation_id": req.conversation_id},
+                {"$set": {
+                    "meeting_status": "reported",
+                    "verification_status": req.verification_result
+                }}
+            )
+        
+        logger.info(f"Meeting report saved for conversation {req.conversation_id}")
+        return {"success": True}
+    except Exception as e:
+        logger.error(f"Meeting report error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @api_router.get("/chat/conversations/{user_id}")
