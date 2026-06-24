@@ -11,9 +11,11 @@ import {
   StatusBar,
   NativeScrollEvent,
   NativeSyntheticEvent,
-  PanResponder,
   TextInput,
   ActivityIndicator,
+  Keyboard,
+  Platform,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -23,7 +25,6 @@ import { formatLocationForPrivacy } from '../utils/locationFormatter';
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const PHOTO_HEIGHT = SCREEN_HEIGHT * 0.5;
 const STICKY_HEADER_HEIGHT = 52;
-const SWIPE_THRESHOLD = 100;
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w185';
 
 // Format match level to display properly (e.g., "great match" -> "Great Match")
@@ -354,30 +355,44 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
 }) => {
   const insets = useSafeAreaInsets();
   const scrollY = useRef(new Animated.Value(0)).current;
-  const translateY = useRef(new Animated.Value(0)).current;
   const [showStickyHeader, setShowStickyHeader] = useState(false);
-  const [isAtTop, setIsAtTop] = useState(true);
   
   // Message input state - inline dialog
   const [showMessageDialog, setShowMessageDialog] = useState(false);
   const [messageText, setMessageText] = useState('');
   const [requestSent, setRequestSent] = useState(hasAlreadySentRequest);
 
+  // Keyboard handling - listeners to track keyboard state
+  useEffect(() => {
+    const keyboardWillShow = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      () => { /* Keyboard shown - KeyboardAvoidingView handles positioning */ }
+    );
+    const keyboardWillHide = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => { /* Keyboard hidden */ }
+    );
+
+    return () => {
+      keyboardWillShow.remove();
+      keyboardWillHide.remove();
+    };
+  }, []);
+
   // Reset state when profile changes
   useEffect(() => {
     scrollY.setValue(0);
-    translateY.setValue(0);
     setShowStickyHeader(false);
-    setIsAtTop(true);
     setShowMessageDialog(false);
     setMessageText('');
     setRequestSent(hasAlreadySentRequest);
-  }, [profile?.user_id, hasAlreadySentRequest]);
+  }, [profile?.user_id, hasAlreadySentRequest, scrollY]);
   
   // Handle sending message
   const handleSendMessage = async () => {
     if (!messageText.trim()) return;
     
+    Keyboard.dismiss();
     const success = await onSendMessage(messageText.trim());
     if (success) {
       setMessageText('');
@@ -386,43 +401,6 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
     }
   };
 
-  // Pan responder for swipe-down-to-dismiss
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder: (_, gestureState) => {
-        // Only activate if at top of scroll and swiping down
-        return isAtTop && gestureState.dy > 10 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx);
-      },
-      onPanResponderMove: (_, gestureState) => {
-        if (gestureState.dy > 0) {
-          translateY.setValue(gestureState.dy);
-        }
-      },
-      onPanResponderRelease: (_, gestureState) => {
-        if (gestureState.dy > SWIPE_THRESHOLD) {
-          // Dismiss
-          Animated.timing(translateY, {
-            toValue: SCREEN_HEIGHT,
-            duration: 200,
-            useNativeDriver: true,
-          }).start(() => {
-            onClose();
-            translateY.setValue(0);
-          });
-        } else {
-          // Snap back
-          Animated.spring(translateY, {
-            toValue: 0,
-            useNativeDriver: true,
-            tension: 100,
-            friction: 10,
-          }).start();
-        }
-      },
-    })
-  ).current;
-
   const handleScroll = Animated.event(
     [{ nativeEvent: { contentOffset: { y: scrollY } } }],
     {
@@ -430,7 +408,6 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
       listener: (event: NativeSyntheticEvent<NativeScrollEvent>) => {
         const y = event.nativeEvent.contentOffset.y;
         setShowStickyHeader(y > PHOTO_HEIGHT - STICKY_HEADER_HEIGHT - 60);
-        setIsAtTop(y <= 5);
       },
     }
   );
@@ -450,15 +427,11 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
   });
 
   return (
-    <Animated.View 
+    <View 
       style={[
         styles.container, 
-        { 
-          paddingTop: insets.top,
-          transform: [{ translateY }],
-        }
+        { paddingTop: insets.top }
       ]}
-      {...panResponder.panHandlers}
     >
       <StatusBar barStyle="light-content" />
 
@@ -658,21 +631,38 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
         </View>
       </Animated.ScrollView>
 
-      {/* Inline Message Dialog - Overlays on profile */}
+      {/* Inline Message Dialog - Overlays on profile with keyboard avoidance */}
       {showMessageDialog && (
-        <View style={styles.messageDialogOverlay}>
+        <KeyboardAvoidingView 
+          style={styles.messageDialogOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={0}
+        >
           <TouchableOpacity 
             style={styles.messageDialogBackdrop} 
             activeOpacity={1} 
-            onPress={() => setShowMessageDialog(false)} 
+            onPress={() => {
+              Keyboard.dismiss();
+              setShowMessageDialog(false);
+            }} 
           />
-          <View style={[styles.messageDialogContainer, { paddingBottom: insets.bottom + 16 }]}>
+          <Animated.View 
+            style={[
+              styles.messageDialogContainer, 
+              { 
+                paddingBottom: Math.max(insets.bottom + 16, 16),
+              }
+            ]}
+          >
             <View style={styles.messageDialogHeader}>
               <Text style={styles.messageDialogTitle}>Send a message to</Text>
               <Text style={styles.messageDialogName}>{profile.name}</Text>
               <TouchableOpacity 
                 style={styles.messageDialogClose} 
-                onPress={() => setShowMessageDialog(false)}
+                onPress={() => {
+                  Keyboard.dismiss();
+                  setShowMessageDialog(false);
+                }}
               >
                 <Ionicons name="close" size={24} color={COLORS.textMuted} />
               </TouchableOpacity>
@@ -686,6 +676,7 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
               multiline
               maxLength={500}
               autoFocus
+              blurOnSubmit={false}
             />
             <TouchableOpacity
               style={[
@@ -706,8 +697,8 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
                 </>
               )}
             </TouchableOpacity>
-          </View>
-        </View>
+          </Animated.View>
+        </KeyboardAvoidingView>
       )}
 
       {/* Fixed Bottom CTA */}
@@ -730,7 +721,7 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
           )}
         </View>
       )}
-    </Animated.View>
+    </View>
   );
 };
 
@@ -923,20 +914,13 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     zIndex: 200,
+    justifyContent: 'flex-end',
   },
   messageDialogBackdrop: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
   },
   messageDialogContainer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
     backgroundColor: COLORS.bgCard,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
