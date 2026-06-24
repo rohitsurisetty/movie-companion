@@ -24,6 +24,18 @@ const STICKY_HEADER_HEIGHT = 52;
 const SWIPE_THRESHOLD = 100;
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w185';
 
+// Format match level to display properly (e.g., "great match" -> "Great Match")
+const formatMatchLevel = (level: string): string => {
+  if (!level) return '';
+  // Remove duplicate "match" if present (e.g., "Great Match Match" -> "Great Match")
+  const cleanLevel = level.replace(/match\s*match/gi, 'Match');
+  // Capitalize first letter of each word
+  return cleanLevel
+    .split(' ')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ');
+};
+
 const COLORS = {
   primary: '#E50914',
   primaryDark: '#B5070F',
@@ -435,7 +447,7 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
         <View style={{ width: 40 }} />
       </View>
 
-      {/* Sticky Header (appears on scroll) */}
+      {/* Sticky Header (appears on scroll) - only name, no message button */}
       <Animated.View
         style={[
           styles.stickyHeader,
@@ -454,12 +466,8 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
           <Text style={styles.stickyName} numberOfLines={1}>{profile.name}, {profile.age}</Text>
           <Text style={styles.stickyDetails}>{shortLocation}</Text>
         </View>
-        <TouchableOpacity
-          style={[styles.stickyMessageBtn, { backgroundColor: accentColor }]}
-          onPress={onMessage}
-        >
-          <Ionicons name="chatbubble" size={16} color="#FFF" />
-        </TouchableOpacity>
+        {/* Removed message button - using fixed bottom CTA instead */}
+        <View style={{ width: 36 }} />
       </Animated.View>
 
       {/* Scrollable Content */}
@@ -503,7 +511,7 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
               <View style={styles.matchCardHeader}>
                 <Ionicons name="sparkles" size={16} color={COLORS.gold} />
                 <Text style={styles.matchCardTitle}>
-                  {profile.match_level.charAt(0).toUpperCase() + profile.match_level.slice(1)} Match
+                  {formatMatchLevel(profile.match_level)}
                 </Text>
               </View>
               {profile.explanation && (
