@@ -99,9 +99,11 @@ interface PremiumProfileViewProps {
 const PhotoCarousel = ({
   photos,
   name,
+  onPhotoTap,
 }: {
   photos: string[];
   name: string;
+  onPhotoTap?: (index: number) => void;
 }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const scrollViewRef = useRef<ScrollView>(null);
@@ -111,6 +113,31 @@ const PhotoCarousel = ({
     const index = Math.round(contentOffset / SCREEN_WIDTH);
     if (index !== currentIndex && index >= 0 && index < photos.length) {
       setCurrentIndex(index);
+    }
+  };
+
+  const goToPhoto = (index: number) => {
+    if (scrollViewRef.current && index >= 0 && index < photos.length) {
+      scrollViewRef.current.scrollTo({ x: index * SCREEN_WIDTH, animated: true });
+      setCurrentIndex(index);
+    }
+  };
+
+  // Tap to navigate photos - left half goes back, right half goes forward
+  const handlePhotoTap = (tapX: number) => {
+    if (photos.length <= 1) return;
+    
+    const halfWidth = SCREEN_WIDTH / 2;
+    if (tapX < halfWidth) {
+      // Tapped left - go to previous
+      if (currentIndex > 0) {
+        goToPhoto(currentIndex - 1);
+      }
+    } else {
+      // Tapped right - go to next
+      if (currentIndex < photos.length - 1) {
+        goToPhoto(currentIndex + 1);
+      }
     }
   };
 
@@ -141,11 +168,32 @@ const PhotoCarousel = ({
         decelerationRate="fast"
       >
         {photoList.map((photo, index) => (
-          <View key={index} style={carouselStyles.photoContainer}>
+          <TouchableOpacity 
+            key={index} 
+            style={carouselStyles.photoContainer}
+            activeOpacity={1}
+            onPress={(e) => handlePhotoTap(e.nativeEvent.locationX)}
+          >
             <Image source={{ uri: photo }} style={carouselStyles.photo} resizeMode="cover" />
-          </View>
+          </TouchableOpacity>
         ))}
       </ScrollView>
+
+      {/* Tap hint areas - visual feedback for navigation */}
+      {photoList.length > 1 && (
+        <View style={carouselStyles.tapHintContainer} pointerEvents="none">
+          {currentIndex > 0 && (
+            <View style={carouselStyles.tapHintLeft}>
+              <Ionicons name="chevron-back" size={24} color="rgba(255,255,255,0.5)" />
+            </View>
+          )}
+          {currentIndex < photoList.length - 1 && (
+            <View style={carouselStyles.tapHintRight}>
+              <Ionicons name="chevron-forward" size={24} color="rgba(255,255,255,0.5)" />
+            </View>
+          )}
+        </View>
+      )}
 
       {/* Photo Indicators - Top bar style */}
       {photoList.length > 1 && (
@@ -226,6 +274,33 @@ const carouselStyles = StyleSheet.create({
     left: 0,
     right: 0,
     height: 100,
+  },
+  tapHintContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+  },
+  tapHintLeft: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  tapHintRight: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });
 
@@ -426,6 +501,13 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
     extrapolate: 'clamp',
   });
 
+  // Floating header opacity (inverse of sticky)
+  const floatingHeaderOpacity = scrollY.interpolate({
+    inputRange: [PHOTO_HEIGHT - 120, PHOTO_HEIGHT - 60],
+    outputRange: [1, 0],
+    extrapolate: 'clamp',
+  });
+
   return (
     <View 
       style={[
@@ -435,14 +517,20 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
     >
       <StatusBar barStyle="light-content" />
 
-      {/* Floating Header (always visible on photos) */}
-      <View style={[styles.floatingHeader, { top: insets.top + 12 }]}>
+      {/* Floating Header (visible on photos, fades out when scrolling) */}
+      <Animated.View 
+        style={[
+          styles.floatingHeader, 
+          { top: insets.top + 12, opacity: floatingHeaderOpacity }
+        ]}
+        pointerEvents={showStickyHeader ? 'none' : 'auto'}
+      >
         <TouchableOpacity style={styles.headerButton} onPress={onClose}>
           <Ionicons name="chevron-down" size={26} color="#FFF" />
         </TouchableOpacity>
-        {/* Empty view for spacing - no three dots since no actions */}
+        {/* Empty view for spacing */}
         <View style={{ width: 40 }} />
-      </View>
+      </Animated.View>
 
       {/* Sticky Header (appears on scroll) - only name, no message button */}
       <Animated.View

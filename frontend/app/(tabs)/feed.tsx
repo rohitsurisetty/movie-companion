@@ -498,7 +498,6 @@ export default function FeedScreen() {
   };
 
   const [sendingMessage, setSendingMessage] = useState(false);
-  const [showRequestSentToast, setShowRequestSentToast] = useState(false);
   const [sentRequestUserIds, setSentRequestUserIds] = useState<Set<string>>(new Set());
 
   // Check if we've already sent a request to this user
@@ -528,16 +527,12 @@ export default function FeedScreen() {
         // Track that we sent a request to this user
         setSentRequestUserIds(prev => new Set([...prev, selectedProfile.user_id]));
         
-        // Show toast feedback
-        setShowRequestSentToast(true);
-        setTimeout(() => setShowRequestSentToast(false), 3000);
+        // Close the profile modal and navigate to chat
+        closeProfile();
         
-        // If the conversation was already active, navigate to chat
-        if (data.conversation_status === 'active') {
-          closeProfile();
-          router.push('/(tabs)/chat');
-        }
-        // For pending requests, just show toast - stay on profile
+        // Navigate to chat - the message will be visible there
+        // (whether as a pending request for them to accept, or as an active chat)
+        router.push('/(tabs)/chat');
         
         return true;
       }
@@ -704,19 +699,6 @@ export default function FeedScreen() {
             />
           )}
         </Modal>
-
-        {/* Request Sent Toast */}
-        {showRequestSentToast && (
-          <View style={styles.toastContainer}>
-            <View style={styles.toast}>
-              <Ionicons name="checkmark-circle" size={24} color={COLORS.success} />
-              <View style={styles.toastTextContainer}>
-                <Text style={styles.toastTitle}>Message Request Sent!</Text>
-                <Text style={styles.toastSubtitle}>{"They'll see it in their requests"}</Text>
-              </View>
-            </View>
-          </View>
-        )}
       </SafeAreaView>
     </GestureHandlerRootView>
   );
