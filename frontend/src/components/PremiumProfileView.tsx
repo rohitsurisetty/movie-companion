@@ -12,6 +12,8 @@ import {
   NativeScrollEvent,
   NativeSyntheticEvent,
   PanResponder,
+  TextInput,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -87,8 +89,9 @@ interface PremiumProfileViewProps {
   photos: string[];
   mode: 'date' | 'buddy';
   onClose: () => void;
-  onMessage: () => void;
+  onSendMessage: (message: string) => Promise<boolean>;
   hasAlreadySentRequest?: boolean;
+  isSendingMessage?: boolean;
 }
 
 // ============ PHOTO CAROUSEL ============
@@ -345,14 +348,20 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
   photos,
   mode,
   onClose,
-  onMessage,
+  onSendMessage,
   hasAlreadySentRequest = false,
+  isSendingMessage = false,
 }) => {
   const insets = useSafeAreaInsets();
   const scrollY = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(0)).current;
   const [showStickyHeader, setShowStickyHeader] = useState(false);
   const [isAtTop, setIsAtTop] = useState(true);
+  
+  // Message input state - inline dialog
+  const [showMessageDialog, setShowMessageDialog] = useState(false);
+  const [messageText, setMessageText] = useState('');
+  const [requestSent, setRequestSent] = useState(hasAlreadySentRequest);
 
   // Reset state when profile changes
   useEffect(() => {
@@ -360,7 +369,22 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
     translateY.setValue(0);
     setShowStickyHeader(false);
     setIsAtTop(true);
-  }, [profile?.user_id]);
+    setShowMessageDialog(false);
+    setMessageText('');
+    setRequestSent(hasAlreadySentRequest);
+  }, [profile?.user_id, hasAlreadySentRequest]);
+  
+  // Handle sending message
+  const handleSendMessage = async () => {
+    if (!messageText.trim()) return;
+    
+    const success = await onSendMessage(messageText.trim());
+    if (success) {
+      setMessageText('');
+      setShowMessageDialog(false);
+      setRequestSent(true);
+    }
+  };
 
   // Pan responder for swipe-down-to-dismiss
   const panResponder = useRef(
@@ -634,24 +658,78 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
         </View>
       </Animated.ScrollView>
 
-      {/* Fixed Bottom CTA */}
-      <View style={[styles.bottomCTA, { paddingBottom: insets.bottom + 12 }]}>
-        {hasAlreadySentRequest ? (
-          <View style={[styles.messageBtn, styles.messageBtnSent]}>
-            <Ionicons name="checkmark-circle" size={20} color={COLORS.success} />
-            <Text style={[styles.messageBtnText, { color: COLORS.success }]}>Request Sent</Text>
+      {/* Inline Message Dialog - Overlays on profile */}
+      {showMessageDialog && (
+        <View style={styles.messageDialogOverlay}>
+          <TouchableOpacity 
+            style={styles.messageDialogBackdrop} 
+            activeOpacity={1} 
+            onPress={() => setShowMessageDialog(false)} 
+          />
+          <View style={[styles.messageDialogContainer, { paddingBottom: insets.bottom + 16 }]}>
+            <View style={styles.messageDialogHeader}>
+              <Text style={styles.messageDialogTitle}>Send a message to</Text>
+              <Text style={styles.messageDialogName}>{profile.name}</Text>
+              <TouchableOpacity 
+                style={styles.messageDialogClose} 
+                onPress={() => setShowMessageDialog(false)}
+              >
+                <Ionicons name="close" size={24} color={COLORS.textMuted} />
+              </TouchableOpacity>
+            </View>
+            <TextInput
+              style={styles.messageDialogInput}
+              placeholder="Write something nice..."
+              placeholderTextColor={COLORS.textMuted}
+              value={messageText}
+              onChangeText={setMessageText}
+              multiline
+              maxLength={500}
+              autoFocus
+            />
+            <TouchableOpacity
+              style={[
+                styles.messageDialogSendBtn, 
+                { backgroundColor: accentColor },
+                (!messageText.trim() || isSendingMessage) && styles.messageDialogSendBtnDisabled
+              ]}
+              onPress={handleSendMessage}
+              disabled={!messageText.trim() || isSendingMessage}
+              activeOpacity={0.8}
+            >
+              {isSendingMessage ? (
+                <ActivityIndicator size="small" color="#FFF" />
+              ) : (
+                <>
+                  <Ionicons name="send" size={18} color="#FFF" />
+                  <Text style={styles.messageDialogSendText}>Send Request</Text>
+                </>
+              )}
+            </TouchableOpacity>
           </View>
-        ) : (
-          <TouchableOpacity
-            style={[styles.messageBtn, { backgroundColor: accentColor }]}
-            onPress={onMessage}
-            activeOpacity={0.9}
-          >
-            <Ionicons name="chatbubble" size={20} color="#FFF" />
-            <Text style={styles.messageBtnText}>Message</Text>
-          </TouchableOpacity>
-        )}
-      </View>
+        </View>
+      )}
+
+      {/* Fixed Bottom CTA */}
+      {!showMessageDialog && (
+        <View style={[styles.bottomCTA, { paddingBottom: insets.bottom + 12 }]}>
+          {requestSent ? (
+            <View style={[styles.messageBtn, styles.messageBtnSent]}>
+              <Ionicons name="checkmark-circle" size={20} color={COLORS.success} />
+              <Text style={[styles.messageBtnText, { color: COLORS.success }]}>Request Sent</Text>
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={[styles.messageBtn, { backgroundColor: accentColor }]}
+              onPress={() => setShowMessageDialog(true)}
+              activeOpacity={0.9}
+            >
+              <Ionicons name="chatbubble" size={20} color="#FFF" />
+              <Text style={styles.messageBtnText}>Message</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
     </Animated.View>
   );
 };
@@ -833,6 +911,81 @@ const styles = StyleSheet.create({
     borderColor: COLORS.success,
   },
   messageBtnText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFF',
+  },
+  // Message Dialog Styles
+  messageDialogOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 200,
+  },
+  messageDialogBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+  },
+  messageDialogContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: COLORS.bgCard,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 20,
+  },
+  messageDialogHeader: {
+    marginBottom: 16,
+    alignItems: 'center',
+  },
+  messageDialogTitle: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    marginBottom: 4,
+  },
+  messageDialogName: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: COLORS.text,
+  },
+  messageDialogClose: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    padding: 4,
+  },
+  messageDialogInput: {
+    backgroundColor: COLORS.bgSection,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 14,
+    fontSize: 16,
+    color: COLORS.text,
+    minHeight: 100,
+    textAlignVertical: 'top',
+    marginBottom: 16,
+  },
+  messageDialogSendBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 52,
+    borderRadius: 26,
+    gap: 8,
+  },
+  messageDialogSendBtnDisabled: {
+    opacity: 0.5,
+  },
+  messageDialogSendText: {
     fontSize: 16,
     fontWeight: '600',
     color: '#FFF',

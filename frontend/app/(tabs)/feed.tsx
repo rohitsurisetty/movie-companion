@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import {
   View, Text, StyleSheet, TouchableOpacity, Image, ScrollView,
   Dimensions, ActivityIndicator, RefreshControl, FlatList, Pressable,
-  Modal, TextInput, KeyboardAvoidingView, Platform, Keyboard,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -497,8 +497,6 @@ export default function FeedScreen() {
     setSelectedProfile(null);
   };
 
-  const [showMessageInput, setShowMessageInput] = useState(false);
-  const [messageText, setMessageText] = useState('');
   const [sendingMessage, setSendingMessage] = useState(false);
   const [showRequestSentToast, setShowRequestSentToast] = useState(false);
   const [sentRequestUserIds, setSentRequestUserIds] = useState<Set<string>>(new Set());
@@ -506,13 +504,9 @@ export default function FeedScreen() {
   // Check if we've already sent a request to this user
   const hasAlreadySentRequest = (userId: string) => sentRequestUserIds.has(userId);
 
-  const handleMessage = () => {
-    // Show message input modal
-    setShowMessageInput(true);
-  };
-
-  const sendFirstMessage = async () => {
-    if (!messageText.trim() || !selectedProfile) return;
+  // Handler for sending message from within PremiumProfileView
+  const handleSendMessage = async (message: string): Promise<boolean> => {
+    if (!message.trim() || !selectedProfile) return false;
     
     setSendingMessage(true);
     try {
@@ -523,15 +517,13 @@ export default function FeedScreen() {
         body: JSON.stringify({
           sender_id: userId,
           receiver_id: selectedProfile.user_id,
-          content: messageText.trim(),
+          content: message.trim(),
           message_type: 'text',
         }),
       });
       
       if (response.ok) {
         const data = await response.json();
-        setMessageText('');
-        setShowMessageInput(false);
         
         // Track that we sent a request to this user
         setSentRequestUserIds(prev => new Set([...prev, selectedProfile.user_id]));
@@ -540,17 +532,19 @@ export default function FeedScreen() {
         setShowRequestSentToast(true);
         setTimeout(() => setShowRequestSentToast(false), 3000);
         
-        closeProfile();
-        
-        // If this was a new request (pending), don't navigate to chat yet
         // If the conversation was already active, navigate to chat
         if (data.conversation_status === 'active') {
+          closeProfile();
           router.push('/(tabs)/chat');
         }
-        // For pending requests, just show the toast - don't navigate
+        // For pending requests, just show toast - stay on profile
+        
+        return true;
       }
+      return false;
     } catch (error) {
       console.error('Error sending message:', error);
+      return false;
     } finally {
       setSendingMessage(false);
     }
@@ -704,49 +698,11 @@ export default function FeedScreen() {
               photos={selectedProfilePhotos}
               mode={mode}
               onClose={closeProfile}
-              onMessage={handleMessage}
+              onSendMessage={handleSendMessage}
               hasAlreadySentRequest={hasAlreadySentRequest(selectedProfile.user_id)}
+              isSendingMessage={sendingMessage}
             />
           )}
-        </Modal>
-
-        {/* Message Input Modal */}
-        <Modal visible={showMessageInput} transparent animationType="slide" onRequestClose={() => setShowMessageInput(false)}>
-          <KeyboardAvoidingView style={styles.messageModalContainer} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-            <TouchableOpacity style={styles.messageModalOverlay} activeOpacity={1} onPress={() => { Keyboard.dismiss(); setShowMessageInput(false); }} />
-            <View style={styles.messageModalContent}>
-              <View style={styles.messageModalHeader}>
-                <Text style={styles.messageModalTitle}>Send Message to {selectedProfile?.name}</Text>
-                <TouchableOpacity onPress={() => setShowMessageInput(false)}>
-                  <Ionicons name="close" size={24} color={COLORS.text} />
-                </TouchableOpacity>
-              </View>
-              <TextInput
-                style={styles.messageModalInput}
-                placeholder="Type your message..."
-                placeholderTextColor={COLORS.textMuted}
-                value={messageText}
-                onChangeText={setMessageText}
-                multiline
-                maxLength={500}
-                autoFocus
-              />
-              <TouchableOpacity
-                style={[styles.messageModalSendBtn, !messageText.trim() && styles.messageModalSendBtnDisabled]}
-                onPress={sendFirstMessage}
-                disabled={!messageText.trim() || sendingMessage}
-              >
-                {sendingMessage ? (
-                  <ActivityIndicator size="small" color="#FFF" />
-                ) : (
-                  <>
-                    <Ionicons name="send" size={18} color="#FFF" />
-                    <Text style={styles.messageModalSendBtnText}>Send Request</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            </View>
-          </KeyboardAvoidingView>
         </Modal>
 
         {/* Request Sent Toast */}
