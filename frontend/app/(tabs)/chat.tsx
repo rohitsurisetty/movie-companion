@@ -834,27 +834,35 @@ const ConversationItem = ({
   conversation, 
   onPress 
 }: { 
-  conversation: Conversation; 
+  conversation: Conversation & { is_pending?: boolean }; 
   onPress: () => void;
 }) => {
   const user = conversation.other_user;
   const hasUnread = conversation.unread > 0;
+  const isPending = conversation.is_pending || conversation.status === 'pending';
   
   return (
     <TouchableOpacity style={styles.conversationItem} onPress={onPress} activeOpacity={0.7}>
       <View style={styles.conversationAvatar}>
         <Avatar name={user?.name || 'U'} size={56} imageUrl={user?.avatar} />
-        <View style={styles.onlineDot} />
+        {!isPending && <View style={styles.onlineDot} />}
       </View>
       <View style={styles.conversationContent}>
         <View style={styles.conversationHeader}>
-          <Text style={[styles.conversationName, hasUnread && styles.unreadName]} numberOfLines={1}>
-            {user?.name || 'Unknown'}
-          </Text>
+          <View style={styles.conversationNameRow}>
+            <Text style={[styles.conversationName, hasUnread && styles.unreadName]} numberOfLines={1}>
+              {user?.name || 'Unknown'}
+            </Text>
+            {isPending && (
+              <View style={styles.pendingBadge}>
+                <Text style={styles.pendingBadgeText}>Pending</Text>
+              </View>
+            )}
+          </View>
           <Text style={styles.conversationTime}>{formatTime(conversation.last_message_at)}</Text>
         </View>
-        <Text style={[styles.conversationPreview, hasUnread && styles.unreadPreview]} numberOfLines={1}>
-          {conversation.last_message || 'Start a conversation'}
+        <Text style={[styles.conversationPreview, hasUnread && styles.unreadPreview, isPending && styles.pendingPreview]} numberOfLines={1}>
+          {isPending ? `You: ${conversation.last_message || 'Message sent'}` : (conversation.last_message || 'Start a conversation')}
         </Text>
       </View>
       {hasUnread ? (
@@ -1513,6 +1521,10 @@ const styles = StyleSheet.create({
   unreadPreview: { color: COLORS.text, fontWeight: '500' },
   unreadBadge: { backgroundColor: COLORS.primary, borderRadius: 12, paddingHorizontal: 8, paddingVertical: 4, minWidth: 24, alignItems: 'center' },
   unreadBadgeText: { color: '#FFF', fontSize: 12, fontWeight: '600' },
+  conversationNameRow: { flexDirection: 'row', alignItems: 'center', flex: 1, gap: 8 },
+  pendingBadge: { backgroundColor: COLORS.warning, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
+  pendingBadgeText: { color: '#000', fontSize: 10, fontWeight: '600' },
+  pendingPreview: { fontStyle: 'italic', color: COLORS.textMuted },
   
   // Request Card
   requestCard: { backgroundColor: COLORS.bgCard, borderRadius: 16, padding: 16, marginVertical: 8 },

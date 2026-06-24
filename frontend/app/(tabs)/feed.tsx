@@ -655,29 +655,31 @@ export default function FeedScreen() {
         {/* Premium Profile View Modal */}
         <Modal 
           visible={showProfileModal} 
-          animationType="slide" 
+          animationType="fade" 
           onRequestClose={closeProfile}
           statusBarTranslucent
+          transparent={false}
         >
-          {selectedProfile && (
-            <PremiumProfileView
-              visible={showProfileModal}
-              profile={{
-                user_id: selectedProfile.user_id,
-                name: selectedProfile.name,
-                age: selectedProfile.age,
-                gender: selectedProfile.gender || '',
-                location: selectedProfile.location || '',
-                bio: selectedProfile.bio,
-                genres: selectedProfile.genres,
-                topMovies: selectedProfile.topMovies,
-                filmLanguages: selectedProfile.filmLanguages,
-                languagesSpoken: selectedProfile.languagesSpoken,
-                movieFrequency: selectedProfile.movieFrequency,
-                ottTheatre: selectedProfile.ottTheatre,
-                match_level: selectedProfile.match_level,
-                explanation: selectedProfile.explanation,
-                shared_interests: selectedProfile.shared_interests,
+          <View style={{ flex: 1, backgroundColor: COLORS.bg }}>
+            {selectedProfile && (
+              <PremiumProfileView
+                visible={showProfileModal}
+                profile={{
+                  user_id: selectedProfile.user_id,
+                  name: selectedProfile.name,
+                  age: selectedProfile.age,
+                  gender: selectedProfile.gender || '',
+                  location: selectedProfile.location || '',
+                  bio: selectedProfile.bio,
+                  genres: selectedProfile.genres,
+                  topMovies: selectedProfile.topMovies,
+                  filmLanguages: selectedProfile.filmLanguages,
+                  languagesSpoken: selectedProfile.languagesSpoken,
+                  movieFrequency: selectedProfile.movieFrequency,
+                  ottTheatre: selectedProfile.ottTheatre,
+                  match_level: selectedProfile.match_level,
+                  explanation: selectedProfile.explanation,
+                  shared_interests: selectedProfile.shared_interests,
                 compatibility_score: selectedProfile.compatibility_score,
                 relationshipIntent: selectedProfile.relationshipIntent,
                 zodiac: selectedProfile.zodiac,
@@ -698,6 +700,7 @@ export default function FeedScreen() {
               isSendingMessage={sendingMessage}
             />
           )}
+          </View>
         </Modal>
       </SafeAreaView>
     </GestureHandlerRootView>

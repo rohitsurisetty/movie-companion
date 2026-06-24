@@ -53,9 +53,9 @@ MOCK_USERS = [
         "filmLanguages": ["Hindi", "English"],
         "languagesSpoken": ["Hindi", "English", "Marathi"],
         "topMovies": [
-            {"title": "Dil Chahta Hai", "tmdb_id": 19666},
-            {"title": "The Notebook", "tmdb_id": 11036},
-            {"title": "Andhadhun", "tmdb_id": 534780}
+            {"title": "Dil Chahta Hai", "tmdb_id": 19666, "poster_path": "/vQSVx0Vz4dBoHXiJnZuYPLSidmL.jpg"},
+            {"title": "The Notebook", "tmdb_id": 11036, "poster_path": "/rNzQyW4f8B8cQeg7Dgj3n6eT5k9.jpg"},
+            {"title": "Andhadhun", "tmdb_id": 534780, "poster_path": "/epA93IshB3S4y5KdzRzeBsHHXvS.jpg"}
         ],
         "movieFrequency": "Weekly",
         "ottTheatre": "Both",
@@ -88,9 +88,9 @@ MOCK_USERS = [
         "filmLanguages": ["English", "Hindi"],
         "languagesSpoken": ["Hindi", "English", "Punjabi"],
         "topMovies": [
-            {"title": "Inception", "tmdb_id": 27205},
-            {"title": "Interstellar", "tmdb_id": 157336},
-            {"title": "The Dark Knight", "tmdb_id": 155}
+            {"title": "Inception", "tmdb_id": 27205, "poster_path": "/oYuLEt3zVCKq57qu2F8dT7NIa6f.jpg"},
+            {"title": "Interstellar", "tmdb_id": 157336, "poster_path": "/gEU2QniE6E77NI6lCU6MxlNBvIx.jpg"},
+            {"title": "The Dark Knight", "tmdb_id": 155, "poster_path": "/qJ2tW6WMUDux911r6m7haRef0WH.jpg"}
         ],
         "movieFrequency": "Multiple times a week",
         "ottTheatre": "OTT",
@@ -163,7 +163,7 @@ MOCK_USERS = [
         "filmLanguages": ["Hindi", "English"],
         "languagesSpoken": ["Hindi", "English"],
         "topMovies": [
-            {"title": "Dilwale Dulhania Le Jayenge", "tmdb_id": 19404},
+            {"title": "Dilwale Dulhania Le Jayenge", "tmdb_id": 19404, "poster_path": "/2CAL2433ZeIihfX1Hb2139CX0pW.jpg"},
             {"title": "Jab We Met", "tmdb_id": 20453},
             {"title": "Yeh Jawaani Hai Deewani", "tmdb_id": 228161}
         ],
@@ -203,7 +203,7 @@ MOCK_USERS = [
         "filmLanguages": ["Hindi", "English"],
         "languagesSpoken": ["Hindi", "English", "Marathi"],
         "topMovies": [
-            {"title": "Tumbbad", "tmdb_id": 534734},
+            {"title": "Tumbbad", "tmdb_id": 534734, "poster_path": "/bxrbmhJVW0G5ZPfBq3NN3SXOoRQ.jpg"},
             {"title": "Get Out", "tmdb_id": 419430},
             {"title": "Hereditary", "tmdb_id": 493559}
         ],
@@ -279,8 +279,8 @@ MOCK_USERS = [
         "languagesSpoken": ["Telugu", "Hindi", "English"],
         "topMovies": [
             {"title": "Arjun Reddy", "tmdb_id": 453500},
-            {"title": "Parasite", "tmdb_id": 496243},
-            {"title": "Zindagi Na Milegi Dobara", "tmdb_id": 76788}
+            {"title": "Parasite", "tmdb_id": 496243, "poster_path": "/7IiTTgloJzvGI1TAYymCfbfl3vT.jpg"},
+            {"title": "Zindagi Na Milegi Dobara", "tmdb_id": 76788, "poster_path": "/nIYh4DWZX7FLJGkTfON7VR70U9c.jpg"}
         ],
         "movieFrequency": "Multiple times a week",
         "ottTheatre": "OTT",
@@ -498,7 +498,7 @@ MOCK_USERS = [
         "filmLanguages": ["Hindi", "English"],
         "languagesSpoken": ["Hindi", "English"],
         "topMovies": [
-            {"title": "Avengers: Endgame", "tmdb_id": 299534},
+            {"title": "Avengers: Endgame", "tmdb_id": 299534, "poster_path": "/or06FN3Dka5tukK1e9sl16pB3iy.jpg"},
             {"title": "Top Gun: Maverick", "tmdb_id": 361743},
             {"title": "RRR", "tmdb_id": 579974}
         ],
@@ -608,7 +608,7 @@ MOCK_USERS = [
         "languagesSpoken": ["Hindi", "English"],
         "topMovies": [
             {"title": "Drive to Survive", "tmdb_id": 87082},
-            {"title": "Dangal", "tmdb_id": 360814},
+            {"title": "Dangal", "tmdb_id": 360814, "poster_path": "/6rGJbtDPyYdFo0FTtGiYTyVc1K3.jpg"},
             {"title": "The Last Dance", "tmdb_id": 99424}
         ],
         "movieFrequency": "Weekly",
@@ -647,7 +647,7 @@ MOCK_USERS = [
         "languagesSpoken": ["Tamil", "Malayalam", "Hindi", "English"],
         "topMovies": [
             {"title": "Roja", "tmdb_id": 144233},
-            {"title": "La La Land", "tmdb_id": 313369},
+            {"title": "La La Land", "tmdb_id": 313369, "poster_path": "/uDO8zWDhfWwoFdKS4fzkUJt0Rf0.jpg"},
             {"title": "Rockstar", "tmdb_id": 87827}
         ],
         "movieFrequency": "Weekly",
@@ -1475,8 +1475,8 @@ async def get_matches_for_user(
             "filmLanguages": ["Hindi", "English"],
             "languagesSpoken": ["Hindi", "English"],
             "topMovies": [
-                {"title": "Inception", "tmdb_id": 27205},
-                {"title": "Interstellar", "tmdb_id": 157336}
+                {"title": "Inception", "tmdb_id": 27205, "poster_path": "/oYuLEt3zVCKq57qu2F8dT7NIa6f.jpg"},
+                {"title": "Interstellar", "tmdb_id": 157336, "poster_path": "/gEU2QniE6E77NI6lCU6MxlNBvIx.jpg"}
             ],
             "movieFrequency": "Weekly",
             "ottTheatre": "Both",

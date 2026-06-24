@@ -327,10 +327,20 @@ const GenreChip = ({ genre, highlight }: { genre: string; highlight?: boolean })
 );
 
 // Movie poster in horizontal scroll
-const MoviePoster = ({ movie }: { movie: { title: string; poster_path?: string; tmdb_id?: number } }) => {
-  const posterUrl = movie.poster_path 
-    ? (movie.poster_path.startsWith('http') ? movie.poster_path : `${TMDB_IMAGE_BASE}${movie.poster_path}`)
-    : null;
+const MoviePoster = ({ movie }: { movie: { title: string; poster_path?: string; tmdb_id?: number; poster?: string } }) => {
+  // Try multiple sources for the poster
+  let posterUrl = null;
+  
+  if (movie.poster_path) {
+    posterUrl = movie.poster_path.startsWith('http') 
+      ? movie.poster_path 
+      : `${TMDB_IMAGE_BASE}${movie.poster_path}`;
+  } else if (movie.poster) {
+    posterUrl = movie.poster.startsWith('http') 
+      ? movie.poster 
+      : `${TMDB_IMAGE_BASE}${movie.poster}`;
+  }
+  // Note: tmdb_id alone cannot generate a poster URL - we need the actual poster_path from TMDB API
 
   return (
     <View style={sectionStyles.moviePosterContainer}>
@@ -341,7 +351,7 @@ const MoviePoster = ({ movie }: { movie: { title: string; poster_path?: string; 
           <Ionicons name="film" size={24} color={COLORS.textMuted} />
         </View>
       )}
-      <Text style={sectionStyles.moviePosterTitle} numberOfLines={2}>{movie.title}</Text>
+      <Text style={sectionStyles.moviePosterTitle} numberOfLines={2}>{movie.title || 'Unknown'}</Text>
     </View>
   );
 };
