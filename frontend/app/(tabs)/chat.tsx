@@ -859,8 +859,8 @@ const UnmatchModal = ({
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
-      <View style={styles.unmatchModalOverlay}>
-        <View style={[styles.unmatchModalContainer, { paddingBottom: insets.bottom + 16 }]}>
+      <Pressable style={styles.unmatchModalOverlay} onPress={handleClose}>
+        <Pressable style={[styles.unmatchModalContainer, { paddingBottom: insets.bottom + 16 }]} onPress={(e) => e.stopPropagation()}>
           {/* Header */}
           <View style={styles.unmatchModalHeader}>
             <TouchableOpacity onPress={handleClose} style={styles.unmatchModalClose}>
@@ -939,8 +939,8 @@ const UnmatchModal = ({
               </TouchableOpacity>
             </>
           )}
-        </View>
-      </View>
+        </Pressable>
+      </Pressable>
     </Modal>
   );
 };
@@ -995,8 +995,8 @@ const ReportModal = ({
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
-      <View style={styles.reportModalOverlay}>
-        <View style={[styles.reportModalContainer, { paddingBottom: insets.bottom + 16 }]}>
+      <Pressable style={styles.reportModalOverlay} onPress={handleClose}>
+        <Pressable style={[styles.reportModalContainer, { paddingBottom: insets.bottom + 16 }]} onPress={(e) => e.stopPropagation()}>
           {/* Header */}
           <View style={styles.reportModalHeader}>
             <TouchableOpacity onPress={handleClose} style={styles.reportModalClose}>
@@ -1128,8 +1128,8 @@ const ReportModal = ({
               </TouchableOpacity>
             </>
           )}
-        </View>
-      </View>
+        </Pressable>
+      </Pressable>
     </Modal>
   );
 };
@@ -1434,13 +1434,48 @@ const GiftedChatScreen = ({
     />
   );
 
-  // Custom input toolbar
+  // Custom input toolbar with media icons
   const renderInputToolbar = (props: any) => (
-    <InputToolbar
-      {...props}
-      containerStyle={styles.inputToolbar}
-      primaryStyle={styles.inputPrimary}
-    />
+    <View style={styles.customInputToolbar}>
+      {/* Left side - Camera/Media button */}
+      <TouchableOpacity 
+        style={styles.mediaButton}
+        onPress={() => showComingSoonModal('Photo & Media')}
+      >
+        <Ionicons name="camera" size={24} color={COLORS.primary} />
+      </TouchableOpacity>
+      
+      {/* Center - Text Input */}
+      <View style={styles.inputContainer}>
+        <InputToolbar
+          {...props}
+          containerStyle={styles.inputToolbarInner}
+          primaryStyle={styles.inputPrimaryInner}
+        />
+      </View>
+      
+      {/* Right side - GIF, Voice, Video icons */}
+      <View style={styles.rightMediaButtons}>
+        <TouchableOpacity 
+          style={styles.mediaIconBtn}
+          onPress={() => showComingSoonModal('GIFs')}
+        >
+          <Text style={styles.gifText}>GIF</Text>
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={styles.mediaIconBtn}
+          onPress={() => showComingSoonModal('Voice Notes')}
+        >
+          <Ionicons name="mic" size={22} color={COLORS.textSecondary} />
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={styles.mediaIconBtn}
+          onPress={() => showComingSoonModal('Video Messages')}
+        >
+          <Ionicons name="videocam" size={22} color={COLORS.textSecondary} />
+        </TouchableOpacity>
+      </View>
+    </View>
   );
 
   // Custom composer
@@ -1457,7 +1492,7 @@ const GiftedChatScreen = ({
   const renderSend = (props: any) => (
     <Send {...props} containerStyle={styles.sendContainer}>
       <View style={styles.sendButton}>
-        <Ionicons name="send" size={20} color="#FFF" />
+        <Ionicons name="send" size={18} color="#FFF" />
       </View>
     </Send>
   );
@@ -1916,12 +1951,20 @@ const styles = StyleSheet.create({
   // Messages
   messagesContainer: { backgroundColor: COLORS.bg, paddingBottom: 10 },
   
-  // Input
+  // Input - Redesigned with media icons
   inputToolbar: { backgroundColor: COLORS.bg, borderTopWidth: 1, borderTopColor: COLORS.border, paddingHorizontal: 8, paddingVertical: 8 },
   inputPrimary: { alignItems: 'center' },
-  composerInput: { backgroundColor: COLORS.bgInput, borderRadius: 20, paddingHorizontal: 16, paddingTop: 10, paddingBottom: 10, marginRight: 8, color: COLORS.text, fontSize: 16, maxHeight: 100 },
-  sendContainer: { justifyContent: 'center', alignItems: 'center', marginRight: 4 },
-  sendButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: COLORS.primary, justifyContent: 'center', alignItems: 'center' },
+  customInputToolbar: { flexDirection: 'row', alignItems: 'flex-end', backgroundColor: COLORS.bg, borderTopWidth: 1, borderTopColor: COLORS.border, paddingHorizontal: 8, paddingVertical: 8, gap: 8 },
+  mediaButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(229,9,20,0.15)', justifyContent: 'center', alignItems: 'center', marginBottom: 2 },
+  inputContainer: { flex: 1 },
+  inputToolbarInner: { backgroundColor: 'transparent', borderTopWidth: 0, padding: 0, margin: 0 },
+  inputPrimaryInner: { alignItems: 'center' },
+  rightMediaButtons: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 6 },
+  mediaIconBtn: { padding: 8 },
+  gifText: { fontSize: 12, fontWeight: 'bold', color: COLORS.textSecondary, backgroundColor: COLORS.bgInput, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, overflow: 'hidden' },
+  composerInput: { backgroundColor: COLORS.bgInput, borderRadius: 20, paddingHorizontal: 16, paddingTop: 10, paddingBottom: 10, marginRight: 0, color: COLORS.text, fontSize: 16, maxHeight: 100 },
+  sendContainer: { justifyContent: 'center', alignItems: 'center', marginRight: 0, marginLeft: 4 },
+  sendButton: { width: 36, height: 36, borderRadius: 18, backgroundColor: COLORS.primary, justifyContent: 'center', alignItems: 'center' },
   
   // Menu
   menuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
@@ -2098,38 +2141,38 @@ const styles = StyleSheet.create({
   unmatchBackBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 16, gap: 6 },
   unmatchBackBtnText: { fontSize: 14, color: COLORS.textMuted },
 
-  // Professional Report Modal (Bumble-inspired)
-  reportModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  reportModalContainer: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, maxHeight: '90%' },
+  // Professional Report Modal - Dark Theme
+  reportModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
+  reportModalContainer: { backgroundColor: COLORS.bgCard, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, maxHeight: '90%' },
   reportModalHeader: { flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 8 },
   reportModalClose: { padding: 8 },
-  reportModalTitle: { fontSize: 24, fontWeight: 'bold', color: '#1A1A1A', textAlign: 'center' },
-  reportModalSubtitle: { fontSize: 14, color: '#666666', textAlign: 'center', marginTop: 8, marginBottom: 20, lineHeight: 20, paddingHorizontal: 16 },
-  reportModalIntroText: { fontSize: 15, color: '#666666', textAlign: 'center', marginTop: 12, marginBottom: 24, lineHeight: 22, paddingHorizontal: 16 },
+  reportModalTitle: { fontSize: 24, fontWeight: 'bold', color: COLORS.text, textAlign: 'center' },
+  reportModalSubtitle: { fontSize: 14, color: COLORS.textSecondary, textAlign: 'center', marginTop: 8, marginBottom: 20, lineHeight: 20, paddingHorizontal: 16 },
+  reportModalIntroText: { fontSize: 15, color: COLORS.textSecondary, textAlign: 'center', marginTop: 12, marginBottom: 24, lineHeight: 22, paddingHorizontal: 16 },
   reportStepsContainer: { marginBottom: 24 },
   reportStep: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, gap: 16 },
-  reportStepNumber: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#1A1A1A', justifyContent: 'center', alignItems: 'center' },
+  reportStepNumber: { width: 28, height: 28, borderRadius: 14, backgroundColor: COLORS.primary, justifyContent: 'center', alignItems: 'center' },
   reportStepNumberText: { fontSize: 14, fontWeight: 'bold', color: '#FFFFFF' },
-  reportStepText: { fontSize: 15, color: '#1A1A1A', flex: 1 },
-  reportUnmatchOption: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F5F5F5', borderRadius: 16, padding: 16, marginBottom: 24, gap: 14 },
+  reportStepText: { fontSize: 15, color: COLORS.text, flex: 1 },
+  reportUnmatchOption: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.bgInput, borderRadius: 16, padding: 16, marginBottom: 24, gap: 14 },
   reportUnmatchOptionText: { flex: 1 },
-  reportUnmatchOptionTitle: { fontSize: 15, fontWeight: '600', color: '#1A1A1A' },
-  reportUnmatchOptionSubtitle: { fontSize: 13, color: '#666666', marginTop: 2 },
-  reportStartBtn: { backgroundColor: '#1A1A1A', paddingVertical: 16, borderRadius: 30, alignItems: 'center', marginBottom: 12 },
+  reportUnmatchOptionTitle: { fontSize: 15, fontWeight: '600', color: COLORS.text },
+  reportUnmatchOptionSubtitle: { fontSize: 13, color: COLORS.textSecondary, marginTop: 2 },
+  reportStartBtn: { backgroundColor: COLORS.primary, paddingVertical: 16, borderRadius: 30, alignItems: 'center', marginBottom: 12 },
   reportStartBtnText: { fontSize: 16, fontWeight: '600', color: '#FFFFFF' },
   reportUnmatchBtn: { paddingVertical: 12, alignItems: 'center' },
-  reportUnmatchBtnText: { fontSize: 16, fontWeight: '500', color: '#666666' },
+  reportUnmatchBtnText: { fontSize: 16, fontWeight: '500', color: COLORS.textSecondary },
   reportReasonsList: { maxHeight: 400 },
-  reportReasonItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 18, borderBottomWidth: 1, borderBottomColor: '#EEEEEE' },
-  reportReasonText: { fontSize: 16, color: '#1A1A1A' },
+  reportReasonItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 18, borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  reportReasonText: { fontSize: 16, color: COLORS.text },
   reportBackBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 20, gap: 6 },
-  reportBackBtnText: { fontSize: 14, color: '#666666' },
-  reportDetailsInput: { backgroundColor: '#F5F5F5', borderRadius: 16, padding: 16, fontSize: 15, color: '#1A1A1A', minHeight: 120, textAlignVertical: 'top', marginTop: 16 },
-  reportDetailsCount: { fontSize: 12, color: '#999999', textAlign: 'right', marginTop: 8 },
-  reportSubmitBtn: { backgroundColor: '#1A1A1A', paddingVertical: 16, borderRadius: 30, alignItems: 'center', marginTop: 20 },
+  reportBackBtnText: { fontSize: 14, color: COLORS.textMuted },
+  reportDetailsInput: { backgroundColor: COLORS.bgInput, borderRadius: 16, padding: 16, fontSize: 15, color: COLORS.text, minHeight: 120, textAlignVertical: 'top', marginTop: 16 },
+  reportDetailsCount: { fontSize: 12, color: COLORS.textMuted, textAlign: 'right', marginTop: 8 },
+  reportSubmitBtn: { backgroundColor: COLORS.primary, paddingVertical: 16, borderRadius: 30, alignItems: 'center', marginTop: 20 },
   reportSubmitBtnText: { fontSize: 16, fontWeight: '600', color: '#FFFFFF' },
   reportConfirmationIcon: { alignItems: 'center', marginBottom: 20, marginTop: 20 },
-  reportConfirmationText: { fontSize: 15, color: '#666666', textAlign: 'center', marginTop: 12, lineHeight: 22, paddingHorizontal: 16 },
-  reportDoneBtn: { backgroundColor: '#1A1A1A', paddingVertical: 16, borderRadius: 30, alignItems: 'center', marginTop: 32 },
+  reportConfirmationText: { fontSize: 15, color: COLORS.textSecondary, textAlign: 'center', marginTop: 12, lineHeight: 22, paddingHorizontal: 16 },
+  reportDoneBtn: { backgroundColor: COLORS.primary, paddingVertical: 16, borderRadius: 30, alignItems: 'center', marginTop: 32 },
   reportDoneBtnText: { fontSize: 16, fontWeight: '600', color: '#FFFFFF' },
 });
