@@ -4,7 +4,7 @@ import {
   Modal, Image, Switch, ActivityIndicator, Alert, Platform,
   ScrollView as RNScrollView, Animated,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, BORDER_RADIUS } from '../../src/theme';
@@ -589,6 +589,214 @@ const fieldStyles = StyleSheet.create({
   moreText: { fontSize: 12, color: COLORS.textMuted },
 });
 
+// ============ EDIT PROFILE MODAL CONTENT ============
+// Separated component that uses useSafeAreaInsets for proper Dynamic Island handling
+function EditProfileModalContent({
+  visible,
+  onClose,
+  profile,
+  topMovies,
+  expandedSections,
+  toggleSection,
+  onOpenEditModal,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  profile: ProfileData;
+  topMovies: MovieSelection[];
+  expandedSections: Set<string>;
+  toggleSection: (section: string) => void;
+  onOpenEditModal: (type: EditModalType) => void;
+}) {
+  const insets = useSafeAreaInsets();
+  
+  if (!visible) return null;
+
+  return (
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+      <View style={[editModalStyles.container, { paddingTop: insets.top }]}>
+        {/* Header with proper padding for Dynamic Island */}
+        <View style={editModalStyles.header}>
+          <TouchableOpacity onPress={onClose} style={editModalStyles.closeBtn}>
+            <Ionicons name="close" size={28} color={COLORS.text} />
+          </TouchableOpacity>
+          <Text style={editModalStyles.title}>Edit Profile</Text>
+          <View style={{ width: 44 }} />
+        </View>
+
+        <RNScrollView style={editModalStyles.scroll} showsVerticalScrollIndicator={false}>
+          {/* Basic Information */}
+          <AccordionSection 
+            title="Basic Information"
+            icon="person-outline"
+            expanded={expandedSections.has('basic')}
+            onToggle={() => toggleSection('basic')}
+          >
+            <ProfileField icon="person-outline" label="Name" value={profile.name} disabled isEmpty={!profile.name} />
+            <ProfileField icon="male-female-outline" label="Gender" value={profile.gender} disabled isEmpty={!profile.gender} />
+            <ProfileField icon="location-outline" label="Location" value={getPartialLocation(profile.location)} onPress={() => onOpenEditModal('location')} isEmpty={!profile.location} />
+          </AccordionSection>
+
+          {/* Bio */}
+          <AccordionSection 
+            title="Bio"
+            icon="document-text-outline"
+            expanded={expandedSections.has('bio')}
+            onToggle={() => toggleSection('bio')}
+          >
+            <ProfileField icon="document-text-outline" label="About Me" value={profile.bio} onPress={() => onOpenEditModal('bio')} isEmpty={!profile.bio} />
+          </AccordionSection>
+
+          {/* Movie Personality */}
+          <AccordionSection 
+            title="Movie Personality"
+            icon="film-outline"
+            expanded={expandedSections.has('movie')}
+            onToggle={() => toggleSection('movie')}
+          >
+            <ProfileField icon="time-outline" label="Movie Frequency" value={profile.movieFrequency} onPress={() => onOpenEditModal('movieFrequency')} isEmpty={!profile.movieFrequency} />
+            <ProfileField icon="tv-outline" label="OTT vs Theatre" value={profile.ottTheatre} onPress={() => onOpenEditModal('ottTheatre')} isEmpty={!profile.ottTheatre} />
+          </AccordionSection>
+
+          {/* Favorite Genres */}
+          <AccordionSection 
+            title="Favorite Genres"
+            icon="heart-outline"
+            expanded={expandedSections.has('genres')}
+            onToggle={() => toggleSection('genres')}
+          >
+            <ProfileField icon="film-outline" label="Favourite Genres" value={profile.genres} onPress={() => onOpenEditModal('genres')} isArray isEmpty={!profile.genres?.length} />
+          </AccordionSection>
+
+          {/* Top Movies */}
+          <AccordionSection 
+            title="Top Movies"
+            icon="star-outline"
+            expanded={expandedSections.has('topmovies')}
+            onToggle={() => toggleSection('topmovies')}
+          >
+            {topMovies.length > 0 ? (
+              <View style={editModalStyles.moviesGrid}>
+                {topMovies.map((movie, i) => (
+                  <View key={i} style={editModalStyles.movieItem}>
+                    <Image 
+                      source={{ uri: `https://image.tmdb.org/t/p/w200${movie.poster_path}` }}
+                      style={editModalStyles.moviePoster}
+                      resizeMode="cover"
+                    />
+                    <Text style={editModalStyles.movieTitle} numberOfLines={2}>{movie.title}</Text>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <Text style={editModalStyles.emptyHint}>Add your top 5 movies during signup</Text>
+            )}
+          </AccordionSection>
+
+          {/* Languages */}
+          <AccordionSection 
+            title="Languages"
+            icon="globe-outline"
+            expanded={expandedSections.has('languages')}
+            onToggle={() => toggleSection('languages')}
+          >
+            <ProfileField icon="globe-outline" label="Film Languages" value={profile.filmLanguages} onPress={() => onOpenEditModal('filmLanguages')} isArray isEmpty={!profile.filmLanguages?.length} />
+            <ProfileField icon="chatbubble-outline" label="Languages Spoken" value={profile.languagesSpoken} onPress={() => onOpenEditModal('languagesSpoken')} isArray isEmpty={!profile.languagesSpoken?.length} />
+          </AccordionSection>
+
+          {/* Dating Preferences */}
+          <AccordionSection 
+            title="Dating Preferences"
+            icon="heart-outline"
+            expanded={expandedSections.has('dating')}
+            onToggle={() => toggleSection('dating')}
+          >
+            <ProfileField icon="heart-outline" label="Looking For" value={profile.relationshipIntent} onPress={() => onOpenEditModal('relationshipIntent')} isArray isEmpty={!profile.relationshipIntent?.length} />
+            <ProfileField icon="people-outline" label="Want to Meet" value={profile.partnerPreference} onPress={() => onOpenEditModal('partnerPreference')} isEmpty={!profile.partnerPreference} />
+          </AccordionSection>
+
+          {/* Optional Information */}
+          <AccordionSection 
+            title="Optional Information"
+            icon="information-circle-outline"
+            expanded={expandedSections.has('optional')}
+            onToggle={() => toggleSection('optional')}
+          >
+            <ProfileField icon="resize-outline" label="Height" value={profile.height} onPress={() => onOpenEditModal('height')} isEmpty={!profile.height} />
+            <ProfileField icon="moon-outline" label="Religion" value={profile.religion} onPress={() => onOpenEditModal('religion')} isEmpty={!profile.religion} />
+            <ProfileField icon="flame-outline" label="Smoking" value={profile.smoking} onPress={() => onOpenEditModal('smoking')} isEmpty={!profile.smoking} />
+            <ProfileField icon="beer-outline" label="Drinking" value={profile.drinking} onPress={() => onOpenEditModal('drinking')} isEmpty={!profile.drinking} />
+            <ProfileField icon="fitness-outline" label="Exercise" value={profile.exercise} onPress={() => onOpenEditModal('exercise')} isEmpty={!profile.exercise} />
+            <ProfileField icon="star-outline" label="Zodiac Sign" value={profile.zodiac} onPress={() => onOpenEditModal('zodiac')} isEmpty={!profile.zodiac} />
+          </AccordionSection>
+
+          <View style={{ height: 40 }} />
+        </RNScrollView>
+      </View>
+    </Modal>
+  );
+}
+
+const editModalStyles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: COLORS.bg,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: SPACING.m,
+    paddingVertical: SPACING.m,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  closeBtn: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: COLORS.text,
+  },
+  scroll: {
+    flex: 1,
+    padding: SPACING.m,
+  },
+  moviesGrid: { 
+    flexDirection: 'row', 
+    flexWrap: 'wrap', 
+    gap: SPACING.s, 
+    paddingVertical: SPACING.s 
+  },
+  movieItem: { 
+    width: '18%', 
+    alignItems: 'center' 
+  },
+  moviePoster: { 
+    width: '100%', 
+    aspectRatio: 0.67, 
+    borderRadius: BORDER_RADIUS.s, 
+    marginBottom: 4 
+  },
+  movieTitle: { 
+    fontSize: 10, 
+    textAlign: 'center', 
+    color: COLORS.text, 
+    marginBottom: 2 
+  },
+  emptyHint: {
+    fontSize: 14,
+    color: COLORS.textMuted,
+    fontStyle: 'italic',
+    textAlign: 'center',
+    paddingVertical: SPACING.m,
+  },
+});
+
 export default function ProfileScreen() {
   const router = useRouter();
   const [profile, setProfile] = useState<ProfileData>(initialProfileData);
@@ -1006,126 +1214,15 @@ export default function ProfileScreen() {
       </RNScrollView>
 
       {/* ========== EDIT PROFILE ACCORDION MODAL ========== */}
-      <Modal visible={showEditProfile} animationType="slide" onRequestClose={() => setShowEditProfile(false)}>
-        <SafeAreaView style={styles.editModalContainer}>
-          <View style={styles.editModalHeader}>
-            <TouchableOpacity onPress={() => setShowEditProfile(false)} style={styles.editModalClose}>
-              <Ionicons name="close" size={28} color={COLORS.text} />
-            </TouchableOpacity>
-            <Text style={styles.editModalTitle}>Edit Profile</Text>
-            <View style={{ width: 44 }} />
-          </View>
-
-          <RNScrollView style={styles.editModalScroll} showsVerticalScrollIndicator={false}>
-            {/* Basic Information */}
-            <AccordionSection 
-              title="Basic Information"
-              icon="person-outline"
-              expanded={expandedSections.has('basic')}
-              onToggle={() => toggleSection('basic')}
-            >
-              <ProfileField icon="person-outline" label="Name" value={profile.name} disabled isEmpty={!profile.name} />
-              <ProfileField icon="male-female-outline" label="Gender" value={profile.gender} disabled isEmpty={!profile.gender} />
-              <ProfileField icon="location-outline" label="Location" value={getPartialLocation(profile.location)} onPress={() => setEditModal('location')} isEmpty={!profile.location} />
-            </AccordionSection>
-
-            {/* Bio */}
-            <AccordionSection 
-              title="Bio"
-              icon="document-text-outline"
-              expanded={expandedSections.has('bio')}
-              onToggle={() => toggleSection('bio')}
-            >
-              <ProfileField icon="document-text-outline" label="About Me" value={profile.bio} onPress={() => setEditModal('bio')} isEmpty={!profile.bio} />
-            </AccordionSection>
-
-            {/* Movie Personality */}
-            <AccordionSection 
-              title="Movie Personality"
-              icon="film-outline"
-              expanded={expandedSections.has('movie')}
-              onToggle={() => toggleSection('movie')}
-            >
-              <ProfileField icon="time-outline" label="Movie Frequency" value={profile.movieFrequency} onPress={() => setEditModal('movieFrequency')} isEmpty={!profile.movieFrequency} />
-              <ProfileField icon="tv-outline" label="OTT vs Theatre" value={profile.ottTheatre} onPress={() => setEditModal('ottTheatre')} isEmpty={!profile.ottTheatre} />
-            </AccordionSection>
-
-            {/* Favorite Genres */}
-            <AccordionSection 
-              title="Favorite Genres"
-              icon="heart-outline"
-              expanded={expandedSections.has('genres')}
-              onToggle={() => toggleSection('genres')}
-            >
-              <ProfileField icon="film-outline" label="Favourite Genres" value={profile.genres} onPress={() => setEditModal('genres')} isArray isEmpty={!profile.genres?.length} />
-            </AccordionSection>
-
-            {/* Top Movies */}
-            <AccordionSection 
-              title="Top Movies"
-              icon="star-outline"
-              expanded={expandedSections.has('topmovies')}
-              onToggle={() => toggleSection('topmovies')}
-            >
-              {topMovies.length > 0 ? (
-                <View style={styles.moviesGrid}>
-                  {topMovies.map((movie, i) => (
-                    <View key={i} style={styles.movieItem}>
-                      <Image 
-                        source={{ uri: `https://image.tmdb.org/t/p/w200${movie.poster_path}` }}
-                        style={styles.moviePoster}
-                        resizeMode="cover"
-                      />
-                      <Text style={styles.movieTitle} numberOfLines={2}>{movie.title}</Text>
-                    </View>
-                  ))}
-                </View>
-              ) : (
-                <Text style={styles.emptyHint}>Add your top 5 movies during signup</Text>
-              )}
-            </AccordionSection>
-
-            {/* Languages */}
-            <AccordionSection 
-              title="Languages"
-              icon="globe-outline"
-              expanded={expandedSections.has('languages')}
-              onToggle={() => toggleSection('languages')}
-            >
-              <ProfileField icon="globe-outline" label="Film Languages" value={profile.filmLanguages} onPress={() => setEditModal('filmLanguages')} isArray isEmpty={!profile.filmLanguages?.length} />
-              <ProfileField icon="chatbubble-outline" label="Languages Spoken" value={profile.languagesSpoken} onPress={() => setEditModal('languagesSpoken')} isArray isEmpty={!profile.languagesSpoken?.length} />
-            </AccordionSection>
-
-            {/* Dating Preferences */}
-            <AccordionSection 
-              title="Dating Preferences"
-              icon="heart-outline"
-              expanded={expandedSections.has('dating')}
-              onToggle={() => toggleSection('dating')}
-            >
-              <ProfileField icon="heart-outline" label="Looking For" value={profile.relationshipIntent} onPress={() => setEditModal('relationshipIntent')} isArray isEmpty={!profile.relationshipIntent?.length} />
-              <ProfileField icon="people-outline" label="Want to Meet" value={profile.partnerPreference} onPress={() => setEditModal('partnerPreference')} isEmpty={!profile.partnerPreference} />
-            </AccordionSection>
-
-            {/* Optional Information */}
-            <AccordionSection 
-              title="Optional Information"
-              icon="information-circle-outline"
-              expanded={expandedSections.has('optional')}
-              onToggle={() => toggleSection('optional')}
-            >
-              <ProfileField icon="resize-outline" label="Height" value={profile.height} onPress={() => setEditModal('height')} isEmpty={!profile.height} />
-              <ProfileField icon="moon-outline" label="Religion" value={profile.religion} onPress={() => setEditModal('religion')} isEmpty={!profile.religion} />
-              <ProfileField icon="flame-outline" label="Smoking" value={profile.smoking} onPress={() => setEditModal('smoking')} isEmpty={!profile.smoking} />
-              <ProfileField icon="beer-outline" label="Drinking" value={profile.drinking} onPress={() => setEditModal('drinking')} isEmpty={!profile.drinking} />
-              <ProfileField icon="fitness-outline" label="Exercise" value={profile.exercise} onPress={() => setEditModal('exercise')} isEmpty={!profile.exercise} />
-              <ProfileField icon="star-outline" label="Zodiac Sign" value={profile.zodiac} onPress={() => setEditModal('zodiac')} isEmpty={!profile.zodiac} />
-            </AccordionSection>
-
-            <View style={{ height: 40 }} />
-          </RNScrollView>
-        </SafeAreaView>
-      </Modal>
+      <EditProfileModalContent
+        visible={showEditProfile}
+        onClose={() => setShowEditProfile(false)}
+        profile={profile}
+        topMovies={topMovies}
+        expandedSections={expandedSections}
+        toggleSection={toggleSection}
+        onOpenEditModal={(type: EditModalType) => setEditModal(type)}
+      />
 
       {/* ========== PROFILE PREVIEW MODAL (Reusing PremiumProfileView) ========== */}
       <Modal visible={showProfilePreview} animationType="fade" onRequestClose={() => setShowProfilePreview(false)}>
