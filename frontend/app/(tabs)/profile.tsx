@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, TextInput,
   Modal, Image, Switch, ActivityIndicator, Alert, Platform,
-  ScrollView as RNScrollView,
+  ScrollView as RNScrollView, Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -13,6 +13,7 @@ import { getProfile, saveProfile, clearAll } from '../../src/store';
 import { getPartialLocation } from '../../src/utils/location';
 import { formatLocationForPrivacy } from '../../src/utils/locationFormatter';
 import { SharedHeader, ModeSwitcher, useAppMode } from '../../src/components/SharedHeader';
+import { PremiumProfileView } from '../../src/components/PremiumProfileView';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -324,7 +325,7 @@ function HeightEditModal({
                       style={[modalStyles.heightItem, feet === f && modalStyles.heightItemActive]}
                       onPress={() => setFeet(f)}
                     >
-                      <Text style={[modalStyles.heightItemText, feet === f && modalStyles.heightItemTextActive]}>{f}'</Text>
+                      <Text style={[modalStyles.heightItemText, feet === f && modalStyles.heightItemTextActive]}>{f}&apos;</Text>
                     </TouchableOpacity>
                   ))}
                 </RNScrollView>
@@ -338,7 +339,7 @@ function HeightEditModal({
                       style={[modalStyles.heightItem, inches === i && modalStyles.heightItemActive]}
                       onPress={() => setInches(i)}
                     >
-                      <Text style={[modalStyles.heightItemText, inches === i && modalStyles.heightItemTextActive]}>{i}"</Text>
+                      <Text style={[modalStyles.heightItemText, inches === i && modalStyles.heightItemTextActive]}>{i}&quot;</Text>
                     </TouchableOpacity>
                   ))}
                 </RNScrollView>
@@ -424,6 +425,94 @@ const modalStyles = StyleSheet.create({
   heightDisplayText: { fontSize: 24, fontWeight: 'bold', color: COLORS.gold },
 });
 
+// ============ ACCORDION SECTION COMPONENT ============
+function AccordionSection({
+  title,
+  icon,
+  expanded,
+  onToggle,
+  children,
+}: {
+  title: string;
+  icon: string;
+  expanded: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  const rotateAnim = React.useRef(new Animated.Value(expanded ? 1 : 0)).current;
+
+  React.useEffect(() => {
+    Animated.timing(rotateAnim, {
+      toValue: expanded ? 1 : 0,
+      duration: 200,
+      useNativeDriver: true,
+    }).start();
+  }, [expanded, rotateAnim]);
+
+  const rotation = rotateAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '180deg'],
+  });
+
+  return (
+    <View style={accordionStyles.container}>
+      <TouchableOpacity style={accordionStyles.header} onPress={onToggle} activeOpacity={0.7}>
+        <View style={accordionStyles.headerLeft}>
+          <View style={accordionStyles.iconContainer}>
+            <Ionicons name={icon as any} size={20} color={COLORS.primary} />
+          </View>
+          <Text style={accordionStyles.title}>{title}</Text>
+        </View>
+        <Animated.View style={{ transform: [{ rotate: rotation }] }}>
+          <Ionicons name="chevron-down" size={22} color={COLORS.textMuted} />
+        </Animated.View>
+      </TouchableOpacity>
+      {expanded && (
+        <View style={accordionStyles.content}>
+          {children}
+        </View>
+      )}
+    </View>
+  );
+}
+
+const accordionStyles = StyleSheet.create({
+  container: {
+    marginBottom: SPACING.s,
+    backgroundColor: COLORS.bgCard,
+    borderRadius: BORDER_RADIUS.l,
+    overflow: 'hidden',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: SPACING.m,
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.m,
+  },
+  iconContainer: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(229, 9, 20, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  title: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.text,
+  },
+  content: {
+    paddingHorizontal: SPACING.m,
+    paddingBottom: SPACING.m,
+  },
+});
+
 // Profile Field Row Component
 function ProfileField({
   icon, label, value, onPress, isArray = false, isEmpty = false, disabled = false,
@@ -506,6 +595,10 @@ export default function ProfileScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [editModal, setEditModal] = useState<EditModalType>(null);
+  const [showProfilePreview, setShowProfilePreview] = useState(false);
+  const [showEditProfile, setShowEditProfile] = useState(false);
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
+  const [userPhotos, setUserPhotos] = useState<string[]>([]);
   
   // Safe array extractions to prevent .map() errors
   const topMovies = Array.isArray(profile?.topMovies) ? profile.topMovies : [];
@@ -515,6 +608,7 @@ export default function ProfileScreen() {
 
   useEffect(() => {
     loadProfile();
+    loadPhotos();
   }, []);
 
   const loadProfile = async () => {
@@ -524,6 +618,56 @@ export default function ProfileScreen() {
       setProfile(data);
     }
     setLoading(false);
+  };
+
+  const loadPhotos = async () => {
+    try {
+      const storedProfile = await getProfile();
+      if (storedProfile?.userId) {
+        const response = await fetch(`${BACKEND_URL}/api/user/pictures/${storedProfile.userId}`);
+        if (response.ok) {
+          const data = await response.json();
+          setUserPhotos(data.pictures || []);
+        }
+      }
+    } catch (error) {
+      console.log('Error loading photos:', error);
+    }
+  };
+
+  // Calculate profile completion percentage
+  const calculateProfileCompletion = useCallback(() => {
+    const fields = [
+      profile.name,
+      profile.gender,
+      profile.bio,
+      profile.location,
+      profile.genres?.length > 0,
+      profile.topMovies?.length > 0,
+      profile.filmLanguages?.length > 0,
+      profile.languagesSpoken?.length > 0,
+      profile.movieFrequency,
+      profile.relationshipIntent?.length > 0,
+      profile.partnerPreference,
+      userPhotos.length > 0,
+    ];
+    const completed = fields.filter(Boolean).length;
+    return Math.round((completed / fields.length) * 100);
+  }, [profile, userPhotos]);
+
+  const completionPercentage = calculateProfileCompletion();
+
+  // Toggle accordion section
+  const toggleSection = (section: string) => {
+    setExpandedSections(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(section)) {
+        newSet.delete(section);
+      } else {
+        newSet.add(section);
+      }
+      return newSet;
+    });
   };
 
   // Sync profile to backend recommendation engine
@@ -662,180 +806,306 @@ export default function ProfileScreen() {
     );
   }
 
+  // Get primary photo or avatar
+  const primaryPhoto = userPhotos.length > 0 ? userPhotos[0] : null;
+  const avatarColor = getAvatarColor();
+  const avatarIcon = getAvatarIcon();
+
   return (
     <SafeAreaView style={styles.container} testID="profile-screen">
       {/* Shared Header with Mode Switcher */}
       <SharedHeader
-        title="My Profile"
+        title="Profile"
         showModeIcon={true}
         onMenuPress={() => setShowModeDrawer(true)}
         colors={colors}
       />
 
       <RNScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* Profile Header */}
-        <TouchableOpacity style={styles.profileHeader} onPress={() => setEditModal('avatar')} activeOpacity={0.8}>
-          <View style={[styles.avatarLarge, { backgroundColor: getAvatarColor() }]}>
-            <Ionicons name={getAvatarIcon() as any} size={44} color={COLORS.white} />
-            <View style={styles.editAvatarBadge}>
-              <Ionicons name="pencil" size={12} color={COLORS.white} />
-            </View>
-          </View>
-          <Text style={styles.profileName}>{profile.name || 'Your Name'}</Text>
-          {profile.age > 0 && <Text style={styles.profileAge}>{profile.age} years old</Text>}
-          {profile.location && <Text style={styles.profileLocation}>{getPartialLocation(profile.location)}</Text>}
-        </TouchableOpacity>
-
-        {/* Basic Info Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Basic Information</Text>
-          <ProfileField icon="person-outline" label="Name" value={profile.name} isEmpty={!profile.name} disabled />
-          <ProfileField icon="male-female-outline" label="Gender" value={profile.gender} isEmpty={!profile.gender} disabled />
-          <ProfileField icon="location-outline" label="Location" value={getPartialLocation(profile.location)} onPress={() => setEditModal('location')} isEmpty={!profile.location} />
-          <ProfileField icon="document-text-outline" label="Bio" value={profile.bio} onPress={() => setEditModal('bio')} isEmpty={!profile.bio} />
-        </View>
-
-        {/* Relationship Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Dating Preferences</Text>
-          <ProfileField icon="heart-outline" label="Looking For" value={profile.relationshipIntent} onPress={() => setEditModal('relationshipIntent')} isArray isEmpty={!profile.relationshipIntent?.length} />
-          <ProfileField icon="people-outline" label="Want to Meet" value={profile.partnerPreference} onPress={() => setEditModal('partnerPreference')} isEmpty={!profile.partnerPreference} />
-        </View>
-
-        {/* Movie Preferences Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Movie Preferences</Text>
-          <ProfileField icon="time-outline" label="Movie Frequency" value={profile.movieFrequency} onPress={() => setEditModal('movieFrequency')} isEmpty={!profile.movieFrequency} />
-          <ProfileField icon="tv-outline" label="OTT vs Theatre" value={profile.ottTheatre} onPress={() => setEditModal('ottTheatre')} isEmpty={!profile.ottTheatre} />
-          <ProfileField icon="globe-outline" label="Film Languages" value={profile.filmLanguages} onPress={() => setEditModal('filmLanguages')} isArray isEmpty={!profile.filmLanguages?.length} />
-          <ProfileField icon="film-outline" label="Favourite Genres" value={profile.genres} onPress={() => setEditModal('genres')} isArray isEmpty={!profile.genres?.length} />
-        </View>
-
-        {/* Top Movies */}
-        {topMovies.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Your Top 5 Movies</Text>
-            <View style={styles.moviesGrid}>
-              {topMovies.map((movie, i) => (
-                <View key={i} style={styles.movieItem}>
-                  <Image 
-                    source={{ uri: `https://image.tmdb.org/t/p/w200${movie.poster_path}` }}
-                    style={styles.moviePoster}
-                    resizeMode="cover"
-                  />
-                  <Text style={styles.movieTitle} numberOfLines={2}>{movie.title}</Text>
-                  <View style={styles.movieRating}>
-                    <Ionicons name="star" size={12} color={COLORS.gold} />
-                    <Text style={styles.ratingText}>{movie.rating}/5</Text>
-                  </View>
-                </View>
-              ))}
-            </View>
-          </View>
-        )}
-
-        {/* Languages Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Languages</Text>
-          <ProfileField icon="chatbubble-outline" label="Languages Spoken" value={profile.languagesSpoken} onPress={() => setEditModal('languagesSpoken')} isArray isEmpty={!profile.languagesSpoken?.length} />
-        </View>
-
-        {/* Personal Details Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Personal Details</Text>
-          <ProfileField icon="resize-outline" label="Height" value={profile.height} onPress={() => setEditModal('height')} isEmpty={!profile.height} />
-          <ProfileField icon="moon-outline" label="Religion" value={profile.religion} onPress={() => setEditModal('religion')} isEmpty={!profile.religion} />
-          <ProfileField icon="ellipse-outline" label="Marital Status" value={profile.maritalStatus} onPress={() => setEditModal('maritalStatus')} isEmpty={!profile.maritalStatus} />
-          <ProfileField icon="restaurant-outline" label="Food Preference" value={profile.foodPreference} onPress={() => setEditModal('foodPreference')} isEmpty={!profile.foodPreference} />
-        </View>
-
-        {/* Lifestyle Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Lifestyle</Text>
-          <ProfileField icon="flame-outline" label="Smoking" value={profile.smoking} onPress={() => setEditModal('smoking')} isEmpty={!profile.smoking} />
-          <ProfileField icon="beer-outline" label="Drinking" value={profile.drinking} onPress={() => setEditModal('drinking')} isEmpty={!profile.drinking} />
-          <ProfileField icon="fitness-outline" label="Exercise" value={profile.exercise} onPress={() => setEditModal('exercise')} isEmpty={!profile.exercise} />
-          <ProfileField icon="airplane-outline" label="Travel" value={profile.travel} onPress={() => setEditModal('travel')} isEmpty={!profile.travel} />
-        </View>
-
-        {/* More About You Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>More About You</Text>
-          <ProfileField icon="star-outline" label="Zodiac Sign" value={profile.zodiac} onPress={() => setEditModal('zodiac')} isEmpty={!profile.zodiac} />
-          <ProfileField icon="paw-outline" label="Pets" value={profile.pets} onPress={() => setEditModal('pets')} isEmpty={!profile.pets} />
-          <ProfileField icon="home-outline" label="Family Planning" value={profile.familyPlanning} onPress={() => setEditModal('familyPlanning')} isEmpty={!profile.familyPlanning} />
-          <ProfileField icon="people-circle-outline" label="Siblings" value={profile.siblings} onPress={() => setEditModal('siblings')} isEmpty={!profile.siblings} />
-          <ProfileField icon="school-outline" label="Education" value={profile.education} onPress={() => setEditModal('education')} isEmpty={!profile.education} />
-          <ProfileField icon="briefcase-outline" label="Work Profile" value={profile.workProfile} onPress={() => setEditModal('workProfile')} isEmpty={!profile.workProfile} />
-        </View>
-
-        {/* Settings & Filters Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Settings & Filters</Text>
-          
+        {/* ========== BUMBLE-INSPIRED PROFILE HEADER ========== */}
+        <View style={styles.profileHeaderNew}>
+          {/* Profile Picture with Completion Ring */}
           <TouchableOpacity 
-            style={styles.settingsRow}
-            onPress={() => router.push('/profile-preview')}
+            style={styles.profilePicContainer}
+            onPress={() => setShowProfilePreview(true)}
+            activeOpacity={0.8}
           >
-            <View style={styles.settingsIcon}>
-              <Ionicons name="eye-outline" size={22} color={COLORS.primary} />
+            {/* Completion Ring */}
+            <View style={styles.completionRing}>
+              <View style={[styles.completionRingFill, { 
+                borderColor: completionPercentage === 100 ? COLORS.success : COLORS.primary,
+              }]} />
+              <View style={styles.completionRingBg} />
             </View>
-            <View style={styles.settingsInfo}>
-              <Text style={styles.settingsLabel}>Profile Preview</Text>
-              <Text style={styles.settingsDesc}>See how others view your profile</Text>
+            
+            {/* Profile Picture */}
+            {primaryPhoto ? (
+              <Image source={{ uri: primaryPhoto }} style={styles.profilePicNew} />
+            ) : (
+              <View style={[styles.profilePicNew, styles.avatarFallback, { backgroundColor: avatarColor }]}>
+                <Ionicons name={avatarIcon as any} size={48} color={COLORS.white} />
+              </View>
+            )}
+            
+            {/* Completion Badge */}
+            <View style={[styles.completionBadge, { 
+              backgroundColor: completionPercentage === 100 ? COLORS.success : COLORS.primary 
+            }]}>
+              <Text style={styles.completionBadgeText}>{completionPercentage}%</Text>
             </View>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
           </TouchableOpacity>
 
+          {/* Name and Info */}
+          <View style={styles.profileInfoNew}>
+            <Text style={styles.profileNameNew}>{profile.name || 'Your Name'}</Text>
+            {profile.age > 0 && profile.location && (
+              <Text style={styles.profileSubtitleNew}>{profile.age} • {getPartialLocation(profile.location)}</Text>
+            )}
+          </View>
+
+          {/* Complete Profile Button */}
+          {completionPercentage < 100 && (
+            <TouchableOpacity 
+              style={styles.completeProfileBtn}
+              onPress={() => setShowEditProfile(true)}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="sparkles" size={18} color="#FFF" />
+              <Text style={styles.completeProfileBtnText}>Complete Profile</Text>
+            </TouchableOpacity>
+          )}
+
+          {/* View as Others See You hint */}
+          <Text style={styles.profileHint}>Tap photo to preview your profile</Text>
+        </View>
+
+        {/* ========== MAIN SETTINGS CARDS ========== */}
+        <View style={styles.settingsSection}>
+          {/* Edit Photos */}
           <TouchableOpacity 
-            style={styles.settingsRow}
+            style={styles.settingsCard}
             onPress={() => router.push('/photos?from=profile')}
+            activeOpacity={0.7}
           >
-            <View style={styles.settingsIcon}>
-              <Ionicons name="images-outline" size={22} color={COLORS.primary} />
+            <View style={[styles.settingsCardIcon, { backgroundColor: 'rgba(76, 175, 80, 0.15)' }]}>
+              <Ionicons name="images" size={24} color="#4CAF50" />
             </View>
-            <View style={styles.settingsInfo}>
-              <Text style={styles.settingsLabel}>Edit Photos</Text>
-              <Text style={styles.settingsDesc}>Add or change your profile photos</Text>
+            <View style={styles.settingsCardContent}>
+              <Text style={styles.settingsCardTitle}>Edit Photos</Text>
+              <Text style={styles.settingsCardDesc}>{userPhotos.length} photo{userPhotos.length !== 1 ? 's' : ''} uploaded</Text>
             </View>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
+            <Ionicons name="chevron-forward" size={22} color={COLORS.textMuted} />
           </TouchableOpacity>
 
+          {/* Preferences & Filters */}
           <TouchableOpacity 
-            style={styles.settingsRow}
+            style={styles.settingsCard}
             onPress={() => router.push('/filters?from=profile')}
+            activeOpacity={0.7}
           >
-            <View style={styles.settingsIcon}>
-              <Ionicons name="options-outline" size={22} color={COLORS.primary} />
+            <View style={[styles.settingsCardIcon, { backgroundColor: 'rgba(33, 150, 243, 0.15)' }]}>
+              <Ionicons name="options" size={24} color="#2196F3" />
             </View>
-            <View style={styles.settingsInfo}>
-              <Text style={styles.settingsLabel}>Preferences & Filters</Text>
-              <Text style={styles.settingsDesc}>Set your match preferences</Text>
+            <View style={styles.settingsCardContent}>
+              <Text style={styles.settingsCardTitle}>Preferences & Filters</Text>
+              <Text style={styles.settingsCardDesc}>Age, distance, and more</Text>
             </View>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
+            <Ionicons name="chevron-forward" size={22} color={COLORS.textMuted} />
           </TouchableOpacity>
 
+          {/* Edit Profile (Opens accordion modal) */}
           <TouchableOpacity 
-            style={styles.settingsRow}
-            onPress={() => router.push('/visibility')}
+            style={styles.settingsCard}
+            onPress={() => setShowEditProfile(true)}
+            activeOpacity={0.7}
           >
-            <View style={styles.settingsIcon}>
-              <Ionicons name="shield-outline" size={22} color={COLORS.primary} />
+            <View style={[styles.settingsCardIcon, { backgroundColor: 'rgba(229, 9, 20, 0.15)' }]}>
+              <Ionicons name="person" size={24} color={COLORS.primary} />
             </View>
-            <View style={styles.settingsInfo}>
-              <Text style={styles.settingsLabel}>Profile Visibility</Text>
-              <Text style={styles.settingsDesc}>Control what others can see</Text>
+            <View style={styles.settingsCardContent}>
+              <Text style={styles.settingsCardTitle}>Edit Profile</Text>
+              <Text style={styles.settingsCardDesc}>Bio, movies, preferences</Text>
             </View>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
+            <Ionicons name="chevron-forward" size={22} color={COLORS.textMuted} />
+          </TouchableOpacity>
+
+          {/* Profile Visibility */}
+          <TouchableOpacity 
+            style={styles.settingsCard}
+            onPress={() => router.push('/visibility')}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.settingsCardIcon, { backgroundColor: 'rgba(156, 39, 176, 0.15)' }]}>
+              <Ionicons name="shield-checkmark" size={24} color="#9C27B0" />
+            </View>
+            <View style={styles.settingsCardContent}>
+              <Text style={styles.settingsCardTitle}>Profile Visibility</Text>
+              <Text style={styles.settingsCardDesc}>Control who sees your profile</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={22} color={COLORS.textMuted} />
           </TouchableOpacity>
         </View>
 
         {/* Logout Button */}
-        <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout} activeOpacity={0.8}>
-          <Ionicons name="log-out-outline" size={20} color="#FF6B6B" />
-          <Text style={styles.logoutText}>Logout & Clear Data</Text>
+        <TouchableOpacity style={styles.logoutBtnNew} onPress={handleLogout} activeOpacity={0.8}>
+          <Ionicons name="log-out-outline" size={20} color={COLORS.textSecondary} />
+          <Text style={styles.logoutTextNew}>Logout & Clear Data</Text>
         </TouchableOpacity>
       </RNScrollView>
+
+      {/* ========== EDIT PROFILE ACCORDION MODAL ========== */}
+      <Modal visible={showEditProfile} animationType="slide" onRequestClose={() => setShowEditProfile(false)}>
+        <SafeAreaView style={styles.editModalContainer}>
+          <View style={styles.editModalHeader}>
+            <TouchableOpacity onPress={() => setShowEditProfile(false)} style={styles.editModalClose}>
+              <Ionicons name="close" size={28} color={COLORS.text} />
+            </TouchableOpacity>
+            <Text style={styles.editModalTitle}>Edit Profile</Text>
+            <View style={{ width: 44 }} />
+          </View>
+
+          <RNScrollView style={styles.editModalScroll} showsVerticalScrollIndicator={false}>
+            {/* Basic Information */}
+            <AccordionSection 
+              title="Basic Information"
+              icon="person-outline"
+              expanded={expandedSections.has('basic')}
+              onToggle={() => toggleSection('basic')}
+            >
+              <ProfileField icon="person-outline" label="Name" value={profile.name} disabled isEmpty={!profile.name} />
+              <ProfileField icon="male-female-outline" label="Gender" value={profile.gender} disabled isEmpty={!profile.gender} />
+              <ProfileField icon="location-outline" label="Location" value={getPartialLocation(profile.location)} onPress={() => setEditModal('location')} isEmpty={!profile.location} />
+            </AccordionSection>
+
+            {/* Bio */}
+            <AccordionSection 
+              title="Bio"
+              icon="document-text-outline"
+              expanded={expandedSections.has('bio')}
+              onToggle={() => toggleSection('bio')}
+            >
+              <ProfileField icon="document-text-outline" label="About Me" value={profile.bio} onPress={() => setEditModal('bio')} isEmpty={!profile.bio} />
+            </AccordionSection>
+
+            {/* Movie Personality */}
+            <AccordionSection 
+              title="Movie Personality"
+              icon="film-outline"
+              expanded={expandedSections.has('movie')}
+              onToggle={() => toggleSection('movie')}
+            >
+              <ProfileField icon="time-outline" label="Movie Frequency" value={profile.movieFrequency} onPress={() => setEditModal('movieFrequency')} isEmpty={!profile.movieFrequency} />
+              <ProfileField icon="tv-outline" label="OTT vs Theatre" value={profile.ottTheatre} onPress={() => setEditModal('ottTheatre')} isEmpty={!profile.ottTheatre} />
+            </AccordionSection>
+
+            {/* Favorite Genres */}
+            <AccordionSection 
+              title="Favorite Genres"
+              icon="heart-outline"
+              expanded={expandedSections.has('genres')}
+              onToggle={() => toggleSection('genres')}
+            >
+              <ProfileField icon="film-outline" label="Favourite Genres" value={profile.genres} onPress={() => setEditModal('genres')} isArray isEmpty={!profile.genres?.length} />
+            </AccordionSection>
+
+            {/* Top Movies */}
+            <AccordionSection 
+              title="Top Movies"
+              icon="star-outline"
+              expanded={expandedSections.has('topmovies')}
+              onToggle={() => toggleSection('topmovies')}
+            >
+              {topMovies.length > 0 ? (
+                <View style={styles.moviesGrid}>
+                  {topMovies.map((movie, i) => (
+                    <View key={i} style={styles.movieItem}>
+                      <Image 
+                        source={{ uri: `https://image.tmdb.org/t/p/w200${movie.poster_path}` }}
+                        style={styles.moviePoster}
+                        resizeMode="cover"
+                      />
+                      <Text style={styles.movieTitle} numberOfLines={2}>{movie.title}</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <Text style={styles.emptyHint}>Add your top 5 movies during signup</Text>
+              )}
+            </AccordionSection>
+
+            {/* Languages */}
+            <AccordionSection 
+              title="Languages"
+              icon="globe-outline"
+              expanded={expandedSections.has('languages')}
+              onToggle={() => toggleSection('languages')}
+            >
+              <ProfileField icon="globe-outline" label="Film Languages" value={profile.filmLanguages} onPress={() => setEditModal('filmLanguages')} isArray isEmpty={!profile.filmLanguages?.length} />
+              <ProfileField icon="chatbubble-outline" label="Languages Spoken" value={profile.languagesSpoken} onPress={() => setEditModal('languagesSpoken')} isArray isEmpty={!profile.languagesSpoken?.length} />
+            </AccordionSection>
+
+            {/* Dating Preferences */}
+            <AccordionSection 
+              title="Dating Preferences"
+              icon="heart-outline"
+              expanded={expandedSections.has('dating')}
+              onToggle={() => toggleSection('dating')}
+            >
+              <ProfileField icon="heart-outline" label="Looking For" value={profile.relationshipIntent} onPress={() => setEditModal('relationshipIntent')} isArray isEmpty={!profile.relationshipIntent?.length} />
+              <ProfileField icon="people-outline" label="Want to Meet" value={profile.partnerPreference} onPress={() => setEditModal('partnerPreference')} isEmpty={!profile.partnerPreference} />
+            </AccordionSection>
+
+            {/* Optional Information */}
+            <AccordionSection 
+              title="Optional Information"
+              icon="information-circle-outline"
+              expanded={expandedSections.has('optional')}
+              onToggle={() => toggleSection('optional')}
+            >
+              <ProfileField icon="resize-outline" label="Height" value={profile.height} onPress={() => setEditModal('height')} isEmpty={!profile.height} />
+              <ProfileField icon="moon-outline" label="Religion" value={profile.religion} onPress={() => setEditModal('religion')} isEmpty={!profile.religion} />
+              <ProfileField icon="flame-outline" label="Smoking" value={profile.smoking} onPress={() => setEditModal('smoking')} isEmpty={!profile.smoking} />
+              <ProfileField icon="beer-outline" label="Drinking" value={profile.drinking} onPress={() => setEditModal('drinking')} isEmpty={!profile.drinking} />
+              <ProfileField icon="fitness-outline" label="Exercise" value={profile.exercise} onPress={() => setEditModal('exercise')} isEmpty={!profile.exercise} />
+              <ProfileField icon="star-outline" label="Zodiac Sign" value={profile.zodiac} onPress={() => setEditModal('zodiac')} isEmpty={!profile.zodiac} />
+            </AccordionSection>
+
+            <View style={{ height: 40 }} />
+          </RNScrollView>
+        </SafeAreaView>
+      </Modal>
+
+      {/* ========== PROFILE PREVIEW MODAL (Reusing PremiumProfileView) ========== */}
+      <Modal visible={showProfilePreview} animationType="fade" onRequestClose={() => setShowProfilePreview(false)}>
+        <View style={{ flex: 1, backgroundColor: COLORS.bg }}>
+          <PremiumProfileView
+            visible={showProfilePreview}
+            profile={{
+              user_id: profile.userId || '',
+              name: profile.name || 'Your Name',
+              age: profile.age || 0,
+              gender: profile.gender || '',
+              location: profile.location || '',
+              bio: profile.bio || '',
+              genres: profile.genres || [],
+              topMovies: topMovies.map(m => ({ title: m.title, tmdb_id: m.id, poster_path: m.poster_path })),
+              filmLanguages: profile.filmLanguages || [],
+              languagesSpoken: profile.languagesSpoken || [],
+              movieFrequency: profile.movieFrequency || '',
+              ottTheatre: profile.ottTheatre || '',
+              match_level: 'Your Profile',
+              explanation: 'This is how others see your profile',
+              shared_interests: [],
+            }}
+            photos={userPhotos.length > 0 ? userPhotos : ['https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=800']}
+            mode={mode}
+            onClose={() => setShowProfilePreview(false)}
+            onSendMessage={async () => false}
+            hasAlreadySentRequest={true}
+            isSendingMessage={false}
+          />
+        </View>
+      </Modal>
 
       {/* Edit Modals */}
       <AvatarSelectModal
@@ -1087,12 +1357,201 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
   loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  scroll: { flex: 1, overflow: 'scroll' as any },
+  scrollContent: { paddingBottom: 120 },
+  
+  // ========== BUMBLE-INSPIRED PROFILE HEADER ==========
+  profileHeaderNew: {
+    alignItems: 'center',
+    paddingVertical: SPACING.xl,
+    paddingHorizontal: SPACING.l,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  profilePicContainer: {
+    position: 'relative',
+    marginBottom: SPACING.m,
+  },
+  completionRing: {
+    position: 'absolute',
+    top: -4,
+    left: -4,
+    right: -4,
+    bottom: -4,
+    borderRadius: 60,
+    overflow: 'hidden',
+  },
+  completionRingFill: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderWidth: 3,
+    borderRadius: 60,
+  },
+  completionRingBg: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderWidth: 3,
+    borderRadius: 60,
+    borderColor: COLORS.border,
+  },
+  profilePicNew: {
+    width: 108,
+    height: 108,
+    borderRadius: 54,
+    borderWidth: 3,
+    borderColor: COLORS.bg,
+  },
+  avatarFallback: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  completionBadge: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: COLORS.bg,
+  },
+  completionBadgeText: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#FFF',
+  },
+  profileInfoNew: {
+    alignItems: 'center',
+    marginBottom: SPACING.m,
+  },
+  profileNameNew: {
+    fontSize: 26,
+    fontWeight: 'bold',
+    color: COLORS.text,
+    marginBottom: 4,
+  },
+  profileSubtitleNew: {
+    fontSize: 15,
+    color: COLORS.textSecondary,
+  },
+  completeProfileBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 24,
+    gap: 8,
+    marginBottom: SPACING.s,
+  },
+  completeProfileBtnText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#FFF',
+  },
+  profileHint: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    marginTop: 4,
+  },
+  
+  // ========== SETTINGS CARDS ==========
+  settingsSection: {
+    padding: SPACING.m,
+    gap: SPACING.s,
+  },
+  settingsCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.bgCard,
+    padding: SPACING.m,
+    borderRadius: BORDER_RADIUS.l,
+    gap: SPACING.m,
+  },
+  settingsCardIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  settingsCardContent: {
+    flex: 1,
+  },
+  settingsCardTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.text,
+    marginBottom: 2,
+  },
+  settingsCardDesc: {
+    fontSize: 13,
+    color: COLORS.textMuted,
+  },
+  
+  // ========== LOGOUT BUTTON ==========
+  logoutBtnNew: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: SPACING.s,
+    marginHorizontal: SPACING.m,
+    marginTop: SPACING.l,
+    paddingVertical: 14,
+  },
+  logoutTextNew: {
+    fontSize: 15,
+    color: COLORS.textSecondary,
+  },
+  
+  // ========== EDIT PROFILE MODAL ==========
+  editModalContainer: {
+    flex: 1,
+    backgroundColor: COLORS.bg,
+  },
+  editModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: SPACING.m,
+    paddingVertical: SPACING.s,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  editModalClose: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  editModalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: COLORS.text,
+  },
+  editModalScroll: {
+    flex: 1,
+    padding: SPACING.m,
+  },
+  emptyHint: {
+    fontSize: 14,
+    color: COLORS.textMuted,
+    fontStyle: 'italic',
+    textAlign: 'center',
+    paddingVertical: SPACING.m,
+  },
+  
+  // ========== LEGACY STYLES ==========
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: SPACING.m, paddingVertical: SPACING.s, borderBottomWidth: 1, borderBottomColor: COLORS.border },
   backBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { flex: 1, fontSize: 18, fontWeight: 'bold', color: COLORS.text, textAlign: 'center' },
   savingIndicator: { width: 44 },
-  scroll: { flex: 1, overflow: 'scroll' as any },
-  scrollContent: { paddingBottom: 120 },
   profileHeader: { alignItems: 'center', paddingVertical: SPACING.xl, borderBottomWidth: 1, borderBottomColor: COLORS.border },
   avatarLarge: { width: 100, height: 100, borderRadius: 50, alignItems: 'center', justifyContent: 'center', marginBottom: SPACING.m },
   editAvatarBadge: { position: 'absolute', bottom: 0, right: 0, width: 28, height: 28, borderRadius: 14, backgroundColor: COLORS.primary, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: COLORS.bg },
