@@ -177,19 +177,29 @@ export default function PhotosScreen() {
       const data = await response.json();
 
       if (data.success) {
-        setPictures(prev => prev.map(p => 
+        // Update state with the new picture
+        const newPictures = pictures.map(p => 
           p.index === slotIndex 
             ? { ...p, uri: data.picture_url, uploading: false, uploaded: true }
             : p
-        ));
+        );
+        setPictures(newPictures);
         
-        // Also save the first picture as the primary profile picture
-        if (slotIndex === 1) {
-          const profile = await getProfile();
-          if (profile) {
-            await saveProfile({ ...profile, profilePicture: data.picture_url });
-          }
-        }
+        // Save ALL pictures to local profile storage for reliable sync
+        const profile = await getProfile();
+        const allPictureUrls = newPictures
+          .filter(p => p.uri && p.uploaded)
+          .map(p => p.uri as string);
+        
+        const updatedProfile = {
+          ...(profile || {}),
+          userId: userId,
+          profilePicture: allPictureUrls[0] || null, // First photo is primary
+          pictures: allPictureUrls, // Store all photos
+        };
+        
+        await saveProfile(updatedProfile);
+        console.log('[Photos] Saved', allPictureUrls.length, 'photos to local profile');
       } else {
         throw new Error(data.detail || 'Upload failed');
       }
@@ -220,11 +230,28 @@ export default function PhotosScreen() {
                 method: 'DELETE',
               });
 
-              setPictures(prev => prev.map(p => 
+              // Update state
+              const newPictures = pictures.map(p => 
                 p.index === slotIndex 
                   ? { ...p, uri: null, uploading: false, uploaded: false }
                   : p
-              ));
+              );
+              setPictures(newPictures);
+              
+              // Sync to local profile storage
+              const profile = await getProfile();
+              const remainingPictureUrls = newPictures
+                .filter(p => p.uri && p.uploaded)
+                .map(p => p.uri as string);
+              
+              const updatedProfile = {
+                ...(profile || {}),
+                profilePicture: remainingPictureUrls[0] || null,
+                pictures: remainingPictureUrls,
+              };
+              
+              await saveProfile(updatedProfile);
+              console.log('[Photos] Updated local profile after delete, remaining:', remainingPictureUrls.length);
             } catch (error) {
               console.error('Delete error:', error);
               Alert.alert('Error', 'Failed to remove picture.');

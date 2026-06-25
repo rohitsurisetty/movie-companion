@@ -613,9 +613,24 @@ export default function ProfileScreen() {
 
   const loadProfile = async () => {
     setLoading(true);
-    const data = await getProfile();
-    if (data) {
-      setProfile(data);
+    try {
+      const data = await getProfile();
+      const auth = await import('../../src/store').then(m => m.getAuth());
+      
+      if (data) {
+        // Ensure userId is set from auth if not in profile
+        const profileWithUserId = {
+          ...data,
+          userId: data.userId || auth?.user_id,
+        };
+        setProfile(profileWithUserId);
+        console.log('[Profile] Loaded profile for userId:', profileWithUserId.userId);
+      } else if (auth?.user_id) {
+        // No profile data but we have auth - create minimal profile
+        setProfile({ ...initialProfileData, userId: auth.user_id });
+      }
+    } catch (error) {
+      console.log('[Profile] Error loading profile:', error);
     }
     setLoading(false);
   };
@@ -623,19 +638,59 @@ export default function ProfileScreen() {
   const loadPhotos = async () => {
     try {
       const storedProfile = await getProfile();
-      if (storedProfile?.userId) {
-        const response = await fetch(`${BACKEND_URL}/api/user/pictures/${storedProfile.userId}`);
-        if (response.ok) {
-          const data = await response.json();
-          // Backend returns pictures as object { picture_1: url, picture_2: url }
-          // Convert to array and filter out null/undefined values
-          const picturesObj = data.pictures || {};
-          const picturesArray = Object.values(picturesObj).filter((url): url is string => Boolean(url));
-          setUserPhotos(picturesArray);
+      const auth = await import('../../src/store').then(m => m.getAuth());
+      const userId = storedProfile?.userId || auth?.user_id;
+      
+      console.log('[Profile] Loading photos for userId:', userId);
+      
+      let backendPhotos: string[] = [];
+      let localPhotos: string[] = [];
+      
+      // First, try to get photos from backend
+      if (userId) {
+        try {
+          const response = await fetch(`${BACKEND_URL}/api/user/pictures/${userId}`);
+          if (response.ok) {
+            const data = await response.json();
+            console.log('[Profile] Backend pictures response:', JSON.stringify(data));
+            
+            // Backend returns { success: true, pictures: { picture_1: url, picture_2: url } }
+            const picturesObj = data.pictures || {};
+            backendPhotos = [
+              picturesObj.picture_1,
+              picturesObj.picture_2,
+              picturesObj.picture_3,
+              picturesObj.picture_4,
+              picturesObj.picture_5,
+            ].filter((url): url is string => Boolean(url) && typeof url === 'string');
+            
+            console.log('[Profile] Valid backend photos:', backendPhotos.length);
+          }
+        } catch (apiError) {
+          console.log('[Profile] Backend API error:', apiError);
         }
       }
+      
+      // Also check local storage
+      if (storedProfile?.profilePicture) {
+        localPhotos.push(storedProfile.profilePicture);
+      }
+      if (storedProfile?.pictures && Array.isArray(storedProfile.pictures)) {
+        const validLocalPics = storedProfile.pictures.filter(Boolean);
+        localPhotos = [...localPhotos, ...validLocalPics];
+      }
+      
+      console.log('[Profile] Local photos found:', localPhotos.length);
+      
+      // Merge and dedupe - prefer backend photos, then local
+      const allPhotos = [...new Set([...backendPhotos, ...localPhotos])];
+      
+      console.log('[Profile] Total unique photos:', allPhotos.length);
+      setUserPhotos(allPhotos);
+      
     } catch (error) {
-      console.log('Error loading photos:', error);
+      console.log('[Profile] Error loading photos:', error);
+      setUserPhotos([]);
     }
   };
 

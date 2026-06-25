@@ -41,6 +41,10 @@ export type ProfileData = {
   visibilityToggles: Record<string, boolean>;
   movieBuddyMode: boolean;
   movieDateMode: boolean;
+  // Photo fields - stored from photos.tsx
+  userId?: string;
+  profilePicture?: string;
+  pictures?: string[];
 };
 
 export const initialProfileData: ProfileData = {
