@@ -789,6 +789,351 @@ const ComingSoonModal = ({
   </Modal>
 );
 
+// ============ UNMATCH REASONS ============
+const UNMATCH_REASONS = [
+  { id: 'not_interesting', label: 'Conversation not interesting', icon: 'chatbubble-ellipses-outline' },
+  { id: 'not_my_type', label: 'Not my type', icon: 'heart-dislike-outline' },
+  { id: 'different_expectations', label: 'Different expectations', icon: 'git-compare-outline' },
+  { id: 'found_someone', label: 'Found someone else', icon: 'people-outline' },
+  { id: 'not_active', label: 'Not active enough', icon: 'time-outline' },
+  { id: 'other', label: 'Other', icon: 'ellipsis-horizontal-outline' },
+];
+
+// ============ REPORT REASONS ============
+const REPORT_REASONS = [
+  { id: 'fake_profile', label: 'Fake profile', icon: 'person-remove-outline' },
+  { id: 'spam_scam', label: 'Spam or scam', icon: 'warning-outline' },
+  { id: 'harassment', label: 'Harassment', icon: 'hand-left-outline' },
+  { id: 'sexual_content', label: 'Sexual content', icon: 'eye-off-outline' },
+  { id: 'inappropriate', label: 'Inappropriate behaviour', icon: 'alert-circle-outline' },
+  { id: 'hate_speech', label: 'Hate speech', icon: 'megaphone-outline' },
+  { id: 'underage', label: 'Underage user', icon: 'shield-outline' },
+  { id: 'safety_concern', label: 'Safety concern', icon: 'fitness-outline' },
+  { id: 'offline_misconduct', label: 'Offline misconduct', icon: 'location-outline' },
+  { id: 'other', label: 'Other', icon: 'ellipsis-horizontal-outline' },
+];
+
+// ============ PROFESSIONAL UNMATCH MODAL ============
+const UnmatchModal = ({
+  visible,
+  onClose,
+  userName,
+  onUnmatch,
+  onTransitionToReport,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  userName: string;
+  onUnmatch: (reason: string) => Promise<void>;
+  onTransitionToReport: () => void;
+}) => {
+  const [step, setStep] = useState<'reason' | 'confirm_report'>('reason');
+  const [selectedReason, setSelectedReason] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const insets = useSafeAreaInsets();
+
+  const handleReasonSelect = (reasonId: string) => {
+    setSelectedReason(reasonId);
+    setStep('confirm_report');
+  };
+
+  const handleConfirmUnmatch = async (shouldReport: boolean) => {
+    if (shouldReport) {
+      onClose();
+      onTransitionToReport();
+    } else {
+      setIsSubmitting(true);
+      await onUnmatch(selectedReason || 'other');
+      setIsSubmitting(false);
+      setStep('reason');
+      setSelectedReason(null);
+      onClose();
+    }
+  };
+
+  const handleClose = () => {
+    setStep('reason');
+    setSelectedReason(null);
+    onClose();
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
+      <View style={styles.unmatchModalOverlay}>
+        <View style={[styles.unmatchModalContainer, { paddingBottom: insets.bottom + 16 }]}>
+          {/* Header */}
+          <View style={styles.unmatchModalHeader}>
+            <TouchableOpacity onPress={handleClose} style={styles.unmatchModalClose}>
+              <Ionicons name="close" size={24} color={COLORS.textMuted} />
+            </TouchableOpacity>
+          </View>
+
+          {step === 'reason' ? (
+            <>
+              {/* Step 1: Reason Selection */}
+              <View style={styles.unmatchModalIconContainer}>
+                <View style={styles.unmatchModalIconBg}>
+                  <Ionicons name="heart-dislike" size={32} color={COLORS.warning} />
+                </View>
+              </View>
+              <Text style={styles.unmatchModalTitle}>Unmatch {userName}</Text>
+              <Text style={styles.unmatchModalSubtitle}>
+                {"We'd love to understand why. This helps us improve your experience."}
+              </Text>
+
+              <ScrollView style={styles.unmatchReasonsList} showsVerticalScrollIndicator={false}>
+                {UNMATCH_REASONS.map((reason) => (
+                  <TouchableOpacity
+                    key={reason.id}
+                    style={styles.unmatchReasonItem}
+                    onPress={() => handleReasonSelect(reason.id)}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name={reason.icon as any} size={22} color={COLORS.textSecondary} />
+                    <Text style={styles.unmatchReasonText}>{reason.label}</Text>
+                    <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </>
+          ) : (
+            <>
+              {/* Step 2: Confirm Report */}
+              <View style={styles.unmatchModalIconContainer}>
+                <View style={[styles.unmatchModalIconBg, { backgroundColor: 'rgba(255, 184, 0, 0.15)' }]}>
+                  <Ionicons name="help-circle" size={32} color={COLORS.warning} />
+                </View>
+              </View>
+              <Text style={styles.unmatchModalTitle}>One more thing...</Text>
+              <Text style={styles.unmatchModalSubtitle}>
+                Do you think this user should be reported for violating our community guidelines?
+              </Text>
+
+              <View style={styles.unmatchConfirmActions}>
+                <TouchableOpacity
+                  style={[styles.unmatchConfirmBtn, styles.unmatchConfirmBtnNo]}
+                  onPress={() => handleConfirmUnmatch(false)}
+                  disabled={isSubmitting}
+                >
+                  {isSubmitting ? (
+                    <ActivityIndicator size="small" color={COLORS.text} />
+                  ) : (
+                    <>
+                      <Ionicons name="close-circle-outline" size={22} color={COLORS.text} />
+                      <Text style={styles.unmatchConfirmBtnText}>No, just unmatch</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.unmatchConfirmBtn, styles.unmatchConfirmBtnYes]}
+                  onPress={() => handleConfirmUnmatch(true)}
+                >
+                  <Ionicons name="flag-outline" size={22} color="#FFF" />
+                  <Text style={[styles.unmatchConfirmBtnText, { color: '#FFF' }]}>Yes, report them</Text>
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity onPress={() => setStep('reason')} style={styles.unmatchBackBtn}>
+                <Ionicons name="arrow-back" size={18} color={COLORS.textMuted} />
+                <Text style={styles.unmatchBackBtnText}>Back</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
+      </View>
+    </Modal>
+  );
+};
+
+// ============ PROFESSIONAL REPORT MODAL (Bumble-inspired) ============
+const ReportModal = ({
+  visible,
+  onClose,
+  userName,
+  onReport,
+  onUnmatchInstead,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  userName: string;
+  onReport: (reason: string, details?: string) => Promise<void>;
+  onUnmatchInstead: () => void;
+}) => {
+  const [step, setStep] = useState<'intro' | 'reasons' | 'details' | 'confirmation'>('intro');
+  const [selectedReason, setSelectedReason] = useState<string | null>(null);
+  const [additionalDetails, setAdditionalDetails] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const insets = useSafeAreaInsets();
+
+  const handleStartReport = () => {
+    setStep('reasons');
+  };
+
+  const handleReasonSelect = (reasonId: string) => {
+    setSelectedReason(reasonId);
+    setStep('details');
+  };
+
+  const handleSubmitReport = async () => {
+    setIsSubmitting(true);
+    await onReport(selectedReason || 'other', additionalDetails || undefined);
+    setIsSubmitting(false);
+    setStep('confirmation');
+  };
+
+  const handleClose = () => {
+    setStep('intro');
+    setSelectedReason(null);
+    setAdditionalDetails('');
+    onClose();
+  };
+
+  const handleUnmatchInstead = () => {
+    handleClose();
+    onUnmatchInstead();
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
+      <View style={styles.reportModalOverlay}>
+        <View style={[styles.reportModalContainer, { paddingBottom: insets.bottom + 16 }]}>
+          {/* Header */}
+          <View style={styles.reportModalHeader}>
+            <TouchableOpacity onPress={handleClose} style={styles.reportModalClose}>
+              <Ionicons name="close" size={24} color={COLORS.text} />
+            </TouchableOpacity>
+          </View>
+
+          {step === 'intro' && (
+            <>
+              {/* Intro Step - Bumble-inspired */}
+              <Text style={styles.reportModalTitle}>Report {userName}</Text>
+              <Text style={styles.reportModalIntroText}>
+                {"Let us know when someone's broken our guidelines. They won't know that you've reported them, or why."}
+              </Text>
+
+              <View style={styles.reportStepsContainer}>
+                <View style={styles.reportStep}>
+                  <View style={styles.reportStepNumber}><Text style={styles.reportStepNumberText}>1</Text></View>
+                  <Text style={styles.reportStepText}>Let us know what happened</Text>
+                </View>
+                <View style={styles.reportStep}>
+                  <View style={styles.reportStepNumber}><Text style={styles.reportStepNumberText}>2</Text></View>
+                  <Text style={styles.reportStepText}>{"We'll investigate your report"}</Text>
+                </View>
+                <View style={styles.reportStep}>
+                  <View style={styles.reportStepNumber}><Text style={styles.reportStepNumberText}>3</Text></View>
+                  <Text style={styles.reportStepText}>{"We'll keep you updated"}</Text>
+                </View>
+              </View>
+
+              <TouchableOpacity style={styles.reportUnmatchOption} onPress={handleUnmatchInstead}>
+                <Ionicons name="heart-dislike-outline" size={22} color={COLORS.textSecondary} />
+                <View style={styles.reportUnmatchOptionText}>
+                  <Text style={styles.reportUnmatchOptionTitle}>{"Don't think they've broken our guidelines?"}</Text>
+                  <Text style={styles.reportUnmatchOptionSubtitle}>Unmatch instead</Text>
+                </View>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.reportStartBtn} onPress={handleStartReport}>
+                <Text style={styles.reportStartBtnText}>Start report</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.reportUnmatchBtn} onPress={handleUnmatchInstead}>
+                <Text style={styles.reportUnmatchBtnText}>Unmatch instead</Text>
+              </TouchableOpacity>
+            </>
+          )}
+
+          {step === 'reasons' && (
+            <>
+              {/* Reasons Step */}
+              <Text style={styles.reportModalTitle}>Report</Text>
+              <Text style={styles.reportModalSubtitle}>
+                {"Don't worry, your feedback is anonymous and they won't know that you've blocked or reported them."}
+              </Text>
+
+              <ScrollView style={styles.reportReasonsList} showsVerticalScrollIndicator={false}>
+                {REPORT_REASONS.map((reason) => (
+                  <TouchableOpacity
+                    key={reason.id}
+                    style={styles.reportReasonItem}
+                    onPress={() => handleReasonSelect(reason.id)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.reportReasonText}>{reason.label}</Text>
+                    <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
+              <TouchableOpacity onPress={() => setStep('intro')} style={styles.reportBackBtn}>
+                <Ionicons name="arrow-back" size={18} color={COLORS.textMuted} />
+                <Text style={styles.reportBackBtnText}>Back</Text>
+              </TouchableOpacity>
+            </>
+          )}
+
+          {step === 'details' && (
+            <>
+              {/* Details Step */}
+              <Text style={styles.reportModalTitle}>Tell us more</Text>
+              <Text style={styles.reportModalSubtitle}>
+                Provide any additional details that might help us investigate. (Optional)
+              </Text>
+
+              <TextInput
+                style={styles.reportDetailsInput}
+                placeholder="What happened? Share any relevant details..."
+                placeholderTextColor={COLORS.textMuted}
+                value={additionalDetails}
+                onChangeText={setAdditionalDetails}
+                multiline
+                numberOfLines={4}
+                maxLength={500}
+              />
+              <Text style={styles.reportDetailsCount}>{additionalDetails.length}/500</Text>
+
+              <TouchableOpacity 
+                style={styles.reportSubmitBtn} 
+                onPress={handleSubmitReport}
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? (
+                  <ActivityIndicator size="small" color="#FFF" />
+                ) : (
+                  <Text style={styles.reportSubmitBtnText}>Submit Report</Text>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity onPress={() => setStep('reasons')} style={styles.reportBackBtn}>
+                <Ionicons name="arrow-back" size={18} color={COLORS.textMuted} />
+                <Text style={styles.reportBackBtnText}>Back</Text>
+              </TouchableOpacity>
+            </>
+          )}
+
+          {step === 'confirmation' && (
+            <>
+              {/* Confirmation Step */}
+              <View style={styles.reportConfirmationIcon}>
+                <Ionicons name="shield-checkmark" size={48} color={COLORS.success} />
+              </View>
+              <Text style={styles.reportModalTitle}>Thank you</Text>
+              <Text style={styles.reportConfirmationText}>
+                Our trust and safety team will review this report. We take every report seriously and will take appropriate action.
+              </Text>
+
+              <TouchableOpacity style={styles.reportDoneBtn} onPress={handleClose}>
+                <Text style={styles.reportDoneBtnText}>Done</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
+      </View>
+    </Modal>
+  );
+};
+
 // ============ MESSAGE REQUEST CARD ============
 const MessageRequestCard = ({ 
   request, 
@@ -894,6 +1239,10 @@ const GiftedChatScreen = ({
   const [showDidYouMeet, setShowDidYouMeet] = useState(false);
   const [showComingSoon, setShowComingSoon] = useState(false);
   const [comingSoonFeature, setComingSoonFeature] = useState('');
+  
+  // New modal states for redesigned flows
+  const [showUnmatchModal, setShowUnmatchModal] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
   
   const otherUser = conversation.other_user;
   const otherUserId = conversation.other_user_id;
@@ -1020,48 +1369,50 @@ const GiftedChatScreen = ({
     onSend([newMessage]);
   };
 
-  const handleUnmatch = () => {
-    Alert.alert(
-      'Unmatch',
-      `Are you sure you want to unmatch with ${otherUser?.name}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Unmatch',
-          style: 'destructive',
-          onPress: async () => {
-            await fetch(`${API_BASE}/api/chat/unmatch`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ user_id: userId, other_user_id: otherUserId }),
-            });
-            onBack();
-          },
-        },
-      ]
-    );
+  // New Unmatch handler with modal
+  const handleUnmatchWithReason = async (reason: string) => {
+    try {
+      await fetch(`${API_BASE}/api/chat/unmatch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          user_id: userId, 
+          other_user_id: otherUserId,
+          reason: reason 
+        }),
+      });
+      onBack();
+    } catch (error) {
+      console.error('Error unmatching:', error);
+    }
   };
 
-  const handleReport = () => {
-    Alert.alert(
-      'Report User',
-      'Why are you reporting this user?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Inappropriate', onPress: () => submitReport('inappropriate') },
-        { text: 'Harassment', onPress: () => submitReport('harassment') },
-        { text: 'Fake Profile', onPress: () => submitReport('fake_profile') },
-      ]
-    );
-  };
-
-  const submitReport = async (reason: string) => {
-    await fetch(`${API_BASE}/api/chat/report`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reporter_id: userId, reported_id: otherUserId, reason }),
-    });
-    Alert.alert('Reported', 'Thank you. We will review this report.');
+  // New Report handler with details
+  const handleReportWithDetails = async (reason: string, details?: string) => {
+    try {
+      await fetch(`${API_BASE}/api/chat/report`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          reporter_id: userId, 
+          reported_id: otherUserId, 
+          reason,
+          details: details || null
+        }),
+      });
+      // After reporting, also unmatch
+      await fetch(`${API_BASE}/api/chat/unmatch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          user_id: userId, 
+          other_user_id: otherUserId,
+          reason: 'reported' 
+        }),
+      });
+    } catch (error) {
+      console.error('Error reporting:', error);
+    }
   };
 
   // Custom bubble
@@ -1213,7 +1564,7 @@ const GiftedChatScreen = ({
         />
       )}
 
-      {/* Menu Modal */}
+      {/* Simplified Menu Modal - Only 4 options */}
       <Modal visible={showMenu} transparent animationType="fade" onRequestClose={() => setShowMenu(false)}>
         <Pressable style={styles.menuOverlay} onPress={() => setShowMenu(false)}>
           <View style={styles.menuContainer}>
@@ -1226,24 +1577,11 @@ const GiftedChatScreen = ({
               <Text style={styles.menuItemText}>Did you meet?</Text>
             </TouchableOpacity>
             <View style={styles.menuDivider} />
-            <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); showComingSoonModal('Media Attachments'); }}>
-              <Ionicons name="image-outline" size={22} color={COLORS.text} />
-              <Text style={styles.menuItemText}>Send Photo</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); showComingSoonModal('GIFs'); }}>
-              <Ionicons name="happy-outline" size={22} color={COLORS.text} />
-              <Text style={styles.menuItemText}>Send GIF</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); showComingSoonModal('Voice Notes'); }}>
-              <Ionicons name="mic-outline" size={22} color={COLORS.text} />
-              <Text style={styles.menuItemText}>Voice Note</Text>
-            </TouchableOpacity>
-            <View style={styles.menuDivider} />
-            <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); handleUnmatch(); }}>
+            <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); setShowUnmatchModal(true); }}>
               <Ionicons name="heart-dislike-outline" size={22} color={COLORS.warning} />
               <Text style={[styles.menuItemText, { color: COLORS.warning }]}>Unmatch</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); handleReport(); }}>
+            <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); setShowReportModal(true); }}>
               <Ionicons name="flag-outline" size={22} color={COLORS.primary} />
               <Text style={[styles.menuItemText, { color: COLORS.primary }]}>Report</Text>
             </TouchableOpacity>
@@ -1266,6 +1604,24 @@ const GiftedChatScreen = ({
         otherUserName={otherUser?.name || 'this person'}
         conversationId={conversation.conversation_id}
         userId={userId}
+      />
+
+      {/* Professional Unmatch Modal */}
+      <UnmatchModal
+        visible={showUnmatchModal}
+        onClose={() => setShowUnmatchModal(false)}
+        userName={otherUser?.name || 'this user'}
+        onUnmatch={handleUnmatchWithReason}
+        onTransitionToReport={() => setShowReportModal(true)}
+      />
+
+      {/* Professional Report Modal (Bumble-inspired) */}
+      <ReportModal
+        visible={showReportModal}
+        onClose={() => setShowReportModal(false)}
+        userName={otherUser?.name || 'this user'}
+        onReport={handleReportWithDetails}
+        onUnmatchInstead={() => setShowUnmatchModal(true)}
       />
 
       {/* Coming Soon Modal */}
@@ -1721,4 +2077,59 @@ const styles = StyleSheet.create({
   comingSoonText: { fontSize: 14, color: COLORS.textSecondary, textAlign: 'center', marginTop: 12, lineHeight: 20 },
   comingSoonBtn: { marginTop: 24, backgroundColor: COLORS.primary, paddingHorizontal: 32, paddingVertical: 14, borderRadius: 24 },
   comingSoonBtnText: { fontSize: 16, fontWeight: '600', color: '#FFF' },
+
+  // Professional Unmatch Modal
+  unmatchModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  unmatchModalContainer: { backgroundColor: COLORS.bgCard, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, maxHeight: '80%' },
+  unmatchModalHeader: { flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 8 },
+  unmatchModalClose: { padding: 8 },
+  unmatchModalIconContainer: { alignItems: 'center', marginBottom: 16 },
+  unmatchModalIconBg: { width: 64, height: 64, borderRadius: 32, backgroundColor: 'rgba(255, 184, 0, 0.15)', justifyContent: 'center', alignItems: 'center' },
+  unmatchModalTitle: { fontSize: 22, fontWeight: 'bold', color: COLORS.text, textAlign: 'center' },
+  unmatchModalSubtitle: { fontSize: 14, color: COLORS.textSecondary, textAlign: 'center', marginTop: 8, marginBottom: 20, lineHeight: 20, paddingHorizontal: 16 },
+  unmatchReasonsList: { maxHeight: 300 },
+  unmatchReasonItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 16, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: COLORS.border, gap: 14 },
+  unmatchReasonText: { flex: 1, fontSize: 16, color: COLORS.text },
+  unmatchConfirmActions: { marginTop: 24, gap: 12 },
+  unmatchConfirmBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 16, borderRadius: 24, gap: 10 },
+  unmatchConfirmBtnNo: { backgroundColor: COLORS.bgInput, borderWidth: 1, borderColor: COLORS.border },
+  unmatchConfirmBtnYes: { backgroundColor: COLORS.primary },
+  unmatchConfirmBtnText: { fontSize: 16, fontWeight: '600', color: COLORS.text },
+  unmatchBackBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 16, gap: 6 },
+  unmatchBackBtnText: { fontSize: 14, color: COLORS.textMuted },
+
+  // Professional Report Modal (Bumble-inspired)
+  reportModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  reportModalContainer: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, maxHeight: '90%' },
+  reportModalHeader: { flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 8 },
+  reportModalClose: { padding: 8 },
+  reportModalTitle: { fontSize: 24, fontWeight: 'bold', color: '#1A1A1A', textAlign: 'center' },
+  reportModalSubtitle: { fontSize: 14, color: '#666666', textAlign: 'center', marginTop: 8, marginBottom: 20, lineHeight: 20, paddingHorizontal: 16 },
+  reportModalIntroText: { fontSize: 15, color: '#666666', textAlign: 'center', marginTop: 12, marginBottom: 24, lineHeight: 22, paddingHorizontal: 16 },
+  reportStepsContainer: { marginBottom: 24 },
+  reportStep: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, gap: 16 },
+  reportStepNumber: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#1A1A1A', justifyContent: 'center', alignItems: 'center' },
+  reportStepNumberText: { fontSize: 14, fontWeight: 'bold', color: '#FFFFFF' },
+  reportStepText: { fontSize: 15, color: '#1A1A1A', flex: 1 },
+  reportUnmatchOption: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F5F5F5', borderRadius: 16, padding: 16, marginBottom: 24, gap: 14 },
+  reportUnmatchOptionText: { flex: 1 },
+  reportUnmatchOptionTitle: { fontSize: 15, fontWeight: '600', color: '#1A1A1A' },
+  reportUnmatchOptionSubtitle: { fontSize: 13, color: '#666666', marginTop: 2 },
+  reportStartBtn: { backgroundColor: '#1A1A1A', paddingVertical: 16, borderRadius: 30, alignItems: 'center', marginBottom: 12 },
+  reportStartBtnText: { fontSize: 16, fontWeight: '600', color: '#FFFFFF' },
+  reportUnmatchBtn: { paddingVertical: 12, alignItems: 'center' },
+  reportUnmatchBtnText: { fontSize: 16, fontWeight: '500', color: '#666666' },
+  reportReasonsList: { maxHeight: 400 },
+  reportReasonItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 18, borderBottomWidth: 1, borderBottomColor: '#EEEEEE' },
+  reportReasonText: { fontSize: 16, color: '#1A1A1A' },
+  reportBackBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 20, gap: 6 },
+  reportBackBtnText: { fontSize: 14, color: '#666666' },
+  reportDetailsInput: { backgroundColor: '#F5F5F5', borderRadius: 16, padding: 16, fontSize: 15, color: '#1A1A1A', minHeight: 120, textAlignVertical: 'top', marginTop: 16 },
+  reportDetailsCount: { fontSize: 12, color: '#999999', textAlign: 'right', marginTop: 8 },
+  reportSubmitBtn: { backgroundColor: '#1A1A1A', paddingVertical: 16, borderRadius: 30, alignItems: 'center', marginTop: 20 },
+  reportSubmitBtnText: { fontSize: 16, fontWeight: '600', color: '#FFFFFF' },
+  reportConfirmationIcon: { alignItems: 'center', marginBottom: 20, marginTop: 20 },
+  reportConfirmationText: { fontSize: 15, color: '#666666', textAlign: 'center', marginTop: 12, lineHeight: 22, paddingHorizontal: 16 },
+  reportDoneBtn: { backgroundColor: '#1A1A1A', paddingVertical: 16, borderRadius: 30, alignItems: 'center', marginTop: 32 },
+  reportDoneBtnText: { fontSize: 16, fontWeight: '600', color: '#FFFFFF' },
 });
