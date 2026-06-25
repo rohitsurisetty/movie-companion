@@ -8,6 +8,7 @@ import {
   Text,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { usePathname } from 'expo-router';
 import { useTina } from '../context/TinaContext';
 
 // Tina avatar
@@ -28,11 +29,15 @@ export default function FloatingTinaButton({
 }: FloatingTinaButtonProps) {
   const insets = useSafeAreaInsets();
   const { state, toggleTina, shouldShowFloatingButton } = useTina();
+  const pathname = usePathname();
   const scaleAnim = React.useRef(new Animated.Value(1)).current;
   const pulseAnim = React.useRef(new Animated.Value(1)).current;
 
+  // Hide on chat tab - user doesn't want Tina while chatting with someone
+  const isOnChatTab = pathname === '/chat' || pathname.startsWith('/chat');
+
   // Check if button should be visible based on context
-  const isVisible = visible && shouldShowFloatingButton();
+  const isVisible = visible && shouldShowFloatingButton() && !isOnChatTab;
 
   // Pulse animation when there's an unread message
   React.useEffect(() => {

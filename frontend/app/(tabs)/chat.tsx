@@ -1495,7 +1495,7 @@ const styles = StyleSheet.create({
   tabTextActive: { color: COLORS.primary, fontWeight: '600' },
   
   // List
-  listContent: { flex: 1, paddingHorizontal: 16 },
+  listContent: { paddingHorizontal: 16, paddingBottom: 20 },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   loadingText: { color: COLORS.textSecondary, marginTop: 12 },
   
