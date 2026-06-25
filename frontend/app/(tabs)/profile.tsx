@@ -590,7 +590,7 @@ const fieldStyles = StyleSheet.create({
 });
 
 // ============ EDIT PROFILE MODAL CONTENT ============
-// Separated component that uses useSafeAreaInsets for proper Dynamic Island handling
+// Single modal approach - edit forms shown inline to avoid nested modal z-index issues
 function EditProfileModalContent({
   visible,
   onClose,
@@ -598,7 +598,9 @@ function EditProfileModalContent({
   topMovies,
   expandedSections,
   toggleSection,
-  onOpenEditModal,
+  editModal,
+  setEditModal,
+  updateField,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -606,136 +608,717 @@ function EditProfileModalContent({
   topMovies: MovieSelection[];
   expandedSections: Set<string>;
   toggleSection: (section: string) => void;
-  onOpenEditModal: (type: EditModalType) => void;
+  editModal: EditModalType;
+  setEditModal: (type: EditModalType) => void;
+  updateField: (field: string, value: any) => void;
 }) {
   const insets = useSafeAreaInsets();
   
   if (!visible) return null;
 
+  // Get title for edit mode
+  const getEditTitle = () => {
+    switch (editModal) {
+      case 'location': return 'Edit Location';
+      case 'bio': return 'Edit Bio';
+      case 'movieFrequency': return 'Movie Frequency';
+      case 'ottTheatre': return 'OTT vs Theatre';
+      case 'genres': return 'Favourite Genres';
+      case 'filmLanguages': return 'Film Languages';
+      case 'languagesSpoken': return 'Languages Spoken';
+      case 'relationshipIntent': return 'Looking For';
+      case 'partnerPreference': return 'Want to Meet';
+      case 'height': return 'Edit Height';
+      case 'religion': return 'Religion';
+      case 'smoking': return 'Smoking';
+      case 'drinking': return 'Drinking';
+      case 'exercise': return 'Exercise';
+      case 'zodiac': return 'Zodiac Sign';
+      default: return 'Edit Profile';
+    }
+  };
+
+  // Handle back button - go back to list or close modal
+  const handleBack = () => {
+    if (editModal) {
+      setEditModal(null);
+    } else {
+      onClose();
+    }
+  };
+
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+    <Modal visible={visible} animationType="slide" onRequestClose={handleBack}>
       <View style={[editModalStyles.container, { paddingTop: insets.top }]}>
-        {/* Header with proper padding for Dynamic Island */}
+        {/* Header with back arrow */}
         <View style={editModalStyles.header}>
-          <TouchableOpacity onPress={onClose} style={editModalStyles.closeBtn}>
-            <Ionicons name="close" size={28} color={COLORS.text} />
+          <TouchableOpacity onPress={handleBack} style={editModalStyles.closeBtn}>
+            <Ionicons name="arrow-back" size={28} color={COLORS.text} />
           </TouchableOpacity>
-          <Text style={editModalStyles.title}>Edit Profile</Text>
+          <Text style={editModalStyles.title}>{editModal ? getEditTitle() : 'Edit Profile'}</Text>
           <View style={{ width: 44 }} />
         </View>
 
-        <RNScrollView style={editModalStyles.scroll} showsVerticalScrollIndicator={false}>
-          {/* Basic Information */}
-          <AccordionSection 
-            title="Basic Information"
-            icon="person-outline"
-            expanded={expandedSections.has('basic')}
-            onToggle={() => toggleSection('basic')}
-          >
-            <ProfileField icon="person-outline" label="Name" value={profile.name} disabled isEmpty={!profile.name} />
-            <ProfileField icon="male-female-outline" label="Gender" value={profile.gender} disabled isEmpty={!profile.gender} />
-            <ProfileField icon="location-outline" label="Location" value={getPartialLocation(profile.location)} onPress={() => onOpenEditModal('location')} isEmpty={!profile.location} />
-          </AccordionSection>
+        {/* Show edit form OR accordion list based on editModal state */}
+        {editModal ? (
+          <InlineEditForm
+            editModal={editModal}
+            profile={profile}
+            onSave={(field, value) => {
+              updateField(field, value);
+              setEditModal(null);
+            }}
+            onCancel={() => setEditModal(null)}
+          />
+        ) : (
+          <RNScrollView style={editModalStyles.scroll} showsVerticalScrollIndicator={false}>
+            {/* Basic Information */}
+            <AccordionSection 
+              title="Basic Information"
+              icon="person-outline"
+              expanded={expandedSections.has('basic')}
+              onToggle={() => toggleSection('basic')}
+            >
+              <ProfileField icon="person-outline" label="Name" value={profile.name} disabled isEmpty={!profile.name} />
+              <ProfileField icon="male-female-outline" label="Gender" value={profile.gender} disabled isEmpty={!profile.gender} />
+              <ProfileField icon="location-outline" label="Location" value={getPartialLocation(profile.location)} onPress={() => setEditModal('location')} isEmpty={!profile.location} />
+            </AccordionSection>
 
-          {/* Bio */}
-          <AccordionSection 
-            title="Bio"
-            icon="document-text-outline"
-            expanded={expandedSections.has('bio')}
-            onToggle={() => toggleSection('bio')}
-          >
-            <ProfileField icon="document-text-outline" label="About Me" value={profile.bio} onPress={() => onOpenEditModal('bio')} isEmpty={!profile.bio} />
-          </AccordionSection>
+            {/* Bio */}
+            <AccordionSection 
+              title="Bio"
+              icon="document-text-outline"
+              expanded={expandedSections.has('bio')}
+              onToggle={() => toggleSection('bio')}
+            >
+              <ProfileField icon="document-text-outline" label="About Me" value={profile.bio} onPress={() => setEditModal('bio')} isEmpty={!profile.bio} />
+            </AccordionSection>
 
-          {/* Movie Personality */}
-          <AccordionSection 
-            title="Movie Personality"
-            icon="film-outline"
-            expanded={expandedSections.has('movie')}
-            onToggle={() => toggleSection('movie')}
-          >
-            <ProfileField icon="time-outline" label="Movie Frequency" value={profile.movieFrequency} onPress={() => onOpenEditModal('movieFrequency')} isEmpty={!profile.movieFrequency} />
-            <ProfileField icon="tv-outline" label="OTT vs Theatre" value={profile.ottTheatre} onPress={() => onOpenEditModal('ottTheatre')} isEmpty={!profile.ottTheatre} />
-          </AccordionSection>
+            {/* Movie Personality */}
+            <AccordionSection 
+              title="Movie Personality"
+              icon="film-outline"
+              expanded={expandedSections.has('movie')}
+              onToggle={() => toggleSection('movie')}
+            >
+              <ProfileField icon="time-outline" label="Movie Frequency" value={profile.movieFrequency} onPress={() => setEditModal('movieFrequency')} isEmpty={!profile.movieFrequency} />
+              <ProfileField icon="tv-outline" label="OTT vs Theatre" value={profile.ottTheatre} onPress={() => setEditModal('ottTheatre')} isEmpty={!profile.ottTheatre} />
+            </AccordionSection>
 
-          {/* Favorite Genres */}
-          <AccordionSection 
-            title="Favorite Genres"
-            icon="heart-outline"
-            expanded={expandedSections.has('genres')}
-            onToggle={() => toggleSection('genres')}
-          >
-            <ProfileField icon="film-outline" label="Favourite Genres" value={profile.genres} onPress={() => onOpenEditModal('genres')} isArray isEmpty={!profile.genres?.length} />
-          </AccordionSection>
+            {/* Favorite Genres */}
+            <AccordionSection 
+              title="Favorite Genres"
+              icon="heart-outline"
+              expanded={expandedSections.has('genres')}
+              onToggle={() => toggleSection('genres')}
+            >
+              <ProfileField icon="film-outline" label="Favourite Genres" value={profile.genres} onPress={() => setEditModal('genres')} isArray isEmpty={!profile.genres?.length} />
+            </AccordionSection>
 
-          {/* Top Movies */}
-          <AccordionSection 
-            title="Top Movies"
-            icon="star-outline"
-            expanded={expandedSections.has('topmovies')}
-            onToggle={() => toggleSection('topmovies')}
-          >
-            {topMovies.length > 0 ? (
-              <View style={editModalStyles.moviesGrid}>
-                {topMovies.map((movie, i) => (
-                  <View key={i} style={editModalStyles.movieItem}>
-                    <Image 
-                      source={{ uri: `https://image.tmdb.org/t/p/w200${movie.poster_path}` }}
-                      style={editModalStyles.moviePoster}
-                      resizeMode="cover"
-                    />
-                    <Text style={editModalStyles.movieTitle} numberOfLines={2}>{movie.title}</Text>
-                  </View>
-                ))}
-              </View>
-            ) : (
-              <Text style={editModalStyles.emptyHint}>Add your top 5 movies during signup</Text>
-            )}
-          </AccordionSection>
+            {/* Top Movies */}
+            <AccordionSection 
+              title="Top Movies"
+              icon="star-outline"
+              expanded={expandedSections.has('topmovies')}
+              onToggle={() => toggleSection('topmovies')}
+            >
+              {topMovies.length > 0 ? (
+                <View style={editModalStyles.moviesGrid}>
+                  {topMovies.map((movie, i) => (
+                    <View key={i} style={editModalStyles.movieItem}>
+                      <Image 
+                        source={{ uri: `https://image.tmdb.org/t/p/w200${movie.poster_path}` }}
+                        style={editModalStyles.moviePoster}
+                        resizeMode="cover"
+                      />
+                      <Text style={editModalStyles.movieTitle} numberOfLines={2}>{movie.title}</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <Text style={editModalStyles.emptyHint}>Add your top 5 movies during signup</Text>
+              )}
+            </AccordionSection>
 
-          {/* Languages */}
-          <AccordionSection 
-            title="Languages"
-            icon="globe-outline"
-            expanded={expandedSections.has('languages')}
-            onToggle={() => toggleSection('languages')}
-          >
-            <ProfileField icon="globe-outline" label="Film Languages" value={profile.filmLanguages} onPress={() => onOpenEditModal('filmLanguages')} isArray isEmpty={!profile.filmLanguages?.length} />
-            <ProfileField icon="chatbubble-outline" label="Languages Spoken" value={profile.languagesSpoken} onPress={() => onOpenEditModal('languagesSpoken')} isArray isEmpty={!profile.languagesSpoken?.length} />
-          </AccordionSection>
+            {/* Languages */}
+            <AccordionSection 
+              title="Languages"
+              icon="globe-outline"
+              expanded={expandedSections.has('languages')}
+              onToggle={() => toggleSection('languages')}
+            >
+              <ProfileField icon="globe-outline" label="Film Languages" value={profile.filmLanguages} onPress={() => setEditModal('filmLanguages')} isArray isEmpty={!profile.filmLanguages?.length} />
+              <ProfileField icon="chatbubble-outline" label="Languages Spoken" value={profile.languagesSpoken} onPress={() => setEditModal('languagesSpoken')} isArray isEmpty={!profile.languagesSpoken?.length} />
+            </AccordionSection>
 
-          {/* Dating Preferences */}
-          <AccordionSection 
-            title="Dating Preferences"
-            icon="heart-outline"
-            expanded={expandedSections.has('dating')}
-            onToggle={() => toggleSection('dating')}
-          >
-            <ProfileField icon="heart-outline" label="Looking For" value={profile.relationshipIntent} onPress={() => onOpenEditModal('relationshipIntent')} isArray isEmpty={!profile.relationshipIntent?.length} />
-            <ProfileField icon="people-outline" label="Want to Meet" value={profile.partnerPreference} onPress={() => onOpenEditModal('partnerPreference')} isEmpty={!profile.partnerPreference} />
-          </AccordionSection>
+            {/* Dating Preferences */}
+            <AccordionSection 
+              title="Dating Preferences"
+              icon="heart-outline"
+              expanded={expandedSections.has('dating')}
+              onToggle={() => toggleSection('dating')}
+            >
+              <ProfileField icon="heart-outline" label="Looking For" value={profile.relationshipIntent} onPress={() => setEditModal('relationshipIntent')} isArray isEmpty={!profile.relationshipIntent?.length} />
+              <ProfileField icon="people-outline" label="Want to Meet" value={profile.partnerPreference} onPress={() => setEditModal('partnerPreference')} isEmpty={!profile.partnerPreference} />
+            </AccordionSection>
 
-          {/* Optional Information */}
-          <AccordionSection 
-            title="Optional Information"
-            icon="information-circle-outline"
-            expanded={expandedSections.has('optional')}
-            onToggle={() => toggleSection('optional')}
-          >
-            <ProfileField icon="resize-outline" label="Height" value={profile.height} onPress={() => onOpenEditModal('height')} isEmpty={!profile.height} />
-            <ProfileField icon="moon-outline" label="Religion" value={profile.religion} onPress={() => onOpenEditModal('religion')} isEmpty={!profile.religion} />
-            <ProfileField icon="flame-outline" label="Smoking" value={profile.smoking} onPress={() => onOpenEditModal('smoking')} isEmpty={!profile.smoking} />
-            <ProfileField icon="beer-outline" label="Drinking" value={profile.drinking} onPress={() => onOpenEditModal('drinking')} isEmpty={!profile.drinking} />
-            <ProfileField icon="fitness-outline" label="Exercise" value={profile.exercise} onPress={() => onOpenEditModal('exercise')} isEmpty={!profile.exercise} />
-            <ProfileField icon="star-outline" label="Zodiac Sign" value={profile.zodiac} onPress={() => onOpenEditModal('zodiac')} isEmpty={!profile.zodiac} />
-          </AccordionSection>
+            {/* Optional Information */}
+            <AccordionSection 
+              title="Optional Information"
+              icon="information-circle-outline"
+              expanded={expandedSections.has('optional')}
+              onToggle={() => toggleSection('optional')}
+            >
+              <ProfileField icon="resize-outline" label="Height" value={profile.height} onPress={() => setEditModal('height')} isEmpty={!profile.height} />
+              <ProfileField icon="moon-outline" label="Religion" value={profile.religion} onPress={() => setEditModal('religion')} isEmpty={!profile.religion} />
+              <ProfileField icon="flame-outline" label="Smoking" value={profile.smoking} onPress={() => setEditModal('smoking')} isEmpty={!profile.smoking} />
+              <ProfileField icon="beer-outline" label="Drinking" value={profile.drinking} onPress={() => setEditModal('drinking')} isEmpty={!profile.drinking} />
+              <ProfileField icon="fitness-outline" label="Exercise" value={profile.exercise} onPress={() => setEditModal('exercise')} isEmpty={!profile.exercise} />
+              <ProfileField icon="star-outline" label="Zodiac Sign" value={profile.zodiac} onPress={() => setEditModal('zodiac')} isEmpty={!profile.zodiac} />
+            </AccordionSection>
 
-          <View style={{ height: 40 }} />
-        </RNScrollView>
+            <View style={{ height: 40 }} />
+          </RNScrollView>
+        )}
       </View>
     </Modal>
   );
 }
+
+// ============ INLINE EDIT FORM ============
+// Renders the appropriate edit form inside the same modal
+function InlineEditForm({
+  editModal,
+  profile,
+  onSave,
+  onCancel,
+}: {
+  editModal: EditModalType;
+  profile: ProfileData;
+  onSave: (field: string, value: any) => void;
+  onCancel: () => void;
+}) {
+  const [textValue, setTextValue] = useState('');
+  const [selectedValue, setSelectedValue] = useState('');
+  const [selectedArray, setSelectedArray] = useState<string[]>([]);
+  const [heightUnit, setHeightUnit] = useState<'imperial' | 'metric'>('imperial');
+  const [feet, setFeet] = useState(5);
+  const [inches, setInches] = useState(6);
+  const [cm, setCm] = useState(168);
+
+  // Initialize values when editModal changes
+  useEffect(() => {
+    switch (editModal) {
+      case 'location':
+        setTextValue(profile.location || '');
+        break;
+      case 'bio':
+        setTextValue(profile.bio || '');
+        break;
+      case 'movieFrequency':
+        setSelectedValue(profile.movieFrequency || '');
+        break;
+      case 'ottTheatre':
+        setSelectedValue(profile.ottTheatre || '');
+        break;
+      case 'partnerPreference':
+        setSelectedValue(profile.partnerPreference || '');
+        break;
+      case 'religion':
+        setSelectedValue(profile.religion || '');
+        break;
+      case 'smoking':
+        setSelectedValue(profile.smoking || '');
+        break;
+      case 'drinking':
+        setSelectedValue(profile.drinking || '');
+        break;
+      case 'exercise':
+        setSelectedValue(profile.exercise || '');
+        break;
+      case 'zodiac':
+        setSelectedValue(profile.zodiac || '');
+        break;
+      case 'genres':
+        setSelectedArray(profile.genres || []);
+        break;
+      case 'filmLanguages':
+        setSelectedArray(profile.filmLanguages || []);
+        break;
+      case 'languagesSpoken':
+        setSelectedArray(profile.languagesSpoken || []);
+        break;
+      case 'relationshipIntent':
+        setSelectedArray(profile.relationshipIntent || []);
+        break;
+      case 'height':
+        if (profile.height) {
+          if (profile.height.includes("'")) {
+            const parts = profile.height.match(/(\d+)'(\d+)/);
+            if (parts) {
+              setFeet(parseInt(parts[1]));
+              setInches(parseInt(parts[2]));
+              setHeightUnit('imperial');
+            }
+          } else if (profile.height.includes('cm')) {
+            const cmVal = parseInt(profile.height);
+            if (cmVal) {
+              setCm(cmVal);
+              setHeightUnit('metric');
+            }
+          }
+        }
+        break;
+    }
+  }, [editModal, profile]);
+
+  const handleSave = () => {
+    switch (editModal) {
+      case 'location':
+        onSave('location', textValue);
+        break;
+      case 'bio':
+        onSave('bio', textValue);
+        break;
+      case 'movieFrequency':
+        onSave('movieFrequency', selectedValue);
+        break;
+      case 'ottTheatre':
+        onSave('ottTheatre', selectedValue);
+        break;
+      case 'partnerPreference':
+        onSave('partnerPreference', selectedValue);
+        break;
+      case 'religion':
+        onSave('religion', selectedValue);
+        break;
+      case 'smoking':
+        onSave('smoking', selectedValue);
+        break;
+      case 'drinking':
+        onSave('drinking', selectedValue);
+        break;
+      case 'exercise':
+        onSave('exercise', selectedValue);
+        break;
+      case 'zodiac':
+        onSave('zodiac', selectedValue);
+        break;
+      case 'genres':
+        onSave('genres', selectedArray);
+        break;
+      case 'filmLanguages':
+        onSave('filmLanguages', selectedArray);
+        break;
+      case 'languagesSpoken':
+        onSave('languagesSpoken', selectedArray);
+        break;
+      case 'relationshipIntent':
+        onSave('relationshipIntent', selectedArray);
+        break;
+      case 'height':
+        const height = heightUnit === 'imperial' ? `${feet}'${inches}"` : `${cm} cm`;
+        onSave('height', height);
+        break;
+    }
+  };
+
+  const toggleArrayItem = (item: string) => {
+    setSelectedArray(prev => 
+      prev.includes(item) ? prev.filter(i => i !== item) : [...prev, item]
+    );
+  };
+
+  // Text input fields
+  if (editModal === 'location' || editModal === 'bio') {
+    const isMultiline = editModal === 'bio';
+    const maxLength = editModal === 'bio' ? 300 : 100;
+    const placeholder = editModal === 'bio' ? 'Tell people about yourself...' : 'Your city';
+    
+    return (
+      <View style={inlineEditStyles.container}>
+        <TextInput
+          style={[inlineEditStyles.textInput, isMultiline && inlineEditStyles.textInputMultiline]}
+          value={textValue}
+          onChangeText={(t) => setTextValue(t.slice(0, maxLength))}
+          placeholder={placeholder}
+          placeholderTextColor={COLORS.textMuted}
+          multiline={isMultiline}
+          maxLength={maxLength}
+          autoFocus
+        />
+        <Text style={inlineEditStyles.charCount}>{textValue.length}/{maxLength}</Text>
+        <View style={inlineEditStyles.buttonRow}>
+          <TouchableOpacity style={inlineEditStyles.cancelBtn} onPress={onCancel}>
+            <Text style={inlineEditStyles.cancelText}>Cancel</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={inlineEditStyles.saveBtn} onPress={handleSave}>
+            <Text style={inlineEditStyles.saveText}>Save</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  // Single select fields
+  if (['movieFrequency', 'ottTheatre', 'partnerPreference', 'religion', 'smoking', 'drinking', 'exercise', 'zodiac'].includes(editModal || '')) {
+    const optionsMap: Record<string, string[]> = {
+      movieFrequency: MOVIE_FREQUENCIES,
+      ottTheatre: OTT_OPTIONS,
+      partnerPreference: PARTNER_PREFS,
+      religion: RELIGIONS,
+      smoking: SMOKING_OPTS,
+      drinking: DRINKING_OPTS,
+      exercise: EXERCISE_OPTS,
+      zodiac: ZODIAC_SIGNS,
+    };
+    const options = optionsMap[editModal || ''] || [];
+
+    return (
+      <View style={inlineEditStyles.container}>
+        <RNScrollView style={inlineEditStyles.optionsScroll} showsVerticalScrollIndicator={false}>
+          {options.map(opt => (
+            <TouchableOpacity
+              key={opt}
+              style={[inlineEditStyles.option, selectedValue === opt && inlineEditStyles.optionActive]}
+              onPress={() => {
+                setSelectedValue(opt);
+                onSave(editModal || '', opt);
+              }}
+            >
+              <Text style={[inlineEditStyles.optionText, selectedValue === opt && inlineEditStyles.optionTextActive]}>
+                {opt}
+              </Text>
+              {selectedValue === opt && <Ionicons name="checkmark-circle" size={22} color={COLORS.primary} />}
+            </TouchableOpacity>
+          ))}
+        </RNScrollView>
+      </View>
+    );
+  }
+
+  // Multi select fields
+  if (['genres', 'filmLanguages', 'languagesSpoken', 'relationshipIntent'].includes(editModal || '')) {
+    const optionsMap: Record<string, string[]> = {
+      genres: GENRES,
+      filmLanguages: FILM_LANGUAGES,
+      languagesSpoken: LANGUAGES,
+      relationshipIntent: RELATIONSHIP_INTENTS,
+    };
+    const options = optionsMap[editModal || ''] || [];
+
+    return (
+      <View style={inlineEditStyles.container}>
+        <Text style={inlineEditStyles.subtitle}>Select all that apply</Text>
+        <RNScrollView style={inlineEditStyles.optionsScroll} showsVerticalScrollIndicator={false}>
+          <View style={inlineEditStyles.chipsContainer}>
+            {options.map(opt => (
+              <TouchableOpacity
+                key={opt}
+                style={[inlineEditStyles.chip, selectedArray.includes(opt) && inlineEditStyles.chipActive]}
+                onPress={() => toggleArrayItem(opt)}
+              >
+                <Text style={[inlineEditStyles.chipText, selectedArray.includes(opt) && inlineEditStyles.chipTextActive]}>
+                  {opt}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </RNScrollView>
+        <View style={inlineEditStyles.buttonRow}>
+          <TouchableOpacity style={inlineEditStyles.cancelBtn} onPress={onCancel}>
+            <Text style={inlineEditStyles.cancelText}>Cancel</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={inlineEditStyles.saveBtn} onPress={handleSave}>
+            <Text style={inlineEditStyles.saveText}>Save ({selectedArray.length})</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  // Height picker
+  if (editModal === 'height') {
+    const feetOptions = [4, 5, 6, 7];
+    const inchOptions = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+    const cmOptions = Array.from({ length: 101 }, (_, i) => 120 + i);
+
+    return (
+      <View style={inlineEditStyles.container}>
+        <View style={inlineEditStyles.unitToggle}>
+          <TouchableOpacity
+            style={[inlineEditStyles.unitBtn, heightUnit === 'imperial' && inlineEditStyles.unitBtnActive]}
+            onPress={() => setHeightUnit('imperial')}
+          >
+            <Text style={[inlineEditStyles.unitText, heightUnit === 'imperial' && inlineEditStyles.unitTextActive]}>ft/in</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[inlineEditStyles.unitBtn, heightUnit === 'metric' && inlineEditStyles.unitBtnActive]}
+            onPress={() => setHeightUnit('metric')}
+          >
+            <Text style={[inlineEditStyles.unitText, heightUnit === 'metric' && inlineEditStyles.unitTextActive]}>cm</Text>
+          </TouchableOpacity>
+        </View>
+
+        {heightUnit === 'imperial' ? (
+          <View style={inlineEditStyles.heightPickerRow}>
+            <View style={inlineEditStyles.heightColumn}>
+              <Text style={inlineEditStyles.heightLabel}>Feet</Text>
+              <RNScrollView style={inlineEditStyles.heightScroll} showsVerticalScrollIndicator={false}>
+                {feetOptions.map(f => (
+                  <TouchableOpacity
+                    key={f}
+                    style={[inlineEditStyles.heightItem, feet === f && inlineEditStyles.heightItemActive]}
+                    onPress={() => setFeet(f)}
+                  >
+                    <Text style={[inlineEditStyles.heightItemText, feet === f && inlineEditStyles.heightItemTextActive]}>{f}'</Text>
+                  </TouchableOpacity>
+                ))}
+              </RNScrollView>
+            </View>
+            <View style={inlineEditStyles.heightColumn}>
+              <Text style={inlineEditStyles.heightLabel}>Inches</Text>
+              <RNScrollView style={inlineEditStyles.heightScroll} showsVerticalScrollIndicator={false}>
+                {inchOptions.map(i => (
+                  <TouchableOpacity
+                    key={i}
+                    style={[inlineEditStyles.heightItem, inches === i && inlineEditStyles.heightItemActive]}
+                    onPress={() => setInches(i)}
+                  >
+                    <Text style={[inlineEditStyles.heightItemText, inches === i && inlineEditStyles.heightItemTextActive]}>{i}"</Text>
+                  </TouchableOpacity>
+                ))}
+              </RNScrollView>
+            </View>
+          </View>
+        ) : (
+          <RNScrollView style={inlineEditStyles.cmScroll} showsVerticalScrollIndicator={false}>
+            {cmOptions.map(c => (
+              <TouchableOpacity
+                key={c}
+                style={[inlineEditStyles.heightItem, cm === c && inlineEditStyles.heightItemActive]}
+                onPress={() => setCm(c)}
+              >
+                <Text style={[inlineEditStyles.heightItemText, cm === c && inlineEditStyles.heightItemTextActive]}>{c} cm</Text>
+              </TouchableOpacity>
+            ))}
+          </RNScrollView>
+        )}
+
+        <View style={inlineEditStyles.heightDisplay}>
+          <Text style={inlineEditStyles.heightDisplayText}>
+            {heightUnit === 'imperial' ? `${feet}'${inches}"` : `${cm} cm`}
+          </Text>
+        </View>
+
+        <View style={inlineEditStyles.buttonRow}>
+          <TouchableOpacity style={inlineEditStyles.cancelBtn} onPress={onCancel}>
+            <Text style={inlineEditStyles.cancelText}>Cancel</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={inlineEditStyles.saveBtn} onPress={handleSave}>
+            <Text style={inlineEditStyles.saveText}>Save</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  return null;
+}
+
+const inlineEditStyles = StyleSheet.create({
+  container: {
+    flex: 1,
+    padding: SPACING.l,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    marginBottom: SPACING.m,
+    textAlign: 'center',
+  },
+  textInput: {
+    backgroundColor: COLORS.bgCard,
+    borderRadius: BORDER_RADIUS.m,
+    paddingHorizontal: SPACING.m,
+    paddingVertical: 14,
+    color: COLORS.text,
+    fontSize: 16,
+    marginBottom: SPACING.xs,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  textInputMultiline: {
+    minHeight: 120,
+    textAlignVertical: 'top',
+  },
+  charCount: {
+    fontSize: 11,
+    color: COLORS.textMuted,
+    textAlign: 'right',
+    marginBottom: SPACING.m,
+  },
+  buttonRow: {
+    flexDirection: 'row',
+    gap: SPACING.m,
+    marginTop: SPACING.m,
+  },
+  cancelBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: BORDER_RADIUS.full,
+    borderWidth: 1.5,
+    borderColor: COLORS.border,
+    alignItems: 'center',
+  },
+  cancelText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+  },
+  saveBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: BORDER_RADIUS.full,
+    backgroundColor: COLORS.primary,
+    alignItems: 'center',
+  },
+  saveText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: COLORS.white,
+  },
+  optionsScroll: {
+    flex: 1,
+  },
+  option: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 16,
+    paddingHorizontal: SPACING.m,
+    borderRadius: BORDER_RADIUS.m,
+    marginBottom: SPACING.xs,
+    backgroundColor: COLORS.bgCard,
+  },
+  optionActive: {
+    backgroundColor: 'rgba(229,9,20,0.1)',
+    borderWidth: 1,
+    borderColor: COLORS.primary,
+  },
+  optionText: {
+    fontSize: 16,
+    color: COLORS.text,
+  },
+  optionTextActive: {
+    color: COLORS.primary,
+    fontWeight: '600',
+  },
+  chipsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: SPACING.s,
+  },
+  chip: {
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: BORDER_RADIUS.full,
+    borderWidth: 1.5,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.bgCard,
+  },
+  chipActive: {
+    borderColor: COLORS.primary,
+    backgroundColor: COLORS.primary,
+  },
+  chipText: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+  },
+  chipTextActive: {
+    color: COLORS.white,
+    fontWeight: '600',
+  },
+  unitToggle: {
+    flexDirection: 'row',
+    gap: SPACING.s,
+    marginBottom: SPACING.m,
+    justifyContent: 'center',
+  },
+  unitBtn: {
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    borderRadius: BORDER_RADIUS.full,
+    borderWidth: 1.5,
+    borderColor: COLORS.border,
+  },
+  unitBtnActive: {
+    borderColor: COLORS.primary,
+    backgroundColor: COLORS.primary,
+  },
+  unitText: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    fontWeight: '500',
+  },
+  unitTextActive: {
+    color: COLORS.white,
+  },
+  heightPickerRow: {
+    flexDirection: 'row',
+    gap: SPACING.m,
+    flex: 1,
+  },
+  heightColumn: {
+    flex: 1,
+  },
+  heightLabel: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    textAlign: 'center',
+    marginBottom: SPACING.xs,
+  },
+  heightScroll: {
+    flex: 1,
+    backgroundColor: COLORS.bgCard,
+    borderRadius: BORDER_RADIUS.m,
+  },
+  cmScroll: {
+    flex: 1,
+    backgroundColor: COLORS.bgCard,
+    borderRadius: BORDER_RADIUS.m,
+  },
+  heightItem: {
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderRadius: BORDER_RADIUS.s,
+    marginVertical: 2,
+    marginHorizontal: 4,
+  },
+  heightItemActive: {
+    backgroundColor: COLORS.primary,
+  },
+  heightItemText: {
+    fontSize: 16,
+    color: COLORS.textSecondary,
+  },
+  heightItemTextActive: {
+    color: COLORS.white,
+    fontWeight: '600',
+  },
+  heightDisplay: {
+    alignItems: 'center',
+    paddingVertical: SPACING.m,
+    marginTop: SPACING.m,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+  },
+  heightDisplayText: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: COLORS.gold,
+  },
+});
 
 const editModalStyles = StyleSheet.create({
   container: {
@@ -1221,7 +1804,9 @@ export default function ProfileScreen() {
         topMovies={topMovies}
         expandedSections={expandedSections}
         toggleSection={toggleSection}
-        onOpenEditModal={(type: EditModalType) => setEditModal(type)}
+        editModal={editModal}
+        setEditModal={setEditModal}
+        updateField={updateField}
       />
 
       {/* ========== PROFILE PREVIEW MODAL (Reusing PremiumProfileView) ========== */}
