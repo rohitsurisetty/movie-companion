@@ -627,7 +627,11 @@ export default function ProfileScreen() {
         const response = await fetch(`${BACKEND_URL}/api/user/pictures/${storedProfile.userId}`);
         if (response.ok) {
           const data = await response.json();
-          setUserPhotos(data.pictures || []);
+          // Backend returns pictures as object { picture_1: url, picture_2: url }
+          // Convert to array and filter out null/undefined values
+          const picturesObj = data.pictures || {};
+          const picturesArray = Object.values(picturesObj).filter((url): url is string => Boolean(url));
+          setUserPhotos(picturesArray);
         }
       }
     } catch (error) {
