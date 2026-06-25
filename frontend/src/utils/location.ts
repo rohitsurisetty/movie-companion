@@ -75,3 +75,47 @@ export const getCityFromLocation = (fullLocation: string | undefined | null): st
   // For longer strings, return the 3rd from last (usually city)
   return parts[parts.length - 3] || parts[0] || '';
 };
+
+/**
+ * Extracts a simplified location showing only Area and City.
+ * This is the most privacy-friendly option for public display.
+ * 
+ * Example: "HSR Layout, Bengaluru, Karnataka, India, 560102" -> "HSR Layout, Bengaluru"
+ * 
+ * @param fullLocation - The complete location string
+ * @returns Area and City only (e.g., "HSR Layout, Bengaluru")
+ */
+export const getSimplifiedLocation = (fullLocation: string | undefined | null): string => {
+  if (!fullLocation) return '';
+  
+  // Split by comma and trim each part
+  const parts = fullLocation.split(',').map(p => p.trim()).filter(Boolean);
+  
+  if (parts.length === 0) return '';
+  if (parts.length === 1) return parts[0];
+  
+  // Remove postal codes (5-6 digit numbers)
+  const filteredParts = parts.filter(part => !/^\d{5,6}$/.test(part.trim()));
+  
+  // Try to identify Area and City
+  // Common patterns: [Area], [City], [State], [Country]
+  // We want first 2 relevant parts (Area and City)
+  
+  // Skip parts that are state/country names
+  const stateCountryPatterns = /\b(india|karnataka|maharashtra|delhi|tamil\s*nadu|andhra\s*pradesh|telangana|kerala|west\s*bengal|gujarat|rajasthan|punjab|haryana|uttar\s*pradesh|madhya\s*pradesh|bihar|odisha|chhattisgarh|jharkhand|uttarakhand|himachal\s*pradesh|assam|goa)\b/i;
+  
+  const relevantParts: string[] = [];
+  
+  for (const part of filteredParts) {
+    if (stateCountryPatterns.test(part)) continue;
+    relevantParts.push(part);
+    if (relevantParts.length >= 2) break;
+  }
+  
+  if (relevantParts.length === 0) {
+    // Fallback: just return first two parts
+    return filteredParts.slice(0, 2).join(', ');
+  }
+  
+  return relevantParts.join(', ');
+};

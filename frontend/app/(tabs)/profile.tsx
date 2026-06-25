@@ -10,7 +10,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, BORDER_RADIUS } from '../../src/theme';
 import { ProfileData, initialProfileData, MovieSelection } from '../../src/types';
 import { getProfile, saveProfile, clearAll } from '../../src/store';
-import { getPartialLocation } from '../../src/utils/location';
+import { getPartialLocation, getSimplifiedLocation } from '../../src/utils/location';
 import { formatLocationForPrivacy } from '../../src/utils/locationFormatter';
 import { SharedHeader, ModeSwitcher, useAppMode } from '../../src/components/SharedHeader';
 import { PremiumProfileView } from '../../src/components/PremiumProfileView';
@@ -859,12 +859,12 @@ export default function ProfileScreen() {
           <View style={styles.profileInfoNew}>
             <Text style={styles.profileNameNew}>{profile.name || 'Your Name'}</Text>
             {profile.age > 0 && profile.location && (
-              <Text style={styles.profileSubtitleNew}>{profile.age} • {getPartialLocation(profile.location)}</Text>
+              <Text style={styles.profileSubtitleNew}>{profile.age} • {getSimplifiedLocation(profile.location)}</Text>
             )}
           </View>
 
-          {/* Complete Profile Button */}
-          {completionPercentage < 100 && (
+          {/* Complete Profile Button - Always show if not 100% */}
+          {completionPercentage < 100 ? (
             <TouchableOpacity 
               style={styles.completeProfileBtn}
               onPress={() => setShowEditProfile(true)}
@@ -872,6 +872,15 @@ export default function ProfileScreen() {
             >
               <Ionicons name="sparkles" size={18} color="#FFF" />
               <Text style={styles.completeProfileBtnText}>Complete Profile</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity 
+              style={[styles.completeProfileBtn, { backgroundColor: COLORS.bgCard, borderWidth: 1, borderColor: COLORS.border }]}
+              onPress={() => setShowEditProfile(true)}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="create-outline" size={18} color={COLORS.text} />
+              <Text style={[styles.completeProfileBtnText, { color: COLORS.text }]}>Edit Profile</Text>
             </TouchableOpacity>
           )}
 
@@ -909,22 +918,6 @@ export default function ProfileScreen() {
             <View style={styles.settingsCardContent}>
               <Text style={styles.settingsCardTitle}>Preferences & Filters</Text>
               <Text style={styles.settingsCardDesc}>Age, distance, and more</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={22} color={COLORS.textMuted} />
-          </TouchableOpacity>
-
-          {/* Edit Profile (Opens accordion modal) */}
-          <TouchableOpacity 
-            style={styles.settingsCard}
-            onPress={() => setShowEditProfile(true)}
-            activeOpacity={0.7}
-          >
-            <View style={[styles.settingsCardIcon, { backgroundColor: 'rgba(229, 9, 20, 0.15)' }]}>
-              <Ionicons name="person" size={24} color={COLORS.primary} />
-            </View>
-            <View style={styles.settingsCardContent}>
-              <Text style={styles.settingsCardTitle}>Edit Profile</Text>
-              <Text style={styles.settingsCardDesc}>Bio, movies, preferences</Text>
             </View>
             <Ionicons name="chevron-forward" size={22} color={COLORS.textMuted} />
           </TouchableOpacity>
