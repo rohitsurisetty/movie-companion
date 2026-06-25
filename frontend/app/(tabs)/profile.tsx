@@ -1485,24 +1485,57 @@ export default function ProfileScreen() {
     }
   };
 
-  // Calculate profile completion percentage
+  // Calculate profile completion percentage with weighted scoring
   const calculateProfileCompletion = useCallback(() => {
-    const fields = [
-      profile.name,
-      profile.gender,
-      profile.bio,
-      profile.location,
-      profile.genres?.length > 0,
-      profile.topMovies?.length > 0,
-      profile.filmLanguages?.length > 0,
-      profile.languagesSpoken?.length > 0,
-      profile.movieFrequency,
-      profile.relationshipIntent?.length > 0,
-      profile.partnerPreference,
-      userPhotos.length > 0,
+    // Weighted scoring system - total 100 points
+    // Photos: 25 points (5 photos x 5 points each)
+    // Essential fields: 50 points (10 fields x 5 points each)
+    // Optional fields: 25 points (10 fields x 2.5 points each)
+    
+    let score = 0;
+    
+    // ===== PHOTOS (25 points total - 5 points each) =====
+    // Require exactly 5 photos for full score
+    const photoCount = Math.min(userPhotos.length, 5);
+    score += photoCount * 5; // Max 25 points
+    
+    // ===== ESSENTIAL FIELDS (50 points total - 5 points each) =====
+    const essentialFields = [
+      { filled: !!profile.name, points: 5 },
+      { filled: !!profile.gender, points: 5 },
+      { filled: !!profile.bio, points: 5 },
+      { filled: !!profile.location, points: 5 },
+      { filled: (profile.genres?.length || 0) > 0, points: 5 },
+      { filled: (profile.topMovies?.length || 0) > 0, points: 5 },
+      { filled: (profile.filmLanguages?.length || 0) > 0, points: 5 },
+      { filled: (profile.languagesSpoken?.length || 0) > 0, points: 5 },
+      { filled: !!profile.movieFrequency, points: 5 },
+      { filled: (profile.relationshipIntent?.length || 0) > 0, points: 5 },
     ];
-    const completed = fields.filter(Boolean).length;
-    return Math.round((completed / fields.length) * 100);
+    
+    essentialFields.forEach(field => {
+      if (field.filled) score += field.points;
+    });
+    
+    // ===== OPTIONAL FIELDS (25 points total - 2.5 points each) =====
+    const optionalFields = [
+      { filled: !!profile.partnerPreference, points: 2.5 },
+      { filled: !!profile.height, points: 2.5 },
+      { filled: !!profile.religion, points: 2.5 },
+      { filled: !!profile.maritalStatus, points: 2.5 },
+      { filled: !!profile.foodPreference, points: 2.5 },
+      { filled: !!profile.smoking, points: 2.5 },
+      { filled: !!profile.drinking, points: 2.5 },
+      { filled: !!profile.exercise, points: 2.5 },
+      { filled: !!profile.zodiac, points: 2.5 },
+      { filled: !!profile.ottTheatre, points: 2.5 },
+    ];
+    
+    optionalFields.forEach(field => {
+      if (field.filled) score += field.points;
+    });
+    
+    return Math.round(score);
   }, [profile, userPhotos]);
 
   const completionPercentage = calculateProfileCompletion();
