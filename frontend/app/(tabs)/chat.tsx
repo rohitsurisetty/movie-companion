@@ -1359,16 +1359,6 @@ const GiftedChatScreen = ({
     }
   }, [userId, otherUserId, conversation.conversation_id]);
 
-  const handleSuggestionPress = (suggestion: string) => {
-    const newMessage: IMessage = {
-      _id: `temp_${Date.now()}`,
-      text: suggestion,
-      createdAt: new Date(),
-      user: { _id: userId, name: 'You' },
-    };
-    onSend([newMessage]);
-  };
-
   // New Unmatch handler with modal
   const handleUnmatchWithReason = async (reason: string) => {
     try {
@@ -1434,68 +1424,39 @@ const GiftedChatScreen = ({
     />
   );
 
-  // Custom input toolbar with media icons
-  const renderInputToolbar = (props: any) => (
-    <View style={styles.customInputToolbar}>
-      {/* Left side - Camera/Media button */}
-      <TouchableOpacity 
-        style={styles.mediaButton}
-        onPress={() => showComingSoonModal('Photo & Media')}
-      >
-        <Ionicons name="camera" size={24} color={COLORS.primary} />
-      </TouchableOpacity>
-      
-      {/* Center - Text Input */}
-      <View style={styles.inputContainer}>
-        <InputToolbar
-          {...props}
-          containerStyle={styles.inputToolbarInner}
-          primaryStyle={styles.inputPrimaryInner}
-        />
-      </View>
-      
-      {/* Right side - GIF, Voice, Video icons */}
-      <View style={styles.rightMediaButtons}>
-        <TouchableOpacity 
-          style={styles.mediaIconBtn}
-          onPress={() => showComingSoonModal('GIFs')}
-        >
-          <Text style={styles.gifText}>GIF</Text>
-        </TouchableOpacity>
-        <TouchableOpacity 
-          style={styles.mediaIconBtn}
-          onPress={() => showComingSoonModal('Voice Notes')}
-        >
-          <Ionicons name="mic" size={22} color={COLORS.textSecondary} />
-        </TouchableOpacity>
-        <TouchableOpacity 
-          style={styles.mediaIconBtn}
-          onPress={() => showComingSoonModal('Video Messages')}
-        >
-          <Ionicons name="videocam" size={22} color={COLORS.textSecondary} />
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
+  // ============ CUSTOM TWO-ROW BOTTOM COMPOSER ============
+  // Row 1: Input (Camera | Text | GIF/Mic/Video | Send)
+  // Row 2: AI Recommendations (always visible, horizontal scroll)
+  
+  const [inputText, setInputText] = useState('');
+  
+  const handleSendPress = () => {
+    if (inputText.trim()) {
+      onSend([{ 
+        _id: Math.random().toString(),
+        text: inputText.trim(),
+        createdAt: new Date(),
+        user: { _id: userId, name: 'You' }
+      }]);
+      setInputText('');
+    }
+  };
 
-  // Custom composer
-  const renderComposer = (props: any) => (
-    <Composer
-      {...props}
-      textInputStyle={styles.composerInput}
-      placeholderTextColor={COLORS.textMuted}
-      placeholder="Type a message..."
-    />
-  );
+  const handleSuggestionPress = (suggestion: string) => {
+    // Populate the input and send immediately
+    onSend([{ 
+      _id: Math.random().toString(),
+      text: suggestion,
+      createdAt: new Date(),
+      user: { _id: userId, name: 'You' }
+    }]);
+  };
 
-  // Custom send button
-  const renderSend = (props: any) => (
-    <Send {...props} containerStyle={styles.sendContainer}>
-      <View style={styles.sendButton}>
-        <Ionicons name="send" size={18} color="#FFF" />
-      </View>
-    </Send>
-  );
+  // Custom two-row input toolbar - DISABLE GiftedChat's default
+  const renderInputToolbar = () => null;
+  const renderComposer = () => null;
+  const renderSend = () => null;
+  const renderAccessory = () => null;
 
   // Custom avatar
   const renderAvatar = (props: any) => {
@@ -1550,53 +1511,122 @@ const GiftedChatScreen = ({
           <ActivityIndicator size="large" color={COLORS.primary} />
         </View>
       ) : (
-        <GiftedChat
-          messages={messages}
-          onSend={onSend}
-          user={{ _id: userId, name: 'You' }}
-          renderBubble={renderBubble}
-          renderInputToolbar={renderInputToolbar}
-          renderComposer={renderComposer}
-          renderSend={renderSend}
-          renderAvatar={renderAvatar}
-          renderAccessory={showSuggestions && suggestions.length > 0 ? () => (
-            <View style={styles.suggestionsBarBottom}>
-              <ScrollView 
-                horizontal 
-                showsHorizontalScrollIndicator={false} 
-                contentContainerStyle={styles.suggestionsContent}
-                keyboardShouldPersistTaps="handled"
+        <View style={{ flex: 1 }}>
+          <GiftedChat
+            messages={messages}
+            onSend={onSend}
+            user={{ _id: userId, name: 'You' }}
+            renderBubble={renderBubble}
+            renderInputToolbar={renderInputToolbar}
+            renderComposer={renderComposer}
+            renderSend={renderSend}
+            renderAvatar={renderAvatar}
+            scrollToBottom
+            isTyping={isTyping}
+            infiniteScroll
+            inverted={true}
+            renderUsernameOnMessage={false}
+            showUserAvatar={false}
+            showAvatarForEveryMessage={false}
+            renderAvatarOnTop
+            messagesContainerStyle={styles.messagesContainer}
+            bottomOffset={0}
+            minInputToolbarHeight={0}
+            listViewProps={{
+              style: { backgroundColor: COLORS.bg },
+              keyboardDismissMode: 'interactive',
+              keyboardShouldPersistTaps: 'handled',
+            }}
+          />
+          
+          {/* ============ TWO-ROW BOTTOM COMPOSER ============ */}
+          <View style={styles.twoRowComposer}>
+            {/* Row 2: AI Recommendations - ABOVE the input */}
+            {suggestions.length > 0 && (
+              <View style={styles.aiRecommendationsRow}>
+                <ScrollView 
+                  horizontal 
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.aiChipsContainer}
+                  keyboardShouldPersistTaps="handled"
+                >
+                  <View style={styles.aiLabelContainer}>
+                    <Ionicons name="sparkles" size={14} color={COLORS.primary} />
+                    <Text style={styles.aiLabel}>AI</Text>
+                  </View>
+                  {suggestions.map((suggestion, idx) => (
+                    <TouchableOpacity 
+                      key={idx} 
+                      style={styles.aiChip}
+                      onPress={() => handleSuggestionPress(suggestion)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.aiChipText} numberOfLines={1}>{suggestion}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
+            
+            {/* Row 1: Input Composer */}
+            <View style={styles.composerRow}>
+              {/* Camera Button */}
+              <TouchableOpacity 
+                style={styles.cameraBtn}
+                onPress={() => showComingSoonModal('Photo & Media')}
               >
-                {suggestions.map((suggestion, idx) => (
+                <Ionicons name="camera" size={22} color={COLORS.primary} />
+              </TouchableOpacity>
+              
+              {/* Text Input */}
+              <View style={styles.textInputWrapper}>
+                <TextInput
+                  style={styles.messageInput}
+                  placeholder="Type a message..."
+                  placeholderTextColor={COLORS.textMuted}
+                  value={inputText}
+                  onChangeText={setInputText}
+                  multiline
+                  maxLength={1000}
+                />
+              </View>
+              
+              {/* Right Actions: GIF, Mic, Video OR Send */}
+              {inputText.trim() ? (
+                // Show Send button when typing
+                <TouchableOpacity 
+                  style={styles.sendBtn}
+                  onPress={handleSendPress}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="send" size={20} color="#FFF" />
+                </TouchableOpacity>
+              ) : (
+                // Show media icons when not typing
+                <View style={styles.mediaActions}>
                   <TouchableOpacity 
-                    key={idx} 
-                    style={styles.suggestionChip}
-                    onPress={() => handleSuggestionPress(suggestion)}
+                    style={styles.mediaBtn}
+                    onPress={() => showComingSoonModal('GIFs')}
                   >
-                    <Text style={styles.suggestionText}>{suggestion}</Text>
+                    <Text style={styles.gifLabel}>GIF</Text>
                   </TouchableOpacity>
-                ))}
-              </ScrollView>
+                  <TouchableOpacity 
+                    style={styles.mediaBtn}
+                    onPress={() => showComingSoonModal('Voice Notes')}
+                  >
+                    <Ionicons name="mic" size={20} color={COLORS.textSecondary} />
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={styles.mediaBtn}
+                    onPress={() => showComingSoonModal('Video Messages')}
+                  >
+                    <Ionicons name="videocam" size={20} color={COLORS.textSecondary} />
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
-          ) : undefined}
-          alwaysShowSend
-          scrollToBottom
-          isTyping={isTyping}
-          infiniteScroll
-          inverted={true}
-          renderUsernameOnMessage={false}
-          showUserAvatar={false}
-          showAvatarForEveryMessage={false}
-          renderAvatarOnTop
-          messagesContainerStyle={styles.messagesContainer}
-          bottomOffset={Platform.OS === 'ios' ? 34 : 0}
-          minInputToolbarHeight={56}
-          listViewProps={{
-            style: { backgroundColor: COLORS.bg },
-            keyboardDismissMode: 'interactive',
-            keyboardShouldPersistTaps: 'handled',
-          }}
-        />
+          </View>
+        </View>
       )}
 
       {/* Simplified Menu Modal - Only 4 options */}
@@ -1941,30 +1971,122 @@ const styles = StyleSheet.create({
   chatHeaderActions: { flexDirection: 'row' },
   headerActionBtn: { padding: 10 },
   
-  // Suggestions
+  // Messages
+  messagesContainer: { backgroundColor: COLORS.bg, paddingBottom: 10 },
+  
+  // ============ TWO-ROW BOTTOM COMPOSER ============
+  twoRowComposer: {
+    backgroundColor: COLORS.bg,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+  },
+  
+  // Row 2: AI Recommendations (appears above input)
+  aiRecommendationsRow: {
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+    paddingVertical: 10,
+  },
+  aiChipsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    gap: 8,
+  },
+  aiLabelContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(229,9,20,0.15)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+    gap: 4,
+  },
+  aiLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
+  aiChip: {
+    backgroundColor: COLORS.bgCard,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    maxWidth: 220,
+  },
+  aiChipText: {
+    fontSize: 13,
+    color: COLORS.text,
+  },
+  
+  // Row 1: Chat Composer
+  composerRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    gap: 8,
+  },
+  cameraBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: 'rgba(229,9,20,0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  textInputWrapper: {
+    flex: 1,
+    backgroundColor: COLORS.bgInput,
+    borderRadius: 22,
+    minHeight: 42,
+    maxHeight: 120,
+    justifyContent: 'center',
+  },
+  messageInput: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    fontSize: 16,
+    color: COLORS.text,
+    maxHeight: 100,
+  },
+  mediaActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  mediaBtn: {
+    padding: 8,
+  },
+  gifLabel: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    color: COLORS.textSecondary,
+    backgroundColor: COLORS.bgCard,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 6,
+    overflow: 'hidden',
+  },
+  sendBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: COLORS.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  
+  // Legacy input styles (kept for compatibility)
+  inputToolbar: { backgroundColor: COLORS.bg },
+  inputPrimary: { alignItems: 'center' },
   suggestionsBar: { backgroundColor: COLORS.bgCard, borderBottomWidth: 1, borderBottomColor: COLORS.border },
   suggestionsBarBottom: { backgroundColor: COLORS.bgCard, borderTopWidth: 1, borderTopColor: COLORS.border, paddingTop: 8 },
   suggestionsContent: { paddingHorizontal: 12, paddingVertical: 8, gap: 8, flexDirection: 'row' },
   suggestionChip: { backgroundColor: COLORS.suggestion, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, borderWidth: 1, borderColor: COLORS.primary },
   suggestionText: { fontSize: 14, color: COLORS.text },
-  
-  // Messages
-  messagesContainer: { backgroundColor: COLORS.bg, paddingBottom: 10 },
-  
-  // Input - Redesigned with media icons
-  inputToolbar: { backgroundColor: COLORS.bg, borderTopWidth: 1, borderTopColor: COLORS.border, paddingHorizontal: 8, paddingVertical: 8 },
-  inputPrimary: { alignItems: 'center' },
-  customInputToolbar: { flexDirection: 'row', alignItems: 'flex-end', backgroundColor: COLORS.bg, borderTopWidth: 1, borderTopColor: COLORS.border, paddingHorizontal: 8, paddingVertical: 8, gap: 8 },
-  mediaButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(229,9,20,0.15)', justifyContent: 'center', alignItems: 'center', marginBottom: 2 },
-  inputContainer: { flex: 1 },
-  inputToolbarInner: { backgroundColor: 'transparent', borderTopWidth: 0, padding: 0, margin: 0 },
-  inputPrimaryInner: { alignItems: 'center' },
-  rightMediaButtons: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 6 },
-  mediaIconBtn: { padding: 8 },
-  gifText: { fontSize: 12, fontWeight: 'bold', color: COLORS.textSecondary, backgroundColor: COLORS.bgInput, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, overflow: 'hidden' },
-  composerInput: { backgroundColor: COLORS.bgInput, borderRadius: 20, paddingHorizontal: 16, paddingTop: 10, paddingBottom: 10, marginRight: 0, color: COLORS.text, fontSize: 16, maxHeight: 100 },
-  sendContainer: { justifyContent: 'center', alignItems: 'center', marginRight: 0, marginLeft: 4 },
-  sendButton: { width: 36, height: 36, borderRadius: 18, backgroundColor: COLORS.primary, justifyContent: 'center', alignItems: 'center' },
   
   // Menu
   menuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
