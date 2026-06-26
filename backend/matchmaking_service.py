@@ -37,14 +37,14 @@ MOCK_USERS = [
     {
         "user_id": "mock_user_001",
         "name": "Priya Sharma",
-        "age": 28,
+        "age": 26,
         "gender": "Female",
         "location": "Mumbai",
         "avatar": "av2",
-        "profile_picture": "https://images.unsplash.com/photo-1622207691293-5cd80466dab3?w=400&h=600&fit=crop",
+        "profile_picture": "https://images.pexels.com/photos/17533630/pexels-photo-17533630.jpeg?w=400&h=600&fit=crop",
         "pictures": [
-            "https://images.unsplash.com/photo-1622207691293-5cd80466dab3?w=400&h=600&fit=crop",
-            "https://images.unsplash.com/photo-1552113125-81af17f36b57?w=400&h=600&fit=crop"
+            "https://images.pexels.com/photos/17533630/pexels-photo-17533630.jpeg?w=400&h=600&fit=crop",
+            "https://images.pexels.com/photos/33265568/pexels-photo-33265568.jpeg?w=400&h=600&fit=crop"
         ],
         "bio": "Film enthusiast who believes a good movie is the best first date. Looking for someone who appreciates storytelling as much as I do.",
         "partnerPreference": "Men",
@@ -116,10 +116,10 @@ MOCK_USERS = [
         "gender": "Female",
         "location": "Bangalore",
         "avatar": "av3",
-        "profile_picture": "https://images.unsplash.com/photo-1463335361701-e90f4c5045d0?w=400&h=600&fit=crop",
+        "profile_picture": "https://images.pexels.com/photos/29553412/pexels-photo-29553412.jpeg?w=400&h=600&fit=crop",
         "pictures": [
-            "https://images.unsplash.com/photo-1463335361701-e90f4c5045d0?w=400&h=600&fit=crop",
-            "https://images.unsplash.com/photo-1516239482977-b550ba7253f2?w=400&h=600&fit=crop"
+            "https://images.pexels.com/photos/29553412/pexels-photo-29553412.jpeg?w=400&h=600&fit=crop",
+            "https://images.pexels.com/photos/31521632/pexels-photo-31521632.jpeg?w=400&h=600&fit=crop"
         ],
         "bio": "Indie film lover. Give me a slow-burn drama over a blockbuster any day. Currently obsessed with A24 films.",
         "partnerPreference": "Men",
@@ -191,10 +191,10 @@ MOCK_USERS = [
         "gender": "Female",
         "location": "Pune",
         "avatar": "av5",
-        "profile_picture": "https://images.unsplash.com/photo-1524502397800-2eeaad7c3fe5?w=400&h=600&fit=crop",
+        "profile_picture": "https://images.pexels.com/photos/14994313/pexels-photo-14994313.jpeg?w=400&h=600&fit=crop",
         "pictures": [
-            "https://images.unsplash.com/photo-1524502397800-2eeaad7c3fe5?w=400&h=600&fit=crop",
-            "https://images.unsplash.com/photo-1622782045716-a05bcc4f5ae8?w=400&h=600&fit=crop"
+            "https://images.pexels.com/photos/14994313/pexels-photo-14994313.jpeg?w=400&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1706943262473-fc393f495501?w=400&h=600&fit=crop"
         ],
         "bio": "Horror movie addict who watches scary films alone at midnight. Need a movie buddy who won't judge my screaming!",
         "partnerPreference": "Men",
@@ -774,6 +774,607 @@ MOCK_USERS = [
             "disliked_genres": ["Comedy", "Romance", "Animation"],
             "liked_actors": ["Tom Hanks", "Sunny Deol", "Liam Neeson"],
             "liked_directors": ["Steven Spielberg", "Christopher Nolan", "Sam Mendes"]
+        }
+    },
+    # ============== ADDITIONAL FEMALE PROFILES ==============
+    {
+        "user_id": "mock_user_021",
+        "name": "Aanya Malhotra",
+        "age": 24,
+        "gender": "Female",
+        "location": "Bangalore",
+        "avatar": "av2",
+        "profile_picture": "https://images.unsplash.com/photo-1631005438015-a2d58390d01e?w=400&h=600&fit=crop",
+        "pictures": [
+            "https://images.unsplash.com/photo-1631005438015-a2d58390d01e?w=400&h=600&fit=crop",
+            "https://images.pexels.com/photos/17533630/pexels-photo-17533630.jpeg?w=400&h=600&fit=crop"
+        ],
+        "bio": "Tech girl by day, Netflix binger by night. Looking for someone to decode life's mysteries with, one movie at a time.",
+        "partnerPreference": "Men",
+        "relationshipIntent": ["Long-term relationship"],
+        "genres": ["Sci-Fi", "Thriller", "Drama"],
+        "filmLanguages": ["English", "Hindi", "Kannada"],
+        "languagesSpoken": ["Kannada", "Hindi", "English"],
+        "topMovies": [
+            {"title": "Interstellar", "tmdb_id": 157336},
+            {"title": "Gone Girl", "tmdb_id": 210577},
+            {"title": "Vikram", "tmdb_id": 811367}
+        ],
+        "movieFrequency": "Multiple times a week",
+        "ottTheatre": "OTT",
+        "height": "5'5\"",
+        "religion": "Hindu",
+        "zodiac": "Gemini",
+        "smoking": "Never",
+        "drinking": "Socially",
+        "exercise": "Active",
+        "education": "Master's Degree",
+        "workProfile": "Software Engineer",
+        "swipe_history": {
+            "liked_genres": ["Sci-Fi", "Thriller", "Drama", "Mystery"],
+            "disliked_genres": ["Horror", "War"],
+            "liked_actors": ["Matthew McConaughey", "Ben Affleck", "Kamal Haasan"],
+            "liked_directors": ["Christopher Nolan", "David Fincher", "Lokesh Kanagaraj"]
+        }
+    },
+    {
+        "user_id": "mock_user_022",
+        "name": "Diya Singhania",
+        "age": 27,
+        "gender": "Female",
+        "location": "Mumbai",
+        "avatar": "av3",
+        "profile_picture": "https://images.unsplash.com/photo-1618559850638-2aed8a8e8cdc?w=400&h=600&fit=crop",
+        "pictures": [
+            "https://images.unsplash.com/photo-1618559850638-2aed8a8e8cdc?w=400&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1708534419572-6e6614a53ca1?w=400&h=600&fit=crop"
+        ],
+        "bio": "Bollywood romantic at heart. Grew up on SRK films and still believe in 'Pyaar dosti hai'. Seeking my DDLJ moment!",
+        "partnerPreference": "Men",
+        "relationshipIntent": ["Long-term relationship"],
+        "genres": ["Romance", "Drama", "Comedy"],
+        "filmLanguages": ["Hindi", "English"],
+        "languagesSpoken": ["Hindi", "English", "Gujarati"],
+        "topMovies": [
+            {"title": "Dilwale Dulhania Le Jayenge", "tmdb_id": 19404},
+            {"title": "Kal Ho Naa Ho", "tmdb_id": 20742},
+            {"title": "Kabhi Khushi Kabhie Gham", "tmdb_id": 10757}
+        ],
+        "movieFrequency": "Weekly",
+        "ottTheatre": "Both",
+        "height": "5'4\"",
+        "religion": "Hindu",
+        "zodiac": "Cancer",
+        "smoking": "Never",
+        "drinking": "Never",
+        "exercise": "Sometimes",
+        "education": "Bachelor's Degree",
+        "workProfile": "Fashion Designer",
+        "swipe_history": {
+            "liked_genres": ["Romance", "Drama", "Comedy", "Musical"],
+            "disliked_genres": ["Horror", "Action", "War"],
+            "liked_actors": ["Shah Rukh Khan", "Ranveer Singh", "Alia Bhatt"],
+            "liked_directors": ["Karan Johar", "Imtiaz Ali", "Sanjay Leela Bhansali"]
+        }
+    },
+    {
+        "user_id": "mock_user_023",
+        "name": "Kiara Verma",
+        "age": 25,
+        "gender": "Female",
+        "location": "Delhi",
+        "avatar": "av5",
+        "profile_picture": "https://images.unsplash.com/photo-1708534246051-7f47b279e94b?w=400&h=600&fit=crop",
+        "pictures": [
+            "https://images.unsplash.com/photo-1708534246051-7f47b279e94b?w=400&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1739429942851-9083ee185d3d?w=400&h=600&fit=crop"
+        ],
+        "bio": "Marvel fangirl who cried during Iron Man's snap. If you can debate Avengers theories over chai, we're soulmates!",
+        "partnerPreference": "Men",
+        "relationshipIntent": ["Long-term relationship", "Something casual"],
+        "genres": ["Action", "Superhero", "Sci-Fi"],
+        "filmLanguages": ["English", "Hindi"],
+        "languagesSpoken": ["Hindi", "English", "Punjabi"],
+        "topMovies": [
+            {"title": "Avengers: Endgame", "tmdb_id": 299534},
+            {"title": "Iron Man", "tmdb_id": 1726},
+            {"title": "Guardians of the Galaxy", "tmdb_id": 118340}
+        ],
+        "movieFrequency": "Multiple times a week",
+        "ottTheatre": "Theatre",
+        "height": "5'6\"",
+        "religion": "Hindu",
+        "zodiac": "Leo",
+        "smoking": "Never",
+        "drinking": "Socially",
+        "exercise": "Active",
+        "education": "Bachelor's Degree",
+        "workProfile": "Marketing Executive",
+        "swipe_history": {
+            "liked_genres": ["Action", "Superhero", "Sci-Fi", "Adventure"],
+            "disliked_genres": ["Horror", "Documentary"],
+            "liked_actors": ["Robert Downey Jr.", "Chris Hemsworth", "Tom Holland"],
+            "liked_directors": ["Russo Brothers", "James Gunn", "Taika Waititi"]
+        }
+    },
+    {
+        "user_id": "mock_user_024",
+        "name": "Myra Kapoor",
+        "age": 26,
+        "gender": "Female",
+        "location": "Gurgaon",
+        "avatar": "av2",
+        "profile_picture": "https://images.unsplash.com/photo-1624610806209-82a4cbb4339a?w=400&h=600&fit=crop",
+        "pictures": [
+            "https://images.unsplash.com/photo-1624610806209-82a4cbb4339a?w=400&h=600&fit=crop",
+            "https://images.pexels.com/photos/15007244/pexels-photo-15007244.jpeg?w=400&h=600&fit=crop"
+        ],
+        "bio": "Corporate by day, crime documentary junkie by night. Currently investigating why I'm single. Accepting co-detectives!",
+        "partnerPreference": "Men",
+        "relationshipIntent": ["Long-term relationship"],
+        "genres": ["Documentary", "True Crime", "Thriller"],
+        "filmLanguages": ["English", "Hindi"],
+        "languagesSpoken": ["Hindi", "English"],
+        "topMovies": [
+            {"title": "Making a Murderer", "tmdb_id": 63351},
+            {"title": "The Social Dilemma", "tmdb_id": 662418},
+            {"title": "Wild Wild Country", "tmdb_id": 72745}
+        ],
+        "movieFrequency": "Daily",
+        "ottTheatre": "OTT",
+        "height": "5'5\"",
+        "religion": "Hindu",
+        "zodiac": "Virgo",
+        "smoking": "Never",
+        "drinking": "Occasionally",
+        "exercise": "Active",
+        "education": "MBA",
+        "workProfile": "Consultant",
+        "swipe_history": {
+            "liked_genres": ["Documentary", "True Crime", "Thriller", "Drama"],
+            "disliked_genres": ["Romance", "Musical", "Fantasy"],
+            "liked_actors": ["Documentary subjects"],
+            "liked_directors": ["Werner Herzog", "Ava DuVernay", "Ken Burns"]
+        }
+    },
+    {
+        "user_id": "mock_user_025",
+        "name": "Saanvi Reddy",
+        "age": 23,
+        "gender": "Female",
+        "location": "Hyderabad",
+        "avatar": "av3",
+        "profile_picture": "https://images.pexels.com/photos/13236864/pexels-photo-13236864.png?w=400&h=600&fit=crop",
+        "pictures": [
+            "https://images.pexels.com/photos/13236864/pexels-photo-13236864.png?w=400&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1622049605334-72e1e4432346?w=400&h=600&fit=crop"
+        ],
+        "bio": "Telugu cinema enthusiast who believes RRR deserved every Oscar. Animation lover since childhood. Let's watch Ghibli together!",
+        "partnerPreference": "Men",
+        "relationshipIntent": ["Long-term relationship", "Something casual"],
+        "genres": ["Action", "Animation", "Drama"],
+        "filmLanguages": ["Telugu", "Hindi", "English"],
+        "languagesSpoken": ["Telugu", "Hindi", "English"],
+        "topMovies": [
+            {"title": "RRR", "tmdb_id": 579974},
+            {"title": "Spirited Away", "tmdb_id": 129},
+            {"title": "Pushpa", "tmdb_id": 928381}
+        ],
+        "movieFrequency": "Multiple times a week",
+        "ottTheatre": "Both",
+        "height": "5'3\"",
+        "religion": "Hindu",
+        "zodiac": "Aquarius",
+        "smoking": "Never",
+        "drinking": "Never",
+        "exercise": "Sometimes",
+        "education": "Bachelor's Degree",
+        "workProfile": "Graphic Designer",
+        "swipe_history": {
+            "liked_genres": ["Action", "Animation", "Drama", "Fantasy"],
+            "disliked_genres": ["Horror", "War"],
+            "liked_actors": ["Jr. NTR", "Ram Charan", "Allu Arjun"],
+            "liked_directors": ["S.S. Rajamouli", "Hayao Miyazaki", "Sukumar"]
+        }
+    },
+    {
+        "user_id": "mock_user_026",
+        "name": "Aditi Sharma",
+        "age": 28,
+        "gender": "Female",
+        "location": "Pune",
+        "avatar": "av5",
+        "profile_picture": "https://images.pexels.com/photos/5194107/pexels-photo-5194107.jpeg?w=400&h=600&fit=crop",
+        "pictures": [
+            "https://images.pexels.com/photos/5194107/pexels-photo-5194107.jpeg?w=400&h=600&fit=crop",
+            "https://images.pexels.com/photos/11624988/pexels-photo-11624988.jpeg?w=400&h=600&fit=crop"
+        ],
+        "bio": "A24 films are my love language. Looking for someone who appreciates slow cinema and meaningful conversations over filter coffee.",
+        "partnerPreference": "Men",
+        "relationshipIntent": ["Long-term relationship"],
+        "genres": ["Drama", "Indie", "Art House"],
+        "filmLanguages": ["English", "Hindi", "Marathi"],
+        "languagesSpoken": ["Marathi", "Hindi", "English"],
+        "topMovies": [
+            {"title": "Everything Everywhere All at Once", "tmdb_id": 545611},
+            {"title": "Moonlight", "tmdb_id": 376867},
+            {"title": "The Lunchbox", "tmdb_id": 195374}
+        ],
+        "movieFrequency": "Weekly",
+        "ottTheatre": "Both",
+        "height": "5'4\"",
+        "religion": "Hindu",
+        "zodiac": "Pisces",
+        "smoking": "Never",
+        "drinking": "Rarely",
+        "exercise": "Sometimes",
+        "education": "Master's Degree",
+        "workProfile": "Film Critic",
+        "swipe_history": {
+            "liked_genres": ["Drama", "Indie", "Art House", "World Cinema"],
+            "disliked_genres": ["Action", "Horror", "Superhero"],
+            "liked_actors": ["Michelle Yeoh", "Irrfan Khan", "Florence Pugh"],
+            "liked_directors": ["Daniels", "Barry Jenkins", "Chloé Zhao"]
+        }
+    },
+    {
+        "user_id": "mock_user_027",
+        "name": "Rhea Iyer",
+        "age": 24,
+        "gender": "Female",
+        "location": "Chennai",
+        "avatar": "av2",
+        "profile_picture": "https://images.pexels.com/photos/37798732/pexels-photo-37798732.jpeg?w=400&h=600&fit=crop",
+        "pictures": [
+            "https://images.pexels.com/photos/37798732/pexels-photo-37798732.jpeg?w=400&h=600&fit=crop",
+            "https://images.pexels.com/photos/33265568/pexels-photo-33265568.jpeg?w=400&h=600&fit=crop"
+        ],
+        "bio": "AR Rahman melodies + Sunday rain + good company = perfect date. Tamil cinema runs in my veins. Kamal Haasan supremacy!",
+        "partnerPreference": "Men",
+        "relationshipIntent": ["Long-term relationship"],
+        "genres": ["Drama", "Musical", "Romance"],
+        "filmLanguages": ["Tamil", "Hindi", "English"],
+        "languagesSpoken": ["Tamil", "English", "Hindi"],
+        "topMovies": [
+            {"title": "Vikram Vedha", "tmdb_id": 443306},
+            {"title": "96", "tmdb_id": 549618},
+            {"title": "Soorarai Pottru", "tmdb_id": 762902}
+        ],
+        "movieFrequency": "Weekly",
+        "ottTheatre": "Theatre",
+        "height": "5'5\"",
+        "religion": "Hindu",
+        "zodiac": "Libra",
+        "smoking": "Never",
+        "drinking": "Never",
+        "exercise": "Active",
+        "education": "Bachelor's Degree",
+        "workProfile": "Classical Dancer",
+        "swipe_history": {
+            "liked_genres": ["Drama", "Musical", "Romance", "Thriller"],
+            "disliked_genres": ["Horror", "War"],
+            "liked_actors": ["Vijay Sethupathi", "Kamal Haasan", "Trisha"],
+            "liked_directors": ["Mani Ratnam", "Vetrimaaran", "Sudha Kongara"]
+        }
+    },
+    {
+        "user_id": "mock_user_028",
+        "name": "Zara Khan",
+        "age": 26,
+        "gender": "Female",
+        "location": "Mumbai",
+        "avatar": "av3",
+        "profile_picture": "https://images.pexels.com/photos/29553412/pexels-photo-29553412.jpeg?w=400&h=600&fit=crop",
+        "pictures": [
+            "https://images.pexels.com/photos/29553412/pexels-photo-29553412.jpeg?w=400&h=600&fit=crop",
+            "https://images.pexels.com/photos/31521632/pexels-photo-31521632.jpeg?w=400&h=600&fit=crop"
+        ],
+        "bio": "Horror movie enthusiast who watches scary films alone at 3 AM. Looking for a brave soul to share the scares with!",
+        "partnerPreference": "Men",
+        "relationshipIntent": ["Long-term relationship", "Something casual"],
+        "genres": ["Horror", "Thriller", "Mystery"],
+        "filmLanguages": ["Hindi", "English"],
+        "languagesSpoken": ["Hindi", "Urdu", "English"],
+        "topMovies": [
+            {"title": "Tumbbad", "tmdb_id": 534734},
+            {"title": "Hereditary", "tmdb_id": 493559},
+            {"title": "The Conjuring", "tmdb_id": 138843}
+        ],
+        "movieFrequency": "Multiple times a week",
+        "ottTheatre": "OTT",
+        "height": "5'6\"",
+        "religion": "Muslim",
+        "zodiac": "Scorpio",
+        "smoking": "Never",
+        "drinking": "Never",
+        "exercise": "Sometimes",
+        "education": "Bachelor's Degree",
+        "workProfile": "Interior Designer",
+        "swipe_history": {
+            "liked_genres": ["Horror", "Thriller", "Mystery", "Psychological"],
+            "disliked_genres": ["Romance", "Comedy", "Musical"],
+            "liked_actors": ["Toni Collette", "Florence Pugh", "Sohum Shah"],
+            "liked_directors": ["Ari Aster", "Jordan Peele", "Rahi Anil Barve"]
+        }
+    },
+    {
+        "user_id": "mock_user_029",
+        "name": "Ira Banerjee",
+        "age": 27,
+        "gender": "Female",
+        "location": "Kolkata",
+        "avatar": "av5",
+        "profile_picture": "https://images.pexels.com/photos/14994313/pexels-photo-14994313.jpeg?w=400&h=600&fit=crop",
+        "pictures": [
+            "https://images.pexels.com/photos/14994313/pexels-photo-14994313.jpeg?w=400&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1706943262473-fc393f495501?w=400&h=600&fit=crop"
+        ],
+        "bio": "Bengali cinema lover with a soft spot for Satyajit Ray. Can discuss Feluda theories for hours. Looking for my intellectual match!",
+        "partnerPreference": "Men",
+        "relationshipIntent": ["Long-term relationship"],
+        "genres": ["Drama", "Mystery", "Art House"],
+        "filmLanguages": ["Bengali", "Hindi", "English"],
+        "languagesSpoken": ["Bengali", "Hindi", "English"],
+        "topMovies": [
+            {"title": "Pather Panchali", "tmdb_id": 10627},
+            {"title": "Feluda: Gorosthaney Sabdhan", "tmdb_id": 221612},
+            {"title": "Kahaani", "tmdb_id": 121232}
+        ],
+        "movieFrequency": "Weekly",
+        "ottTheatre": "Both",
+        "height": "5'4\"",
+        "religion": "Hindu",
+        "zodiac": "Cancer",
+        "smoking": "Never",
+        "drinking": "Rarely",
+        "exercise": "Sometimes",
+        "education": "Master's Degree",
+        "workProfile": "Professor",
+        "swipe_history": {
+            "liked_genres": ["Drama", "Mystery", "Art House", "World Cinema"],
+            "disliked_genres": ["Action", "Horror", "Superhero"],
+            "liked_actors": ["Soumitra Chatterjee", "Vidya Balan", "Konkona Sen"],
+            "liked_directors": ["Satyajit Ray", "Srijit Mukherji", "Rituparno Ghosh"]
+        }
+    },
+    {
+        "user_id": "mock_user_030",
+        "name": "Aisha Nair",
+        "age": 25,
+        "gender": "Female",
+        "location": "Kochi",
+        "avatar": "av2",
+        "profile_picture": "https://images.unsplash.com/photo-1706943262459-3ef6ce03305c?w=400&h=600&fit=crop",
+        "pictures": [
+            "https://images.unsplash.com/photo-1706943262459-3ef6ce03305c?w=400&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1516239482977-b550ba7253f2?w=400&h=600&fit=crop"
+        ],
+        "bio": "Malayalam new wave cinema is life! Kumbalangi Nights is my comfort film. Looking for someone who appreciates good storytelling.",
+        "partnerPreference": "Men",
+        "relationshipIntent": ["Long-term relationship"],
+        "genres": ["Drama", "Comedy", "Romance"],
+        "filmLanguages": ["Malayalam", "Hindi", "English"],
+        "languagesSpoken": ["Malayalam", "Hindi", "English"],
+        "topMovies": [
+            {"title": "Kumbalangi Nights", "tmdb_id": 588228},
+            {"title": "Bangalore Days", "tmdb_id": 278431},
+            {"title": "Premam", "tmdb_id": 346700}
+        ],
+        "movieFrequency": "Multiple times a week",
+        "ottTheatre": "Both",
+        "height": "5'5\"",
+        "religion": "Hindu",
+        "zodiac": "Taurus",
+        "smoking": "Never",
+        "drinking": "Socially",
+        "exercise": "Active",
+        "education": "Bachelor's Degree",
+        "workProfile": "Doctor",
+        "swipe_history": {
+            "liked_genres": ["Drama", "Comedy", "Romance", "Thriller"],
+            "disliked_genres": ["Horror", "War"],
+            "liked_actors": ["Fahadh Faasil", "Dulquer Salmaan", "Nivin Pauly"],
+            "liked_directors": ["Lijo Jose Pellissery", "Dileesh Pothan", "Alphonse Puthren"]
+        }
+    },
+    {
+        "user_id": "mock_user_031",
+        "name": "Navya Gupta",
+        "age": 24,
+        "gender": "Female",
+        "location": "Noida",
+        "avatar": "av3",
+        "profile_picture": "https://images.unsplash.com/photo-1463335361701-e90f4c5045d0?w=400&h=600&fit=crop",
+        "pictures": [
+            "https://images.unsplash.com/photo-1463335361701-e90f4c5045d0?w=400&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1622782045716-a05bcc4f5ae8?w=400&h=600&fit=crop"
+        ],
+        "bio": "K-drama addict trying to find my own Korean romance. Also love Bollywood masala entertainers. Life's too short for boring movies!",
+        "partnerPreference": "Men",
+        "relationshipIntent": ["Long-term relationship", "Something casual"],
+        "genres": ["Romance", "Drama", "Comedy"],
+        "filmLanguages": ["Korean", "Hindi", "English"],
+        "languagesSpoken": ["Hindi", "English"],
+        "topMovies": [
+            {"title": "Parasite", "tmdb_id": 496243},
+            {"title": "Train to Busan", "tmdb_id": 396535},
+            {"title": "Zindagi Na Milegi Dobara", "tmdb_id": 76788}
+        ],
+        "movieFrequency": "Daily",
+        "ottTheatre": "OTT",
+        "height": "5'4\"",
+        "religion": "Hindu",
+        "zodiac": "Sagittarius",
+        "smoking": "Never",
+        "drinking": "Occasionally",
+        "exercise": "Sometimes",
+        "education": "Bachelor's Degree",
+        "workProfile": "Social Media Manager",
+        "swipe_history": {
+            "liked_genres": ["Romance", "Drama", "Comedy", "Thriller"],
+            "disliked_genres": ["Horror", "War", "Documentary"],
+            "liked_actors": ["Song Joong-ki", "Hyun Bin", "Ranveer Singh"],
+            "liked_directors": ["Bong Joon-ho", "Zoya Akhtar", "Park Chan-wook"]
+        }
+    },
+    {
+        "user_id": "mock_user_032",
+        "name": "Tara Mehta",
+        "age": 26,
+        "gender": "Female",
+        "location": "Ahmedabad",
+        "avatar": "av5",
+        "profile_picture": "https://images.unsplash.com/photo-1622049605334-72e1e4432346?w=400&h=600&fit=crop",
+        "pictures": [
+            "https://images.unsplash.com/photo-1622049605334-72e1e4432346?w=400&h=600&fit=crop",
+            "https://images.pexels.com/photos/37145167/pexels-photo-37145167.jpeg?w=400&h=600&fit=crop"
+        ],
+        "bio": "Fantasy and sci-fi nerd. Harry Potter house: Ravenclaw. If you can discuss the ending of Inception, let's talk!",
+        "partnerPreference": "Men",
+        "relationshipIntent": ["Long-term relationship"],
+        "genres": ["Fantasy", "Sci-Fi", "Adventure"],
+        "filmLanguages": ["English", "Hindi", "Gujarati"],
+        "languagesSpoken": ["Gujarati", "Hindi", "English"],
+        "topMovies": [
+            {"title": "Harry Potter and the Deathly Hallows", "tmdb_id": 12445},
+            {"title": "Lord of the Rings", "tmdb_id": 120},
+            {"title": "Dune", "tmdb_id": 438631}
+        ],
+        "movieFrequency": "Multiple times a week",
+        "ottTheatre": "Both",
+        "height": "5'3\"",
+        "religion": "Hindu",
+        "zodiac": "Aquarius",
+        "smoking": "Never",
+        "drinking": "Never",
+        "exercise": "Active",
+        "education": "Bachelor's Degree",
+        "workProfile": "Game Developer",
+        "swipe_history": {
+            "liked_genres": ["Fantasy", "Sci-Fi", "Adventure", "Action"],
+            "disliked_genres": ["Horror", "Documentary"],
+            "liked_actors": ["Timothée Chalamet", "Emma Watson", "Daniel Radcliffe"],
+            "liked_directors": ["Denis Villeneuve", "Christopher Nolan", "Peter Jackson"]
+        }
+    },
+    {
+        "user_id": "mock_user_033",
+        "name": "Simran Kaur",
+        "age": 25,
+        "gender": "Female",
+        "location": "Chandigarh",
+        "avatar": "av2",
+        "profile_picture": "https://images.unsplash.com/photo-1708534419572-6e6614a53ca1?w=400&h=600&fit=crop",
+        "pictures": [
+            "https://images.unsplash.com/photo-1708534419572-6e6614a53ca1?w=400&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1618559850638-2aed8a8e8cdc?w=400&h=600&fit=crop"
+        ],
+        "bio": "Punjabi by heart, rom-com lover by choice. Looking for my Shah Rukh Khan in a world full of ordinary heroes!",
+        "partnerPreference": "Men",
+        "relationshipIntent": ["Long-term relationship"],
+        "genres": ["Romance", "Comedy", "Drama"],
+        "filmLanguages": ["Hindi", "Punjabi", "English"],
+        "languagesSpoken": ["Punjabi", "Hindi", "English"],
+        "topMovies": [
+            {"title": "Veer-Zaara", "tmdb_id": 11597},
+            {"title": "Jab We Met", "tmdb_id": 20453},
+            {"title": "Udta Punjab", "tmdb_id": 381005}
+        ],
+        "movieFrequency": "Weekly",
+        "ottTheatre": "Theatre",
+        "height": "5'6\"",
+        "religion": "Sikh",
+        "zodiac": "Aries",
+        "smoking": "Never",
+        "drinking": "Socially",
+        "exercise": "Active",
+        "education": "Bachelor's Degree",
+        "workProfile": "Event Planner",
+        "swipe_history": {
+            "liked_genres": ["Romance", "Comedy", "Drama", "Action"],
+            "disliked_genres": ["Horror", "Documentary"],
+            "liked_actors": ["Shah Rukh Khan", "Diljit Dosanjh", "Kareena Kapoor"],
+            "liked_directors": ["Yash Chopra", "Imtiaz Ali", "Abhishek Chaubey"]
+        }
+    },
+    {
+        "user_id": "mock_user_034",
+        "name": "Nisha Pillai",
+        "age": 27,
+        "gender": "Female",
+        "location": "Trivandrum",
+        "avatar": "av3",
+        "profile_picture": "https://images.unsplash.com/photo-1739429942851-9083ee185d3d?w=400&h=600&fit=crop",
+        "pictures": [
+            "https://images.unsplash.com/photo-1739429942851-9083ee185d3d?w=400&h=600&fit=crop",
+            "https://images.pexels.com/photos/17533630/pexels-photo-17533630.jpeg?w=400&h=600&fit=crop"
+        ],
+        "bio": "Documentary filmmaker who believes every life is a story worth telling. Looking for someone with depth and passion for cinema.",
+        "partnerPreference": "Men",
+        "relationshipIntent": ["Long-term relationship"],
+        "genres": ["Documentary", "Drama", "World Cinema"],
+        "filmLanguages": ["Malayalam", "English", "Hindi"],
+        "languagesSpoken": ["Malayalam", "Tamil", "English", "Hindi"],
+        "topMovies": [
+            {"title": "The Great Indian Kitchen", "tmdb_id": 807127},
+            {"title": "Jallikattu", "tmdb_id": 595997},
+            {"title": "Churuli", "tmdb_id": 789743}
+        ],
+        "movieFrequency": "Weekly",
+        "ottTheatre": "Both",
+        "height": "5'4\"",
+        "religion": "Hindu",
+        "zodiac": "Virgo",
+        "smoking": "Never",
+        "drinking": "Rarely",
+        "exercise": "Sometimes",
+        "education": "Master's Degree",
+        "workProfile": "Documentary Filmmaker",
+        "swipe_history": {
+            "liked_genres": ["Documentary", "Drama", "World Cinema", "Art House"],
+            "disliked_genres": ["Action", "Superhero"],
+            "liked_actors": ["Fahadh Faasil", "Chemban Vinod Jose"],
+            "liked_directors": ["Lijo Jose Pellissery", "Jeo Baby", "Dileesh Pothan"]
+        }
+    },
+    {
+        "user_id": "mock_user_035",
+        "name": "Pooja Singh",
+        "age": 23,
+        "gender": "Female",
+        "location": "Lucknow",
+        "avatar": "av5",
+        "profile_picture": "https://images.pexels.com/photos/15007244/pexels-photo-15007244.jpeg?w=400&h=600&fit=crop",
+        "pictures": [
+            "https://images.pexels.com/photos/15007244/pexels-photo-15007244.jpeg?w=400&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1631005438015-a2d58390d01e?w=400&h=600&fit=crop"
+        ],
+        "bio": "Anime otaku who also loves Bollywood masala. My perfect weekend is Studio Ghibli marathon + biryani. Any takers?",
+        "partnerPreference": "Men",
+        "relationshipIntent": ["Long-term relationship", "Something casual"],
+        "genres": ["Animation", "Anime", "Romance"],
+        "filmLanguages": ["Japanese", "Hindi", "English"],
+        "languagesSpoken": ["Hindi", "English"],
+        "topMovies": [
+            {"title": "Your Name", "tmdb_id": 372058},
+            {"title": "My Neighbor Totoro", "tmdb_id": 8392},
+            {"title": "Weathering with You", "tmdb_id": 568160}
+        ],
+        "movieFrequency": "Daily",
+        "ottTheatre": "OTT",
+        "height": "5'2\"",
+        "religion": "Hindu",
+        "zodiac": "Pisces",
+        "smoking": "Never",
+        "drinking": "Never",
+        "exercise": "Rarely",
+        "education": "Bachelor's Degree",
+        "workProfile": "Animator",
+        "swipe_history": {
+            "liked_genres": ["Animation", "Anime", "Romance", "Fantasy"],
+            "disliked_genres": ["Horror", "War"],
+            "liked_actors": ["Voice actors"],
+            "liked_directors": ["Makoto Shinkai", "Hayao Miyazaki", "Mamoru Hosoda"]
         }
     }
 ]
