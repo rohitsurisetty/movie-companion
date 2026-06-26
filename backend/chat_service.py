@@ -737,3 +737,163 @@ async def create_mock_conversations(user_id: str, match_profiles: List[Dict] = N
             )
             await send_message(match_id, user_id, "What did you think of Oppenheimer?", "text")
             await send_message(user_id, match_id, "Absolutely mind-blowing! Saw it in IMAX", "text")
+
+
+
+# ============== MATCH HISTORY FUNCTIONS ==============
+
+async def get_match_history(user_id: str) -> List[Dict]:
+    """
+    Get complete match history for a user.
+    Includes ALL matches (active, unmatched) sorted by most recent first.
+    This is a differentiating trust & safety feature.
+    """
+    if _db is None:
+        return []
+    
+    # Get all conversations where user is a participant
+    # Include both active and unmatched conversations
+    all_conversations = await _db.chat_conversations.find({
+        "participants": user_id,
+        "status": {"$in": ["active", "unmatched", "pending"]}
+    }).sort("created_at", -1).to_list(length=500)
+    
+    history = []
+    for conv in all_conversations:
+        other_user_id = [p for p in conv["participants"] if p != user_id][0]
+        
+        # Get other user's basic info
+        other_user = await get_user_info(other_user_id)
+        
+        # Determine if this user was unmatched BY the other person
+        is_unmatched = conv.get("status") == "unmatched"
+        unmatched_by = conv.get("unmatched_by")
+        was_unmatched_by_other = is_unmatched and unmatched_by == other_user_id
+        user_initiated_unmatch = is_unmatched and unmatched_by == user_id
+        
+        # Build history entry
+        entry = {
+            "conversation_id": conv["conversation_id"],
+            "other_user_id": other_user_id,
+            "other_user_name": other_user.get("name", "Unknown"),
+            # Only show profile picture if match is active OR if user was unmatched
+            # (person who unmatched shouldn't see the profile anymore)
+            "other_user_avatar": other_user.get("avatar") if not user_initiated_unmatch else None,
+            "matched_at": conv.get("created_at"),
+            "last_message_at": conv.get("last_message_at"),
+            "status": conv.get("status"),
+            "is_active": conv.get("status") == "active",
+            "is_unmatched": is_unmatched,
+            "was_unmatched_by_other": was_unmatched_by_other,
+            "user_initiated_unmatch": user_initiated_unmatch,
+            "unmatched_at": conv.get("unmatched_at") if is_unmatched else None,
+            "meeting_status": conv.get("meeting_status"),
+        }
+        
+        history.append(entry)
+    
+    return history
+
+
+async def get_unmatched_conversation(user_id: str, conversation_id: str) -> Optional[Dict]:
+    """
+    Get details of an unmatched conversation for read-only viewing.
+    Only the person who WAS UNMATCHED can view this.
+    """
+    if _db is None:
+        return None
+    
+    conv = await _db.chat_conversations.find_one({"conversation_id": conversation_id})
+    
+    if not conv:
+        return None
+    
+    # Verify user is a participant
+    if user_id not in conv.get("participants", []):
+        return None
+    
+    other_user_id = [p for p in conv["participants"] if p != user_id][0]
+    
+    # Check if this user was the one who was unmatched (not the initiator)
+    is_unmatched = conv.get("status") == "unmatched"
+    unmatched_by = conv.get("unmatched_by")
+    was_unmatched_by_other = is_unmatched and unmatched_by == other_user_id
+    
+    # Get other user's info (but hide avatar for read-only view)
+    other_user = await get_user_info(other_user_id)
+    
+    return {
+        "conversation_id": conversation_id,
+        "other_user_id": other_user_id,
+        "other_user_name": other_user.get("name", "Unknown"),
+        "other_user_avatar": None,  # Don't show avatar in read-only mode
+        "status": conv.get("status"),
+        "is_read_only": was_unmatched_by_other,
+        "was_unmatched_by_other": was_unmatched_by_other,
+        "unmatched_at": conv.get("unmatched_at"),
+        "created_at": conv.get("created_at"),
+        "meeting_status": conv.get("meeting_status"),
+    }
+
+
+async def delete_chat_history(user_id: str, conversation_id: str) -> bool:
+    """
+    Delete chat history for a user (local deletion only).
+    The user can choose to delete the conversation from their view.
+    This doesn't affect the other user's view or reports.
+    """
+    if _db is None:
+        return False
+    
+    # Get conversation to verify participation
+    conv = await _db.chat_conversations.find_one({"conversation_id": conversation_id})
+    if not conv or user_id not in conv.get("participants", []):
+        return False
+    
+    # Mark as deleted for this user (soft delete)
+    result = await _db.chat_conversations.update_one(
+        {"conversation_id": conversation_id},
+        {"$addToSet": {"deleted_by_users": user_id}}
+    )
+    
+    logger.info(f"User {user_id} deleted chat history for conversation {conversation_id}")
+    
+    return result.modified_count > 0
+
+
+async def can_user_view_conversation(user_id: str, conversation_id: str) -> Dict:
+    """
+    Check if user can view a conversation and in what mode.
+    Returns: { can_view: bool, is_read_only: bool, reason: str }
+    """
+    if _db is None:
+        return {"can_view": False, "is_read_only": False, "reason": "Database not connected"}
+    
+    conv = await _db.chat_conversations.find_one({"conversation_id": conversation_id})
+    
+    if not conv:
+        return {"can_view": False, "is_read_only": False, "reason": "Conversation not found"}
+    
+    if user_id not in conv.get("participants", []):
+        return {"can_view": False, "is_read_only": False, "reason": "Not a participant"}
+    
+    # Check if user deleted this conversation
+    if user_id in conv.get("deleted_by_users", []):
+        return {"can_view": False, "is_read_only": False, "reason": "Chat deleted"}
+    
+    other_user_id = [p for p in conv["participants"] if p != user_id][0]
+    status = conv.get("status")
+    unmatched_by = conv.get("unmatched_by")
+    
+    if status == "active" or status == "pending":
+        return {"can_view": True, "is_read_only": False, "reason": "Active conversation"}
+    
+    if status == "unmatched":
+        if unmatched_by == user_id:
+            # User initiated unmatch - they can't see the conversation anymore
+            return {"can_view": False, "is_read_only": False, "reason": "You unmatched this user"}
+        else:
+            # User was unmatched BY the other person - read-only access
+            return {"can_view": True, "is_read_only": True, "reason": "User has unmatched with you"}
+    
+    return {"can_view": False, "is_read_only": False, "reason": "Unknown status"}

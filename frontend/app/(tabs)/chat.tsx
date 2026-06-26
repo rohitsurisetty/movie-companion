@@ -1224,10 +1224,14 @@ const GiftedChatScreen = ({
   conversation, 
   userId,
   onBack,
+  isReadOnly = false,
+  otherUserNameOverride,
 }: {
   conversation: Conversation;
   userId: string;
   onBack: () => void;
+  isReadOnly?: boolean;
+  otherUserNameOverride?: string;
 }) => {
   const [messages, setMessages] = useState<IMessage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1239,6 +1243,7 @@ const GiftedChatScreen = ({
   const [showDidYouMeet, setShowDidYouMeet] = useState(false);
   const [showComingSoon, setShowComingSoon] = useState(false);
   const [comingSoonFeature, setComingSoonFeature] = useState('');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   
   // New modal states for redesigned flows
   const [showUnmatchModal, setShowUnmatchModal] = useState(false);
@@ -1246,6 +1251,8 @@ const GiftedChatScreen = ({
   
   const otherUser = conversation.other_user;
   const otherUserId = conversation.other_user_id;
+  // Use override name for read-only mode (unmatched state)
+  const displayName = otherUserNameOverride || otherUser?.name || 'Unknown';
 
   const showComingSoonModal = (feature: string) => {
     setComingSoonFeature(feature);
@@ -1476,33 +1483,48 @@ const GiftedChatScreen = ({
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
     >
-      {/* Chat Header */}
+      {/* Chat Header - Modified for read-only mode */}
       <View style={styles.chatHeader}>
         <TouchableOpacity onPress={onBack} style={styles.backBtn}>
           <Ionicons name="chevron-back" size={28} color={COLORS.text} />
         </TouchableOpacity>
         
-        <TouchableOpacity style={styles.chatHeaderProfile} onPress={() => setShowProfile(true)}>
-          <Avatar name={otherUser?.name || 'U'} size={40} imageUrl={otherUser?.avatar} />
-          <View style={styles.chatHeaderInfo}>
-            <Text style={styles.chatHeaderName}>{otherUser?.name || 'Unknown'}</Text>
-            <Text style={styles.chatHeaderStatus}>
-              {isTyping ? 'typing...' : 'Online'}
-            </Text>
+        {isReadOnly ? (
+          // Read-only header: Just name, no avatar or actions
+          <View style={styles.chatHeaderReadOnly}>
+            <Text style={styles.chatHeaderName}>{displayName}</Text>
+            <Text style={styles.chatHeaderUnmatched}>Conversation ended</Text>
           </View>
-        </TouchableOpacity>
+        ) : (
+          <TouchableOpacity style={styles.chatHeaderProfile} onPress={() => setShowProfile(true)}>
+            <Avatar name={otherUser?.name || 'U'} size={40} imageUrl={otherUser?.avatar} />
+            <View style={styles.chatHeaderInfo}>
+              <Text style={styles.chatHeaderName}>{displayName}</Text>
+              <Text style={styles.chatHeaderStatus}>
+                {isTyping ? 'typing...' : 'Online'}
+              </Text>
+            </View>
+          </TouchableOpacity>
+        )}
         
-        <View style={styles.chatHeaderActions}>
-          <TouchableOpacity style={styles.headerActionBtn} onPress={() => showComingSoonModal('Voice Calls')}>
-            <Ionicons name="call-outline" size={22} color={COLORS.text} />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.headerActionBtn} onPress={() => showComingSoonModal('Video Calls')}>
-            <Ionicons name="videocam-outline" size={22} color={COLORS.text} />
-          </TouchableOpacity>
+        {/* Header Actions - Hide call buttons in read-only */}
+        {isReadOnly ? (
           <TouchableOpacity style={styles.headerActionBtn} onPress={() => setShowMenu(true)}>
             <Ionicons name="ellipsis-vertical" size={22} color={COLORS.text} />
           </TouchableOpacity>
-        </View>
+        ) : (
+          <View style={styles.chatHeaderActions}>
+            <TouchableOpacity style={styles.headerActionBtn} onPress={() => showComingSoonModal('Voice Calls')}>
+              <Ionicons name="call-outline" size={22} color={COLORS.text} />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.headerActionBtn} onPress={() => showComingSoonModal('Video Calls')}>
+              <Ionicons name="videocam-outline" size={22} color={COLORS.text} />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.headerActionBtn} onPress={() => setShowMenu(true)}>
+              <Ionicons name="ellipsis-vertical" size={22} color={COLORS.text} />
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
 
       {/* GiftedChat */}
@@ -1539,119 +1561,200 @@ const GiftedChatScreen = ({
             }}
           />
           
-          {/* ============ TWO-ROW BOTTOM COMPOSER ============ */}
-          <View style={styles.twoRowComposer}>
-            {/* Row 2: AI Recommendations - ABOVE the input */}
-            {suggestions.length > 0 && (
-              <View style={styles.aiRecommendationsRow}>
-                <ScrollView 
-                  horizontal 
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.aiChipsContainer}
-                  keyboardShouldPersistTaps="handled"
-                >
-                  <View style={styles.aiLabelContainer}>
-                    <Ionicons name="sparkles" size={14} color={COLORS.primary} />
-                    <Text style={styles.aiLabel}>AI</Text>
-                  </View>
-                  {suggestions.map((suggestion, idx) => (
-                    <TouchableOpacity 
-                      key={idx} 
-                      style={styles.aiChip}
-                      onPress={() => handleSuggestionPress(suggestion)}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={styles.aiChipText} numberOfLines={1}>{suggestion}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
+          {/* ============ BOTTOM SECTION - CONDITIONAL ============ */}
+          {isReadOnly ? (
+            /* READ-ONLY MODE: Show unmatched notice */
+            <View style={styles.readOnlyNotice}>
+              <View style={styles.readOnlyIconContainer}>
+                <Ionicons name="lock-closed" size={20} color={COLORS.warning} />
               </View>
-            )}
-            
-            {/* Row 1: Input Composer */}
-            <View style={styles.composerRow}>
-              {/* Camera Button */}
-              <TouchableOpacity 
-                style={styles.cameraBtn}
-                onPress={() => showComingSoonModal('Photo & Media')}
-              >
-                <Ionicons name="camera" size={22} color={COLORS.primary} />
-              </TouchableOpacity>
-              
-              {/* Text Input */}
-              <View style={styles.textInputWrapper}>
-                <TextInput
-                  style={styles.messageInput}
-                  placeholder="Type a message..."
-                  placeholderTextColor={COLORS.textMuted}
-                  value={inputText}
-                  onChangeText={setInputText}
-                  multiline
-                  maxLength={1000}
-                />
-              </View>
-              
-              {/* Right Actions: GIF, Mic, Video OR Send */}
-              {inputText.trim() ? (
-                // Show Send button when typing
-                <TouchableOpacity 
-                  style={styles.sendBtn}
-                  onPress={handleSendPress}
-                  activeOpacity={0.8}
-                >
-                  <Ionicons name="send" size={20} color="#FFF" />
-                </TouchableOpacity>
-              ) : (
-                // Show media icons when not typing
-                <View style={styles.mediaActions}>
-                  <TouchableOpacity 
-                    style={styles.mediaBtn}
-                    onPress={() => showComingSoonModal('GIFs')}
+              <Text style={styles.readOnlyText}>
+                {displayName} has unmatched with you. This conversation is now read-only.
+              </Text>
+              <Text style={styles.readOnlySubtext}>
+                If you experienced inappropriate behavior, you can still report this user from the menu above.
+              </Text>
+            </View>
+          ) : (
+            /* ACTIVE MODE: Normal two-row composer */
+            <View style={styles.twoRowComposer}>
+              {/* Row 2: AI Recommendations - ABOVE the input */}
+              {suggestions.length > 0 && (
+                <View style={styles.aiRecommendationsRow}>
+                  <ScrollView 
+                    horizontal 
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.aiChipsContainer}
+                    keyboardShouldPersistTaps="handled"
                   >
-                    <Text style={styles.gifLabel}>GIF</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity 
-                    style={styles.mediaBtn}
-                    onPress={() => showComingSoonModal('Voice Notes')}
-                  >
-                    <Ionicons name="mic" size={20} color={COLORS.textSecondary} />
-                  </TouchableOpacity>
-                  <TouchableOpacity 
-                    style={styles.mediaBtn}
-                    onPress={() => showComingSoonModal('Video Messages')}
-                  >
-                    <Ionicons name="videocam" size={20} color={COLORS.textSecondary} />
-                  </TouchableOpacity>
+                    <View style={styles.aiLabelContainer}>
+                      <Ionicons name="sparkles" size={14} color={COLORS.primary} />
+                      <Text style={styles.aiLabel}>AI</Text>
+                    </View>
+                    {suggestions.map((suggestion, idx) => (
+                      <TouchableOpacity 
+                        key={idx} 
+                        style={styles.aiChip}
+                        onPress={() => handleSuggestionPress(suggestion)}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={styles.aiChipText} numberOfLines={1}>{suggestion}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
                 </View>
               )}
+              
+              {/* Row 1: Input Composer */}
+              <View style={styles.composerRow}>
+                {/* Camera Button */}
+                <TouchableOpacity 
+                  style={styles.cameraBtn}
+                  onPress={() => showComingSoonModal('Photo & Media')}
+                >
+                  <Ionicons name="camera" size={22} color={COLORS.primary} />
+                </TouchableOpacity>
+                
+                {/* Text Input */}
+                <View style={styles.textInputWrapper}>
+                  <TextInput
+                    style={styles.messageInput}
+                    placeholder="Type a message..."
+                    placeholderTextColor={COLORS.textMuted}
+                    value={inputText}
+                    onChangeText={setInputText}
+                    multiline
+                    maxLength={1000}
+                  />
+                </View>
+                
+                {/* Right Actions: GIF, Mic, Video OR Send */}
+                {inputText.trim() ? (
+                  // Show Send button when typing
+                  <TouchableOpacity 
+                    style={styles.sendBtn}
+                    onPress={handleSendPress}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="send" size={20} color="#FFF" />
+                  </TouchableOpacity>
+                ) : (
+                  // Show media icons when not typing
+                  <View style={styles.mediaActions}>
+                    <TouchableOpacity 
+                      style={styles.mediaBtn}
+                      onPress={() => showComingSoonModal('GIFs')}
+                    >
+                      <Text style={styles.gifLabel}>GIF</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      style={styles.mediaBtn}
+                      onPress={() => showComingSoonModal('Voice Notes')}
+                    >
+                      <Ionicons name="mic" size={20} color={COLORS.textSecondary} />
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      style={styles.mediaBtn}
+                      onPress={() => showComingSoonModal('Video Messages')}
+                    >
+                      <Ionicons name="videocam" size={20} color={COLORS.textSecondary} />
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
             </View>
-          </View>
+          )}
         </View>
       )}
 
-      {/* Simplified Menu Modal - Only 4 options */}
+      {/* Menu Modal - Different options for read-only vs active */}
       <Modal visible={showMenu} transparent animationType="fade" onRequestClose={() => setShowMenu(false)}>
         <Pressable style={styles.menuOverlay} onPress={() => setShowMenu(false)}>
           <View style={styles.menuContainer}>
-            <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); setShowProfile(true); }}>
-              <Ionicons name="person-outline" size={22} color={COLORS.text} />
-              <Text style={styles.menuItemText}>View Profile</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); setShowDidYouMeet(true); }}>
-              <Ionicons name="cafe-outline" size={22} color={COLORS.text} />
-              <Text style={styles.menuItemText}>Did you meet?</Text>
-            </TouchableOpacity>
-            <View style={styles.menuDivider} />
-            <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); setShowUnmatchModal(true); }}>
-              <Ionicons name="heart-dislike-outline" size={22} color={COLORS.warning} />
-              <Text style={[styles.menuItemText, { color: COLORS.warning }]}>Unmatch</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); setShowReportModal(true); }}>
-              <Ionicons name="flag-outline" size={22} color={COLORS.primary} />
-              <Text style={[styles.menuItemText, { color: COLORS.primary }]}>Report</Text>
-            </TouchableOpacity>
+            {isReadOnly ? (
+              // READ-ONLY MENU: Delete Chat, Report, Did You Meet?
+              <>
+                <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); setShowDeleteConfirm(true); }}>
+                  <Ionicons name="trash-outline" size={22} color={COLORS.text} />
+                  <Text style={styles.menuItemText}>Delete Chat</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); setShowDidYouMeet(true); }}>
+                  <Ionicons name="cafe-outline" size={22} color={COLORS.text} />
+                  <Text style={styles.menuItemText}>Did you meet?</Text>
+                </TouchableOpacity>
+                <View style={styles.menuDivider} />
+                <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); setShowReportModal(true); }}>
+                  <Ionicons name="flag-outline" size={22} color={COLORS.primary} />
+                  <Text style={[styles.menuItemText, { color: COLORS.primary }]}>Report</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              // ACTIVE MENU: View Profile, Did you meet?, Unmatch, Report
+              <>
+                <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); setShowProfile(true); }}>
+                  <Ionicons name="person-outline" size={22} color={COLORS.text} />
+                  <Text style={styles.menuItemText}>View Profile</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); setShowDidYouMeet(true); }}>
+                  <Ionicons name="cafe-outline" size={22} color={COLORS.text} />
+                  <Text style={styles.menuItemText}>Did you meet?</Text>
+                </TouchableOpacity>
+                <View style={styles.menuDivider} />
+                <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); setShowUnmatchModal(true); }}>
+                  <Ionicons name="heart-dislike-outline" size={22} color={COLORS.warning} />
+                  <Text style={[styles.menuItemText, { color: COLORS.warning }]}>Unmatch</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); setShowReportModal(true); }}>
+                  <Ionicons name="flag-outline" size={22} color={COLORS.primary} />
+                  <Text style={[styles.menuItemText, { color: COLORS.primary }]}>Report</Text>
+                </TouchableOpacity>
+              </>
+            )}
           </View>
         </Pressable>
+      </Modal>
+
+      {/* Delete Chat Confirmation Modal */}
+      <Modal visible={showDeleteConfirm} transparent animationType="fade" onRequestClose={() => setShowDeleteConfirm(false)}>
+        <View style={styles.menuOverlay}>
+          <View style={styles.confirmModal}>
+            <Ionicons name="trash-outline" size={48} color={COLORS.primary} style={{ marginBottom: 16 }} />
+            <Text style={styles.confirmTitle}>Delete this conversation?</Text>
+            <Text style={styles.confirmText}>
+              This will permanently remove this chat from your history. This action cannot be undone.
+            </Text>
+            <View style={styles.confirmButtons}>
+              <TouchableOpacity 
+                style={styles.confirmBtnCancel} 
+                onPress={() => setShowDeleteConfirm(false)}
+              >
+                <Text style={styles.confirmBtnCancelText}>No, keep it</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={styles.confirmBtnDelete} 
+                onPress={async () => {
+                  try {
+                    await fetch(`${API_BASE}/api/chat/delete`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        user_id: userId,
+                        conversation_id: conversation.conversation_id
+                      })
+                    });
+                    setShowDeleteConfirm(false);
+                    onBack();
+                  } catch (error) {
+                    console.error('Error deleting chat:', error);
+                    Alert.alert('Error', 'Could not delete chat. Please try again.');
+                  }
+                }}
+              >
+                <Text style={styles.confirmBtnDeleteText}>Yes, delete</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
       </Modal>
 
       {/* Profile Sheet */}
@@ -2297,4 +2400,100 @@ const styles = StyleSheet.create({
   reportConfirmationText: { fontSize: 15, color: COLORS.textSecondary, textAlign: 'center', marginTop: 12, lineHeight: 22, paddingHorizontal: 16 },
   reportDoneBtn: { backgroundColor: COLORS.primary, paddingVertical: 16, borderRadius: 30, alignItems: 'center', marginTop: 32 },
   reportDoneBtnText: { fontSize: 16, fontWeight: '600', color: '#FFFFFF' },
+  
+  // ============ READ-ONLY MODE STYLES ============
+  chatHeaderReadOnly: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  chatHeaderUnmatched: {
+    fontSize: 12,
+    color: COLORS.warning,
+    marginTop: 2,
+  },
+  readOnlyNotice: {
+    backgroundColor: 'rgba(255, 184, 0, 0.1)',
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+    padding: 20,
+    alignItems: 'center',
+  },
+  readOnlyIconContainer: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255, 184, 0, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  readOnlyText: {
+    fontSize: 15,
+    color: COLORS.warning,
+    textAlign: 'center',
+    fontWeight: '500',
+    lineHeight: 21,
+  },
+  readOnlySubtext: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    marginTop: 8,
+    lineHeight: 18,
+    paddingHorizontal: 20,
+  },
+  
+  // Delete Confirmation Modal
+  confirmModal: {
+    backgroundColor: COLORS.bgCard,
+    marginHorizontal: 24,
+    borderRadius: 20,
+    padding: 24,
+    alignItems: 'center',
+    marginTop: 'auto',
+    marginBottom: 'auto',
+  },
+  confirmTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: COLORS.text,
+    textAlign: 'center',
+  },
+  confirmText: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    marginTop: 12,
+    lineHeight: 20,
+  },
+  confirmButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 24,
+    width: '100%',
+  },
+  confirmBtnCancel: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 24,
+    backgroundColor: COLORS.bgInput,
+    alignItems: 'center',
+  },
+  confirmBtnCancelText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: COLORS.text,
+  },
+  confirmBtnDelete: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 24,
+    backgroundColor: COLORS.primary,
+    alignItems: 'center',
+  },
+  confirmBtnDeleteText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
 });

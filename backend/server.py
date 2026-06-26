@@ -56,6 +56,11 @@ from chat_service import (
     add_ai_reply_to_conversation,
     create_mock_conversations,
     set_chat_db,
+    # History feature functions
+    get_match_history,
+    get_unmatched_conversation,
+    delete_chat_history,
+    can_user_view_conversation,
 )
 
 # Import Tina AI service for conversational profile building
@@ -2960,6 +2965,83 @@ async def api_init_mock_conversations(user_id: str):
         return {"success": True, "message": "Mock conversations created"}
     except Exception as e:
         logger.error(f"Init mock conversations error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================
+# Match History API Endpoints (Trust & Safety Feature)
+# =============================================
+
+@api_router.get("/user/match-history/{user_id}")
+async def api_get_match_history(user_id: str):
+    """
+    Get complete match history for a user.
+    This is a differentiating trust & safety feature that allows users to:
+    - See all their past matches (active and unmatched)
+    - Report users even after they've unmatched
+    - View read-only chat history if they were unmatched by someone
+    """
+    try:
+        history = await get_match_history(user_id)
+        return {"success": True, "history": history, "total": len(history)}
+    except Exception as e:
+        logger.error(f"Get match history error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.get("/chat/conversation-access/{conversation_id}")
+async def api_check_conversation_access(conversation_id: str, user_id: str):
+    """
+    Check if a user can view a conversation and in what mode.
+    Returns whether the conversation is read-only (for users who were unmatched).
+    """
+    try:
+        access = await can_user_view_conversation(user_id, conversation_id)
+        return access
+    except Exception as e:
+        logger.error(f"Check conversation access error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.get("/chat/unmatched/{conversation_id}")
+async def api_get_unmatched_conversation(conversation_id: str, user_id: str):
+    """
+    Get details of an unmatched conversation for read-only viewing.
+    Only available to users who were unmatched (not the ones who initiated).
+    """
+    try:
+        conv = await get_unmatched_conversation(user_id, conversation_id)
+        if conv is None:
+            raise HTTPException(status_code=404, detail="Conversation not found or access denied")
+        return {"success": True, "conversation": conv}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get unmatched conversation error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class DeleteChatRequest(BaseModel):
+    user_id: str
+    conversation_id: str
+
+
+@api_router.post("/chat/delete")
+async def api_delete_chat(req: DeleteChatRequest):
+    """
+    Delete chat history from a user's view.
+    This is a soft delete - the other user's view and any reports are not affected.
+    """
+    try:
+        success = await delete_chat_history(req.user_id, req.conversation_id)
+        if success:
+            return {"success": True, "message": "Chat deleted successfully"}
+        else:
+            raise HTTPException(status_code=400, detail="Could not delete chat")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Delete chat error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

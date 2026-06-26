@@ -1820,6 +1820,22 @@ export default function ProfileScreen() {
             </View>
             <Ionicons name="chevron-forward" size={22} color={COLORS.textMuted} />
           </TouchableOpacity>
+
+          {/* Match History - Trust & Safety Feature */}
+          <TouchableOpacity 
+            style={styles.settingsCard}
+            onPress={() => router.push('/history')}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.settingsCardIcon, { backgroundColor: 'rgba(0, 150, 136, 0.15)' }]}>
+              <Ionicons name="time-outline" size={24} color="#009688" />
+            </View>
+            <View style={styles.settingsCardContent}>
+              <Text style={styles.settingsCardTitle}>History</Text>
+              <Text style={styles.settingsCardDesc}>View all your past matches</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={22} color={COLORS.textMuted} />
+          </TouchableOpacity>
         </View>
 
         {/* Logout Button */}
