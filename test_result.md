@@ -305,7 +305,7 @@ frontend:
           TESTING STATUS: ✅ ALL 5 FEATURES WORKING CORRECTLY
           
           Test Environment:
-          - Frontend: https://showtime-setup.preview.emergentagent.com
+          - Frontend: https://match-history-dev.preview.emergentagent.com
           - Mobile Viewport: 390x844 (iPhone 12/13/14)
           - Test Date: June 25, 2026
           - Test Credentials: Phone +9876543210, OTP: 123456
@@ -424,7 +424,7 @@ frontend:
           TESTING STATUS: ❌ 1 CRITICAL BUG, 3 FEATURES WORKING
           
           Test Environment:
-          - Frontend: https://showtime-setup.preview.emergentagent.com
+          - Frontend: https://match-history-dev.preview.emergentagent.com
           - Mobile Viewport: 390x844 (iPhone 12/13/14)
           - Test Date: June 25, 2026
           - Test Credentials: Phone +9876543210, OTP: 123456
@@ -612,7 +612,7 @@ frontend:
           
           COMPREHENSIVE E2E TESTING RESULTS:
           Test User: +9876543210, OTP: 123456
-          Test URL: https://showtime-setup.preview.emergentagent.com/profile
+          Test URL: https://match-history-dev.preview.emergentagent.com/profile
           
           ✅ PART 1: PROFILE HEADER (Bumble-Inspired Design)
           Screenshot Evidence: profile_page.png
@@ -1200,8 +1200,8 @@ frontend_comprehensive_test:
       TESTING STATUS: ✅ IMPLEMENTATION VERIFIED BY CODE REVIEW
       
       Test Environment:
-      - Frontend: https://showtime-setup.preview.emergentagent.com
-      - Backend: https://showtime-setup.preview.emergentagent.com/api
+      - Frontend: https://match-history-dev.preview.emergentagent.com
+      - Backend: https://match-history-dev.preview.emergentagent.com/api
       - Test Date: June 21, 2026
       - Test Credentials: Phone 9876543210, OTP: 123456
       - Mobile Viewport: 390x844
@@ -1518,7 +1518,7 @@ agent_communication:
       TESTING STATUS: ✅ PARTIAL SUCCESS - "Not Watched" button working, Feed loading issue
       
       Test Environment:
-      - Frontend: https://showtime-setup.preview.emergentagent.com
+      - Frontend: https://match-history-dev.preview.emergentagent.com
       - Test Date: June 21, 2026
       - Mobile Viewport: 390x844 (iPhone 12/13/14)
       - Test Credentials: testuser@example.com, OTP: 123456
@@ -1698,8 +1698,8 @@ agent_communication:
       TESTING STATUS: ✅ IMPLEMENTATION COMPLETE AND WORKING
       
       Test Environment:
-      - Frontend: https://showtime-setup.preview.emergentagent.com
-      - Backend: https://showtime-setup.preview.emergentagent.com/api
+      - Frontend: https://match-history-dev.preview.emergentagent.com
+      - Backend: https://match-history-dev.preview.emergentagent.com/api
       - Test Date: June 21, 2026
       - Test Credentials: Phone +5551234567, OTP: 123456
       
@@ -1980,7 +1980,7 @@ agent_communication:
       TESTING STATUS: IMPLEMENTATION VERIFIED ✅
       
       Test Environment:
-      - Frontend: https://showtime-setup.preview.emergentagent.com
+      - Frontend: https://match-history-dev.preview.emergentagent.com
       - Viewport: iPhone 12 (390x844)
       - Test Phone: +9876543210
       - Test OTP: 123456 (hardcoded bypass)
@@ -2177,7 +2177,7 @@ agent_communication:
       TESTING STATUS: BLOCKED BY CRITICAL FRONTEND BUG ❌
       
       Test Environment:
-      - Frontend: https://showtime-setup.preview.emergentagent.com
+      - Frontend: https://match-history-dev.preview.emergentagent.com
       - Viewport: iPhone (390x844)
       - Test Phone: +9876543210, +1234567890
       - Test Date: June 21, 2026
@@ -2318,7 +2318,7 @@ agent_communication:
       
       Test Request: Test Like/Dislike button delay issue after rating submission
       Test Environment:
-      - Frontend: https://showtime-setup.preview.emergentagent.com
+      - Frontend: https://match-history-dev.preview.emergentagent.com
       - Viewport: iPhone 12 (390x844)
       - Test Phone: +1234567890
       - Test OTP: 123456
@@ -2709,7 +2709,7 @@ agent_communication:
       TESTING STATUS: ALL 4 CRITICAL BUG FIXES VERIFIED ✅
       
       Test Environment:
-      - Frontend: https://showtime-setup.preview.emergentagent.com
+      - Frontend: https://match-history-dev.preview.emergentagent.com
       - Viewport: iPhone 14 (390x844)
       - Test Email: testuser@example.com
       - Backend: Running and responding correctly
@@ -2793,7 +2793,7 @@ agent_communication:
       TESTING COMPLETED: Full end-to-end flow from login through Tina chat to feed
       
       TEST ENVIRONMENT:
-      - Frontend: https://showtime-setup.preview.emergentagent.com
+      - Frontend: https://match-history-dev.preview.emergentagent.com
       - Viewport: iPhone 14 (390x844)
       - Test Email: fulltest@test.com
       
@@ -4050,7 +4050,7 @@ agent_communication:
       ⚠️ COMPLETE ONBOARDING FLOW TEST - BLOCKED BY TESTING LIMITATION (June 2026)
       
       TEST REQUEST: Test complete onboarding flow from login to feed
-      TEST ENVIRONMENT: Mobile viewport (390x844), Frontend: https://showtime-setup.preview.emergentagent.com
+      TEST ENVIRONMENT: Mobile viewport (390x844), Frontend: https://match-history-dev.preview.emergentagent.com
       
       TESTING STATUS: PARTIALLY COMPLETED - BLOCKED BY ALERT DIALOG CAPTURE LIMITATION
       
@@ -4199,7 +4199,7 @@ agent_communication:
       ========================================
       
       ❌ ERROR FOUND:
-      "error: Failed to load resource: the server responded with a status of 400 () at https://showtime-setup.preview.emergentagent.com/api/auth/verify-otp"
+      "error: Failed to load resource: the server responded with a status of 400 () at https://match-history-dev.preview.emergentagent.com/api/auth/verify-otp"
       
       This error occurs when:
       - OTP is incorrect (expected - user entered wrong OTP)
@@ -4257,7 +4257,7 @@ agent_communication:
       TESTING STATUS: ALL 8/8 BACKEND API TESTS PASSED ✅
       
       Test Environment:
-      - Backend URL: https://showtime-setup.preview.emergentagent.com/api
+      - Backend URL: https://match-history-dev.preview.emergentagent.com/api
       - MongoDB: Running and connected
       - Test Date: June 8, 2026
       
@@ -4368,7 +4368,7 @@ agent_communication:
       Test Request: Verify that fields collected by Tina AI are SKIPPED when user exits Tina and continues with manual onboarding.
       
       Test Environment:
-      - Frontend: https://showtime-setup.preview.emergentagent.com
+      - Frontend: https://match-history-dev.preview.emergentagent.com
       - Viewport: iPhone 12 (390x844)
       - Test Phone: +1122334455, +9111233463 (attempted)
       - Test Date: June 21, 2026
@@ -4571,7 +4571,7 @@ agent_communication:
       TESTING STATUS: MAJOR ISSUES FOUND ❌
       
       Test Environment:
-      - Frontend URL: https://showtime-setup.preview.emergentagent.com
+      - Frontend URL: https://match-history-dev.preview.emergentagent.com
       - Device: iPhone 14 (390x844)
       - Test Email: keyboardtest@example.com
       - Test Date: June 9, 2026
@@ -4744,7 +4744,7 @@ agent_communication:
       TESTING STATUS: IMPLEMENTATION VERIFIED ✅ (Code Review + Partial Automation)
       
       Test Environment:
-      - Frontend: https://showtime-setup.preview.emergentagent.com
+      - Frontend: https://match-history-dev.preview.emergentagent.com
       - Viewport: iPhone 12 (390x844)
       - Test Phone: +5556667777
       - Test OTP: 123456 (hardcoded bypass)
@@ -4870,7 +4870,7 @@ agent_communication:
       TESTING STATUS: ✅ IMPLEMENTATION VERIFIED - PRODUCTION-READY
       
       Test Environment:
-      - Frontend: https://showtime-setup.preview.emergentagent.com
+      - Frontend: https://match-history-dev.preview.emergentagent.com
       - Viewport: iPhone 12 (390x844)
       - Test Phone: +1112223333 (fresh user)
       - Test OTP: 123456
@@ -5066,7 +5066,7 @@ agent_communication:
       TESTING STATUS: IMPLEMENTATION VERIFIED ✅ (Code Review + Partial UI Testing)
       
       Test Environment:
-      - Frontend: https://showtime-setup.preview.emergentagent.com
+      - Frontend: https://match-history-dev.preview.emergentagent.com
       - Viewport: iPhone 12 (390x844)
       - Test Phone: +9988776655 (new user)
       - Test OTP: 123456
@@ -5350,7 +5350,7 @@ agent_communication:
       TESTING STATUS: ALL SCENARIOS PASSED ✅
       
       Test Environment:
-      - Frontend: https://showtime-setup.preview.emergentagent.com
+      - Frontend: https://match-history-dev.preview.emergentagent.com
       - Viewport: iPhone 12 (390x844)
       - Test Phone: +8887776666
       - Test OTP: 123456
@@ -5561,7 +5561,7 @@ agent_communication:
       TESTING STATUS: PARTIAL SUCCESS WITH CRITICAL BUG FOUND ⚠️
       
       Test Environment:
-      - Frontend: https://showtime-setup.preview.emergentagent.com
+      - Frontend: https://match-history-dev.preview.emergentagent.com
       - Viewport: iPhone 12 (390x844)
       - Test Phone: +1112223344
       - Test OTP: 123456
@@ -5826,7 +5826,7 @@ agent_communication:
       TESTING STATUS: ✅ IMPLEMENTATION VERIFIED BY CODE REVIEW + PARTIAL UI TESTING
       
       Test Environment:
-      - Frontend: https://showtime-setup.preview.emergentagent.com
+      - Frontend: https://match-history-dev.preview.emergentagent.com
       - Viewport: iPhone 12 (390x844)
       - Test Phone: +9998887770
       - Test OTP: 123456
@@ -6581,7 +6581,7 @@ agent_communication:
       TESTING STATUS: ❌ 1 CRITICAL BUG, 3 FEATURES WORKING
       
       Test Environment:
-      - Frontend: https://showtime-setup.preview.emergentagent.com
+      - Frontend: https://match-history-dev.preview.emergentagent.com
       - Mobile Viewport: 390x844 (iPhone 12/13/14)
       - Test Date: June 25, 2026
       - Test Credentials: Phone +9876543210, OTP: 123456
@@ -6653,7 +6653,7 @@ agent_communication:
       TESTING STATUS: ❌ BLOCKED BY ROUTING CONFLICT
       
       Test Environment:
-      - Frontend: https://showtime-setup.preview.emergentagent.com
+      - Frontend: https://match-history-dev.preview.emergentagent.com
       - Mobile Viewport: 390x844 (iPhone 12/13/14)
       - Test Date: June 25, 2026
       - Test Method: Automated E2E testing + Code review
@@ -7015,7 +7015,7 @@ agent_communication:
       TESTING STATUS: ✅ ALL 3 FIXES VERIFIED BY CODE REVIEW
       
       Test Environment:
-      - Frontend: https://showtime-setup.preview.emergentagent.com
+      - Frontend: https://match-history-dev.preview.emergentagent.com
       - Mobile Viewport: 390x844 (iPhone 12/13/14)
       - Test Date: June 24, 2026
       - Test Method: Comprehensive code review (E2E testing blocked by auth/onboarding)
@@ -8278,8 +8278,8 @@ agent_communication:
       TESTING STATUS: ✅ VERIFIED BY CODE REVIEW (E2E Testing Blocked)
       
       Test Environment:
-      - Frontend: https://showtime-setup.preview.emergentagent.com
-      - Backend: https://showtime-setup.preview.emergentagent.com/api
+      - Frontend: https://match-history-dev.preview.emergentagent.com
+      - Backend: https://match-history-dev.preview.emergentagent.com/api
       - Test Date: June 24, 2026
       - Test User: +9876543210 (OTP: 123456)
       - Mobile Viewport: 390x844
@@ -8546,7 +8546,7 @@ agent_communication:
       TESTING STATUS: ✅ VERIFIED BY CODE REVIEW + PARTIAL E2E TESTING
       
       Test Environment:
-      - Frontend: https://showtime-setup.preview.emergentagent.com
+      - Frontend: https://match-history-dev.preview.emergentagent.com
       - Mobile Viewport: 390x844 (iPhone 12/13/14)
       - Test Date: June 24, 2026
       - Test Credentials: Phone +9876543210, OTP: 123456
@@ -8768,7 +8768,7 @@ agent_communication:
       TESTING STATUS: ✅ BOTH FIXES VERIFIED
       
       Test Environment:
-      - Frontend: https://showtime-setup.preview.emergentagent.com
+      - Frontend: https://match-history-dev.preview.emergentagent.com
       - Mobile Viewport: 390x844 (iPhone 12/13/14)
       - Test Date: June 25, 2026
       - Test Credentials: Phone 9876543210, OTP: 123456
@@ -8856,7 +8856,7 @@ agent_communication:
       ========================================
       
       Test Flow:
-      1. ✅ Navigated to app at https://showtime-setup.preview.emergentagent.com
+      1. ✅ Navigated to app at https://match-history-dev.preview.emergentagent.com
       2. ✅ Clicked "Login with Phone Number"
       3. ✅ Entered phone: 9876543210
       4. ✅ Clicked "Send OTP"
@@ -8988,7 +8988,7 @@ agent_communication:
       TESTING STATUS: ✅ VERIFIED BY COMPREHENSIVE CODE REVIEW
       
       Test Environment:
-      - Frontend: https://showtime-setup.preview.emergentagent.com
+      - Frontend: https://match-history-dev.preview.emergentagent.com
       - Mobile Viewport: 390x844 (iPhone 12/13/14)
       - Test Date: June 25, 2026
       - Test Method: Comprehensive code review (E2E testing blocked by onboarding requirement)
@@ -9157,7 +9157,7 @@ agent_communication:
       TESTING STATUS: ✅ VERIFIED BY COMPREHENSIVE CODE REVIEW
       
       Test Environment:
-      - Frontend: https://showtime-setup.preview.emergentagent.com
+      - Frontend: https://match-history-dev.preview.emergentagent.com
       - Mobile Viewport: 390x844 (iPhone 12/13/14)
       - Test Date: June 25, 2026
       - Test Method: Comprehensive code review + 3 automated E2E test attempts
@@ -9408,7 +9408,7 @@ agent_communication:
       TESTING STATUS: ✅ ALL 5 FEATURES WORKING CORRECTLY
       
       Test Environment:
-      - Frontend: https://showtime-setup.preview.emergentagent.com
+      - Frontend: https://match-history-dev.preview.emergentagent.com
       - Mobile Viewport: 390x844 (iPhone 12/13/14)
       - Test Date: June 25, 2026
       - Test Credentials: Phone +9876543210, OTP: 123456
@@ -9448,7 +9448,7 @@ agent_communication:
       TESTING STATUS: ✅ ALL 3 CRITICAL FIXES VERIFIED BY CODE REVIEW + BACKEND API
       
       Test Environment:
-      - Frontend: https://showtime-setup.preview.emergentagent.com
+      - Frontend: https://match-history-dev.preview.emergentagent.com
       - Mobile Viewport: 390x844 (iPhone 14)
       - Test Date: June 25, 2026
       - Test Method: Code review + Backend API verification + Attempted E2E (blocked by auth)

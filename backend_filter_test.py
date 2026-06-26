@@ -8,7 +8,7 @@ import time
 import json
 
 # Backend URL
-BACKEND_URL = "https://showtime-setup.preview.emergentagent.com/api"
+BACKEND_URL = "https://match-history-dev.preview.emergentagent.com/api"
 
 def print_section(title):
     """Print a formatted section header"""

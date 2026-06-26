@@ -14,7 +14,7 @@ import httpx
 import json
 from typing import Dict, Any
 
-BACKEND_URL = "https://showtime-setup.preview.emergentagent.com"
+BACKEND_URL = "https://match-history-dev.preview.emergentagent.com"
 
 async def test_enhanced_features():
     """Test the specific enhanced features"""

@@ -26,7 +26,7 @@ print('User ID: ' + userId);
 
 ## Step 2: Test Backend API
 ```bash
-curl -X POST "https://showtime-setup.preview.emergentagent.com/api/auth/mock-login" \
+curl -X POST "https://match-history-dev.preview.emergentagent.com/api/auth/mock-login" \
   -H "Content-Type: application/json" \
   -d '{"email":"test@mock.com","name":"Test User"}'
 ```
@@ -34,7 +34,7 @@ curl -X POST "https://showtime-setup.preview.emergentagent.com/api/auth/mock-log
 ## Step 3: Browser Testing
 ```javascript
 // Test mock login flow
-await page.goto("https://showtime-setup.preview.emergentagent.com");
+await page.goto("https://match-history-dev.preview.emergentagent.com");
 await page.click('[data-testid="email-auth-btn"]');
 // Fill mock login form
 await page.fill('[data-testid="mock-name-input"]', 'Test User');

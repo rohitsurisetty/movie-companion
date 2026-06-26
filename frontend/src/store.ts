@@ -2,6 +2,34 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 import { FiltersData, SwipeState } from './types';
 
+// ============ USER / CHAT STORE ============
+// Used to hand off "selected conversation" between History screen and Chat tab.
+export interface SelectedConversation {
+  conversation_id: string;
+  other_user_id: string;
+  other_user?: {
+    user_id: string;
+    name: string;
+    avatar?: string;
+    location?: string;
+  };
+  status: string;
+  unread: number;
+  is_read_only?: boolean;
+}
+
+interface UserStoreState {
+  selectedConversation: SelectedConversation | null;
+  setSelectedConversation: (conv: SelectedConversation | null) => void;
+  clearSelectedConversation: () => void;
+}
+
+export const useUserStore = create<UserStoreState>((set) => ({
+  selectedConversation: null,
+  setSelectedConversation: (conv) => set({ selectedConversation: conv }),
+  clearSelectedConversation: () => set({ selectedConversation: null }),
+}));
+
 const AUTH_KEY = '@film_companion_auth';
 const PROFILE_KEY = '@film_companion_profile';
 const ONBOARDING_KEY = '@film_companion_onboarding_complete';

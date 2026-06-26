@@ -7,10 +7,10 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { GiftedChat, Bubble, InputToolbar, Send, Composer, IMessage, MessageImage } from 'react-native-gifted-chat';
 import { useAppMode } from '../../src/components/SharedHeader';
-import { getUserId } from '../../src/store';
+import { getUserId, useUserStore } from '../../src/store';
 import { formatLocationForPrivacy } from '../../src/utils/locationFormatter';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -45,6 +45,7 @@ interface Conversation {
   last_message_at?: string;
   unread: number;
   status: string;
+  is_read_only?: boolean;
 }
 
 interface MessageRequest {
@@ -1815,6 +1816,20 @@ export default function ChatTab() {
   const [selectedRequest, setSelectedRequest] = useState<MessageRequest | null>(null);
   const [showRequestDetail, setShowRequestDetail] = useState(false);
 
+  // Listen to global selected conversation (set by History screen "Go to Chat" / "View Chat")
+  const storeSelectedConversation = useUserStore((s) => s.selectedConversation);
+  const clearStoreSelectedConversation = useUserStore((s) => s.clearSelectedConversation);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (storeSelectedConversation) {
+        setSelectedConversation(storeSelectedConversation as Conversation);
+        // Clear from the store so we don't re-open it again when the user backs out
+        clearStoreSelectedConversation();
+      }
+    }, [storeSelectedConversation, clearStoreSelectedConversation])
+  );
+
   useEffect(() => {
     initializeChat();
   }, []);
@@ -1887,6 +1902,8 @@ export default function ChatTab() {
         <GiftedChatScreen
           conversation={selectedConversation}
           userId={userId}
+          isReadOnly={!!selectedConversation.is_read_only}
+          otherUserNameOverride={selectedConversation.is_read_only ? selectedConversation.other_user?.name : undefined}
           onBack={() => {
             setSelectedConversation(null);
             fetchConversations(userId);

@@ -10,7 +10,7 @@ import json
 from typing import Dict, List
 
 # Backend URL from environment
-BACKEND_URL = "https://showtime-setup.preview.emergentagent.com/api"
+BACKEND_URL = "https://match-history-dev.preview.emergentagent.com/api"
 
 class Colors:
     GREEN = '\033[92m'

@@ -87,6 +87,9 @@ from picture_service import (
     set_mongodb_db
 )
 
+# Import mock-data seeder for unmatched flow testing
+from mock_unmatched_data import seed_unmatched_for_user
+
 # Import Supabase service for analytics tracking
 import supabase_service as supabase
 
@@ -2986,6 +2989,22 @@ async def api_get_match_history(user_id: str):
         return {"success": True, "history": history, "total": len(history)}
     except Exception as e:
         logger.error(f"Get match history error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.post("/dev/seed-unmatched-mocks/{user_id}")
+async def api_seed_unmatched_mocks(user_id: str):
+    """
+    DEV-ONLY: Seeds two recognisable mock users (Anjali Iyer & Priya Bhatia)
+    with realistic chat history with the given user, then marks both
+    conversations as unmatched (by them).
+    Used to manually test the Match History + post-unmatch flows.
+    """
+    try:
+        result = await seed_unmatched_for_user(db, user_id)
+        return result
+    except Exception as e:
+        logger.error(f"Seed unmatched mocks error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

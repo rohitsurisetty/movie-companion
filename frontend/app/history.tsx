@@ -14,13 +14,13 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, FlatList, 
-  ActivityIndicator, Alert, Modal, Image, Pressable,
+  ActivityIndicator, Alert, Modal, Image, Pressable, ScrollView, TextInput,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { getUserId } from '../src/store';
+import { getUserId, useUserStore } from '../src/store';
 
 const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -37,6 +37,16 @@ const COLORS = {
   warning: '#FFB800',
   teal: '#009688',
 };
+
+// Report reasons - same as chat
+const REPORT_REASONS = [
+  { id: 'fake_profile', label: 'Fake profile or scam' },
+  { id: 'inappropriate', label: 'Inappropriate messages' },
+  { id: 'harassment', label: 'Harassment or bullying' },
+  { id: 'underage', label: 'User appears underage' },
+  { id: 'spam', label: 'Spam or advertising' },
+  { id: 'other', label: 'Other' },
+];
 
 interface MatchHistoryItem {
   conversation_id: string;
@@ -173,6 +183,396 @@ const HistoryItem = ({
   );
 };
 
+// ============ REPORT MODAL (Same as Chat) ============
+const ReportModal = ({
+  visible,
+  onClose,
+  userName,
+  onReport,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  userName: string;
+  onReport: (reason: string, details: string) => void;
+}) => {
+  const insets = useSafeAreaInsets();
+  const [step, setStep] = useState<'intro' | 'reasons' | 'details' | 'done'>('intro');
+  const [selectedReason, setSelectedReason] = useState('');
+  const [details, setDetails] = useState('');
+  
+  if (!visible) return null;
+  
+  const handleSubmit = () => {
+    onReport(selectedReason, details);
+    setStep('done');
+  };
+  
+  const handleClose = () => {
+    setStep('intro');
+    setSelectedReason('');
+    setDetails('');
+    onClose();
+  };
+  
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={handleClose}>
+      <SafeAreaView style={styles.reportModal}>
+        {/* Header */}
+        <View style={styles.reportHeader}>
+          <TouchableOpacity onPress={handleClose} style={styles.reportCloseBtn}>
+            <Ionicons name="close" size={28} color={COLORS.text} />
+          </TouchableOpacity>
+          <Text style={styles.reportHeaderTitle}>Report</Text>
+          <View style={{ width: 44 }} />
+        </View>
+        
+        <ScrollView style={styles.reportContent} showsVerticalScrollIndicator={false}>
+          {step === 'intro' && (
+            <View style={styles.reportIntro}>
+              <View style={styles.reportIconCircle}>
+                <Ionicons name="shield-checkmark" size={48} color={COLORS.primary} />
+              </View>
+              <Text style={styles.reportTitle}>Help us keep the community safe</Text>
+              <Text style={styles.reportSubtitle}>
+                If {userName} has done something that makes you uncomfortable or violates our community guidelines, please let us know.
+              </Text>
+              
+              <View style={styles.reportSteps}>
+                <View style={styles.reportStep}>
+                  <View style={styles.reportStepNumber}><Text style={styles.reportStepNumberText}>1</Text></View>
+                  <Text style={styles.reportStepText}>Select a reason for reporting</Text>
+                </View>
+                <View style={styles.reportStep}>
+                  <View style={styles.reportStepNumber}><Text style={styles.reportStepNumberText}>2</Text></View>
+                  <Text style={styles.reportStepText}>Add any additional details (optional)</Text>
+                </View>
+                <View style={styles.reportStep}>
+                  <View style={styles.reportStepNumber}><Text style={styles.reportStepNumberText}>3</Text></View>
+                  <Text style={styles.reportStepText}>Our team will review and take action</Text>
+                </View>
+              </View>
+              
+              <TouchableOpacity style={styles.reportStartBtn} onPress={() => setStep('reasons')}>
+                <Text style={styles.reportStartBtnText}>Continue</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+          
+          {step === 'reasons' && (
+            <View style={styles.reportReasonsContainer}>
+              <Text style={styles.reportSectionTitle}>Why are you reporting {userName}?</Text>
+              <ScrollView style={styles.reportReasonsList}>
+                {REPORT_REASONS.map((reason) => (
+                  <TouchableOpacity
+                    key={reason.id}
+                    style={styles.reportReasonItem}
+                    onPress={() => {
+                      setSelectedReason(reason.id);
+                      setStep('details');
+                    }}
+                  >
+                    <Text style={styles.reportReasonText}>{reason.label}</Text>
+                    <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+              
+              <TouchableOpacity style={styles.reportBackBtn} onPress={() => setStep('intro')}>
+                <Ionicons name="arrow-back" size={16} color={COLORS.textMuted} />
+                <Text style={styles.reportBackBtnText}>Back</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+          
+          {step === 'details' && (
+            <View style={styles.reportDetailsContainer}>
+              <Text style={styles.reportSectionTitle}>Additional details (optional)</Text>
+              <Text style={styles.reportSubtitle}>
+                Please share any specific incidents or details that can help our team investigate.
+              </Text>
+              
+              <TextInput
+                style={styles.reportDetailsInput}
+                placeholder="Describe what happened..."
+                placeholderTextColor={COLORS.textMuted}
+                multiline
+                numberOfLines={6}
+                value={details}
+                onChangeText={setDetails}
+                maxLength={500}
+              />
+              <Text style={styles.reportDetailsCount}>{details.length}/500</Text>
+              
+              <TouchableOpacity style={styles.reportSubmitBtn} onPress={handleSubmit}>
+                <Text style={styles.reportSubmitBtnText}>Submit Report</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity style={styles.reportBackBtn} onPress={() => setStep('reasons')}>
+                <Ionicons name="arrow-back" size={16} color={COLORS.textMuted} />
+                <Text style={styles.reportBackBtnText}>Back</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+          
+          {step === 'done' && (
+            <View style={styles.reportDoneContainer}>
+              <View style={styles.reportConfirmationIcon}>
+                <Ionicons name="checkmark-circle" size={80} color={COLORS.success} />
+              </View>
+              <Text style={styles.reportTitle}>Report Submitted</Text>
+              <Text style={styles.reportConfirmationText}>
+                Thank you for helping keep our community safe. Our team will review your report and take appropriate action.
+              </Text>
+              <TouchableOpacity style={styles.reportDoneBtn} onPress={handleClose}>
+                <Text style={styles.reportDoneBtnText}>Done</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </ScrollView>
+      </SafeAreaView>
+    </Modal>
+  );
+};
+
+// ============ DID YOU MEET MODAL ============
+const DidYouMeetModal = ({
+  visible,
+  onClose,
+  otherUserName,
+  conversationId,
+  userId,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  otherUserName: string;
+  conversationId: string;
+  userId: string;
+}) => {
+  const [didMeet, setDidMeet] = useState<boolean | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const insets = useSafeAreaInsets();
+  
+  if (!visible) return null;
+  
+  const handleSubmit = async (met: boolean) => {
+    setSubmitting(true);
+    try {
+      await fetch(`${API_BASE}/api/chat/meeting-status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: userId,
+          conversation_id: conversationId,
+          did_meet: met,
+        }),
+      });
+      setDidMeet(met);
+    } catch (error) {
+      console.error('Error setting meeting status:', error);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  
+  const handleClose = () => {
+    setDidMeet(null);
+    onClose();
+  };
+  
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={handleClose}>
+      <Pressable style={styles.modalOverlay} onPress={handleClose}>
+        <View style={[styles.didYouMeetContainer, { paddingBottom: insets.bottom + 20 }]}>
+          <View style={styles.modalHandle} />
+          
+          {didMeet === null ? (
+            <>
+              <View style={styles.didYouMeetIcon}>
+                <Ionicons name="cafe" size={48} color={COLORS.primary} />
+              </View>
+              <Text style={styles.didYouMeetTitle}>Did you meet {otherUserName}?</Text>
+              <Text style={styles.didYouMeetSubtitle}>
+                Your feedback helps us improve matches for everyone.
+              </Text>
+              
+              <View style={styles.didYouMeetButtons}>
+                <TouchableOpacity 
+                  style={[styles.didYouMeetBtn, styles.didYouMeetBtnNo]}
+                  onPress={() => handleSubmit(false)}
+                  disabled={submitting}
+                >
+                  <Ionicons name="close-circle" size={24} color={COLORS.textSecondary} />
+                  <Text style={styles.didYouMeetBtnNoText}>No, we didn't</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity 
+                  style={[styles.didYouMeetBtn, styles.didYouMeetBtnYes]}
+                  onPress={() => handleSubmit(true)}
+                  disabled={submitting}
+                >
+                  <Ionicons name="checkmark-circle" size={24} color="#FFF" />
+                  <Text style={styles.didYouMeetBtnYesText}>Yes, we met!</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          ) : (
+            <>
+              <View style={styles.didYouMeetIcon}>
+                <Ionicons 
+                  name={didMeet ? "heart" : "information-circle"} 
+                  size={48} 
+                  color={didMeet ? COLORS.success : COLORS.textSecondary} 
+                />
+              </View>
+              <Text style={styles.didYouMeetTitle}>
+                {didMeet ? "That's wonderful!" : "Thanks for letting us know"}
+              </Text>
+              <Text style={styles.didYouMeetSubtitle}>
+                {didMeet 
+                  ? "We hope you had a great time! Your feedback helps us improve." 
+                  : "We'll keep working to find better matches for you."}
+              </Text>
+              <TouchableOpacity style={styles.didYouMeetDoneBtn} onPress={handleClose}>
+                <Text style={styles.didYouMeetDoneBtnText}>Done</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
+      </Pressable>
+    </Modal>
+  );
+};
+
+// ============ PROFILE VIEW MODAL ============
+const ProfileViewModal = ({
+  visible,
+  onClose,
+  userId,
+  userName,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  userId: string;
+  userName: string;
+}) => {
+  const [profile, setProfile] = useState<any>(null);
+  const [pictures, setPictures] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [currentPicIndex, setCurrentPicIndex] = useState(0);
+  const insets = useSafeAreaInsets();
+
+  useEffect(() => {
+    if (visible && userId) {
+      fetchProfileData();
+    }
+  }, [visible, userId]);
+
+  const fetchProfileData = async () => {
+    setLoading(true);
+    try {
+      // Fetch profile
+      const profileRes = await fetch(`${API_BASE}/api/user/profile/${userId}`);
+      if (profileRes.ok) {
+        const data = await profileRes.json();
+        setProfile(data.profile);
+      }
+
+      // Fetch pictures
+      const picsRes = await fetch(`${API_BASE}/api/user/pictures/${userId}`);
+      if (picsRes.ok) {
+        const data = await picsRes.json();
+        const pics = data.pictures || {};
+        const photoArray = [pics.picture_1, pics.picture_2, pics.picture_3, pics.picture_4, pics.picture_5]
+          .filter(Boolean);
+        setPictures(photoArray);
+      }
+    } catch (error) {
+      console.error('Error fetching profile:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!visible) return null;
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      <SafeAreaView style={styles.profileModal}>
+        {/* Header */}
+        <View style={styles.profileHeader}>
+          <TouchableOpacity onPress={onClose} style={styles.profileCloseBtn}>
+            <Ionicons name="chevron-down" size={28} color={COLORS.text} />
+          </TouchableOpacity>
+          <Text style={styles.profileHeaderTitle}>{userName}'s Profile</Text>
+          <View style={{ width: 44 }} />
+        </View>
+
+        {loading ? (
+          <View style={styles.profileLoading}>
+            <ActivityIndicator size="large" color={COLORS.primary} />
+          </View>
+        ) : (
+          <ScrollView style={styles.profileScroll} showsVerticalScrollIndicator={false}>
+            {/* Photo Gallery */}
+            {pictures.length > 0 && (
+              <View style={styles.profilePhotoGallery}>
+                <Image 
+                  source={{ uri: pictures[currentPicIndex] }} 
+                  style={styles.profileMainPhoto}
+                />
+                {pictures.length > 1 && (
+                  <View style={styles.profilePhotoDots}>
+                    {pictures.map((_, idx) => (
+                      <TouchableOpacity 
+                        key={idx} 
+                        style={[styles.profilePhotoDot, idx === currentPicIndex && styles.profilePhotoDotActive]}
+                        onPress={() => setCurrentPicIndex(idx)}
+                      />
+                    ))}
+                  </View>
+                )}
+              </View>
+            )}
+
+            {/* Profile Info */}
+            <View style={styles.profileInfo}>
+              <Text style={styles.profileName}>
+                {profile?.name || userName}{profile?.age ? `, ${profile.age}` : ''}
+              </Text>
+              {profile?.location?.city && (
+                <View style={styles.profileLocation}>
+                  <Ionicons name="location-outline" size={16} color={COLORS.textSecondary} />
+                  <Text style={styles.profileLocationText}>{profile.location.city}</Text>
+                </View>
+              )}
+
+              {profile?.bio && (
+                <View style={styles.profileSection}>
+                  <Text style={styles.profileSectionTitle}>About</Text>
+                  <Text style={styles.profileBio}>{profile.bio}</Text>
+                </View>
+              )}
+
+              {profile?.genres?.length > 0 && (
+                <View style={styles.profileSection}>
+                  <Text style={styles.profileSectionTitle}>Favorite Genres</Text>
+                  <View style={styles.profileTags}>
+                    {profile.genres.map((genre: string, idx: number) => (
+                      <View key={idx} style={styles.profileTag}>
+                        <Text style={styles.profileTagText}>{genre}</Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              )}
+            </View>
+          </ScrollView>
+        )}
+      </SafeAreaView>
+    </Modal>
+  );
+};
+
 // Action Sheet for Active Match
 const ActiveMatchActionSheet = ({
   visible,
@@ -302,6 +702,12 @@ export default function HistoryScreen() {
   const [selectedItem, setSelectedItem] = useState<MatchHistoryItem | null>(null);
   const [showActiveActions, setShowActiveActions] = useState(false);
   const [showUnmatchedActions, setShowUnmatchedActions] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [showDidYouMeetModal, setShowDidYouMeetModal] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  
+  // Get the setSelectedConversation from store to directly open chat
+  const setSelectedConversation = useUserStore((s) => s.setSelectedConversation);
   
   useEffect(() => {
     initializeScreen();
@@ -340,17 +746,33 @@ export default function HistoryScreen() {
   
   const handleGoToChat = () => {
     if (!selectedItem) return;
-    // Navigate to chat with this conversation
-    router.push({
-      pathname: '/(tabs)/chat',
-      params: { conversation_id: selectedItem.conversation_id }
-    });
+    
+    // Create a conversation object to pass to the chat screen
+    const conversationData = {
+      conversation_id: selectedItem.conversation_id,
+      other_user_id: selectedItem.other_user_id,
+      other_user: {
+        user_id: selectedItem.other_user_id,
+        name: selectedItem.other_user_name,
+        avatar: selectedItem.other_user_avatar || undefined,
+      },
+      status: selectedItem.status,
+      unread: 0,
+    };
+    
+    // Store in global state for the chat to pick up
+    if (setSelectedConversation) {
+      setSelectedConversation(conversationData);
+    }
+    
+    // Navigate to chat tab - it will use the selected conversation
+    router.push('/(tabs)/chat');
   };
   
   const handleViewChat = async () => {
     if (!selectedItem) return;
     
-    // First check if chat is still available
+    // For read-only chat, check access first
     try {
       const response = await fetch(
         `${API_BASE}/api/chat/conversation-access/${selectedItem.conversation_id}?user_id=${userId}`
@@ -358,15 +780,25 @@ export default function HistoryScreen() {
       if (response.ok) {
         const access = await response.json();
         if (access.can_view) {
-          // Navigate to read-only chat view
-          router.push({
-            pathname: '/(tabs)/chat',
-            params: { 
-              conversation_id: selectedItem.conversation_id,
-              read_only: 'true',
-              other_user_name: selectedItem.other_user_name
-            }
-          });
+          // Create conversation data with read-only flag
+          const conversationData = {
+            conversation_id: selectedItem.conversation_id,
+            other_user_id: selectedItem.other_user_id,
+            other_user: {
+              user_id: selectedItem.other_user_id,
+              name: selectedItem.other_user_name,
+              avatar: undefined, // Don't show avatar for unmatched
+            },
+            status: 'unmatched',
+            unread: 0,
+            is_read_only: true,
+          };
+          
+          if (setSelectedConversation) {
+            setSelectedConversation(conversationData);
+          }
+          
+          router.push('/(tabs)/chat');
         } else {
           Alert.alert(
             'Chat Unavailable',
@@ -382,90 +814,62 @@ export default function HistoryScreen() {
   
   const handleViewProfile = () => {
     if (!selectedItem) return;
-    router.push({
-      pathname: '/profile-preview',
-      params: { user_id: selectedItem.other_user_id }
-    });
+    setShowProfileModal(true);
   };
   
-  const handleReport = () => {
+  const handleReport = async (reason: string, details: string) => {
     if (!selectedItem) return;
-    // Navigate to report flow (this should trigger the report modal in chat)
-    Alert.alert(
-      'Report User',
-      `Are you sure you want to report ${selectedItem.other_user_name}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Report', 
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await fetch(`${API_BASE}/api/chat/report`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  reporter_id: userId,
-                  reported_id: selectedItem.other_user_id,
-                  reason: 'Reported from history',
-                  details: null
-                })
-              });
-              Alert.alert('Report Submitted', 'Thank you for helping keep our community safe. Our team will review your report.');
-            } catch (error) {
-              Alert.alert('Error', 'Could not submit report. Please try again.');
-            }
-          }
-        }
-      ]
-    );
+    
+    try {
+      await fetch(`${API_BASE}/api/chat/report`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reporter_id: userId,
+          reported_id: selectedItem.other_user_id,
+          reason: reason,
+          details: details || null
+        })
+      });
+    } catch (error) {
+      console.error('Error submitting report:', error);
+      Alert.alert('Error', 'Could not submit report. Please try again.');
+    }
   };
   
   const handleDidYouMeet = () => {
     if (!selectedItem) return;
+    setShowDidYouMeetModal(true);
+  };
+
+  // Dev-only helper to seed mock unmatched conversations (Anjali + Priya)
+  const handleSeedMockData = async () => {
+    if (!userId) return;
     Alert.alert(
-      'Did You Meet?',
-      `Did you meet ${selectedItem.other_user_name} in person?`,
+      'Seed Test Data',
+      'This will create two mock unmatched conversations (Anjali Iyer & Priya Bhatia) with chat history. Continue?',
       [
         { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Yes, we met',
-          onPress: async () => {
-            try {
-              await fetch(`${API_BASE}/api/chat/meeting-status`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  user_id: userId,
-                  other_user_id: selectedItem.other_user_id,
-                  did_meet: true
-                })
-              });
-              Alert.alert('Thanks!', 'Your feedback helps improve our matching.');
-            } catch (error) {
-              console.error('Error setting meeting status:', error);
-            }
-          }
-        },
         {
-          text: 'No, we didn\'t',
+          text: 'Seed',
           onPress: async () => {
             try {
-              await fetch(`${API_BASE}/api/chat/meeting-status`, {
+              const res = await fetch(`${API_BASE}/api/dev/seed-unmatched-mocks/${userId}`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  user_id: userId,
-                  other_user_id: selectedItem.other_user_id,
-                  did_meet: false
-                })
               });
-            } catch (error) {
-              console.error('Error setting meeting status:', error);
+              if (res.ok) {
+                await fetchHistory(userId);
+                Alert.alert('Done', 'Mock data seeded. Pull to refresh if you don\'t see it.');
+              } else {
+                Alert.alert('Error', 'Could not seed mock data.');
+              }
+            } catch (e) {
+              console.error('Seed error', e);
+              Alert.alert('Error', 'Could not seed mock data.');
             }
-          }
-        }
-      ]
+          },
+        },
+      ],
     );
   };
 
@@ -477,7 +881,9 @@ export default function HistoryScreen() {
           <Ionicons name="chevron-back" size={28} color={COLORS.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Match History</Text>
-        <View style={{ width: 44 }} />
+        <TouchableOpacity onPress={handleSeedMockData} style={styles.backBtn}>
+          <Ionicons name="flask-outline" size={22} color={COLORS.textMuted} />
+        </TouchableOpacity>
       </View>
       
       {/* Info Banner */}
@@ -520,7 +926,7 @@ export default function HistoryScreen() {
         onClose={() => { setShowActiveActions(false); setSelectedItem(null); }}
         onGoToChat={handleGoToChat}
         onViewProfile={handleViewProfile}
-        onReport={handleReport}
+        onReport={() => setShowReportModal(true)}
         onDidYouMeet={handleDidYouMeet}
       />
       
@@ -529,9 +935,34 @@ export default function HistoryScreen() {
         visible={showUnmatchedActions}
         onClose={() => { setShowUnmatchedActions(false); setSelectedItem(null); }}
         onViewChat={handleViewChat}
-        onReport={handleReport}
+        onReport={() => setShowReportModal(true)}
         onDidYouMeet={handleDidYouMeet}
         userName={selectedItem?.other_user_name || 'this user'}
+      />
+      
+      {/* Report Modal - Full flow like chat */}
+      <ReportModal
+        visible={showReportModal}
+        onClose={() => { setShowReportModal(false); }}
+        userName={selectedItem?.other_user_name || 'this user'}
+        onReport={handleReport}
+      />
+      
+      {/* Did You Meet Modal */}
+      <DidYouMeetModal
+        visible={showDidYouMeetModal}
+        onClose={() => setShowDidYouMeetModal(false)}
+        otherUserName={selectedItem?.other_user_name || 'this person'}
+        conversationId={selectedItem?.conversation_id || ''}
+        userId={userId}
+      />
+      
+      {/* Profile View Modal */}
+      <ProfileViewModal
+        visible={showProfileModal}
+        onClose={() => setShowProfileModal(false)}
+        userId={selectedItem?.other_user_id || ''}
+        userName={selectedItem?.other_user_name || ''}
       />
     </SafeAreaView>
   );
@@ -748,5 +1179,385 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: COLORS.textSecondary,
     textAlign: 'center',
+  },
+  // Modal Overlay
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'flex-end',
+  },
+  modalHandle: {
+    width: 40,
+    height: 4,
+    backgroundColor: COLORS.border,
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginBottom: 20,
+  },
+  // Did You Meet Modal
+  didYouMeetContainer: {
+    backgroundColor: COLORS.bgCard,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingTop: 12,
+    paddingHorizontal: 24,
+  },
+  didYouMeetIcon: {
+    alignItems: 'center',
+    marginVertical: 20,
+  },
+  didYouMeetTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: COLORS.text,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  didYouMeetSubtitle: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 20,
+  },
+  didYouMeetButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  didYouMeetBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: 24,
+    gap: 8,
+  },
+  didYouMeetBtnNo: {
+    backgroundColor: COLORS.bgInput,
+  },
+  didYouMeetBtnNoText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+  },
+  didYouMeetBtnYes: {
+    backgroundColor: COLORS.primary,
+  },
+  didYouMeetBtnYesText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#FFF',
+  },
+  didYouMeetDoneBtn: {
+    backgroundColor: COLORS.primary,
+    paddingVertical: 14,
+    borderRadius: 24,
+    alignItems: 'center',
+  },
+  didYouMeetDoneBtnText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#FFF',
+  },
+  // Report Modal
+  reportModal: {
+    flex: 1,
+    backgroundColor: COLORS.bg,
+  },
+  reportHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  reportCloseBtn: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reportHeaderTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: COLORS.text,
+  },
+  reportContent: {
+    flex: 1,
+    padding: 24,
+  },
+  reportIntro: {
+    alignItems: 'center',
+  },
+  reportIconCircle: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: 'rgba(229, 9, 20, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 24,
+  },
+  reportTitle: {
+    fontSize: 22,
+    fontWeight: '600',
+    color: COLORS.text,
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  reportSubtitle: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 32,
+  },
+  reportSteps: {
+    width: '100%',
+    marginBottom: 32,
+  },
+  reportStep: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    gap: 12,
+  },
+  reportStepNumber: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: COLORS.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reportStepNumberText: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#FFF',
+  },
+  reportStepText: {
+    fontSize: 15,
+    color: COLORS.text,
+    flex: 1,
+  },
+  reportStartBtn: {
+    backgroundColor: COLORS.primary,
+    paddingVertical: 16,
+    paddingHorizontal: 48,
+    borderRadius: 30,
+  },
+  reportStartBtnText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFF',
+  },
+  reportReasonsContainer: {
+    flex: 1,
+  },
+  reportSectionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: COLORS.text,
+    marginBottom: 20,
+  },
+  reportReasonsList: {
+    maxHeight: 400,
+  },
+  reportReasonItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 18,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  reportReasonText: {
+    fontSize: 16,
+    color: COLORS.text,
+  },
+  reportBackBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 20,
+    gap: 6,
+  },
+  reportBackBtnText: {
+    fontSize: 14,
+    color: COLORS.textMuted,
+  },
+  reportDetailsContainer: {
+    flex: 1,
+  },
+  reportDetailsInput: {
+    backgroundColor: COLORS.bgInput,
+    borderRadius: 16,
+    padding: 16,
+    fontSize: 15,
+    color: COLORS.text,
+    minHeight: 120,
+    textAlignVertical: 'top',
+    marginTop: 16,
+  },
+  reportDetailsCount: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    textAlign: 'right',
+    marginTop: 8,
+  },
+  reportSubmitBtn: {
+    backgroundColor: COLORS.primary,
+    paddingVertical: 16,
+    borderRadius: 30,
+    alignItems: 'center',
+    marginTop: 20,
+  },
+  reportSubmitBtnText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFF',
+  },
+  reportDoneContainer: {
+    alignItems: 'center',
+    paddingTop: 40,
+  },
+  reportConfirmationIcon: {
+    marginBottom: 24,
+  },
+  reportConfirmationText: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginTop: 12,
+    paddingHorizontal: 20,
+  },
+  reportDoneBtn: {
+    backgroundColor: COLORS.primary,
+    paddingVertical: 16,
+    paddingHorizontal: 48,
+    borderRadius: 30,
+    marginTop: 32,
+  },
+  reportDoneBtnText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFF',
+  },
+  // Profile Modal
+  profileModal: {
+    flex: 1,
+    backgroundColor: COLORS.bg,
+  },
+  profileHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  profileCloseBtn: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  profileHeaderTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: COLORS.text,
+  },
+  profileLoading: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  profileScroll: {
+    flex: 1,
+  },
+  profilePhotoGallery: {
+    width: '100%',
+    aspectRatio: 1,
+    position: 'relative',
+  },
+  profileMainPhoto: {
+    width: '100%',
+    height: '100%',
+  },
+  profilePhotoDots: {
+    position: 'absolute',
+    bottom: 16,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  profilePhotoDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255,255,255,0.5)',
+  },
+  profilePhotoDotActive: {
+    backgroundColor: '#FFF',
+    width: 24,
+  },
+  profileInfo: {
+    padding: 20,
+  },
+  profileName: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: COLORS.text,
+    marginBottom: 8,
+  },
+  profileLocation: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 20,
+  },
+  profileLocationText: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+  },
+  profileSection: {
+    marginTop: 20,
+  },
+  profileSectionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.textMuted,
+    marginBottom: 8,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  profileBio: {
+    fontSize: 16,
+    color: COLORS.text,
+    lineHeight: 24,
+  },
+  profileTags: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  profileTag: {
+    backgroundColor: COLORS.bgCard,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  profileTagText: {
+    fontSize: 14,
+    color: COLORS.text,
   },
 });
