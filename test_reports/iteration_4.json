@@ -1,0 +1,39 @@
+{
+  "summary": "Feature 'Unmatched Profiles in Main Chat Tab' VERIFIED end-to-end. Backend: 8/8 new pytest tests for /api/chat/conversations/{user_id} auto-seed all PASS (29/29 total across full backend suite with zero regressions). Fresh user calling GET /api/chat/conversations/{user_id} reliably returns Anjali Iyer + Priya Bhatia with is_unmatched=true, is_read_only=true, status=='unmatched', unmatched_at ISO timestamp present, sorted to the bottom by unmatched_at desc. Second call is idempotent (exactly 1 Anjali + 1 Priya, same conversation_id set). /api/chat/messages/{conv_id} returns 9 (Anjali) and 10 (Priya) seeded messages. Regression: /api/user/match-history/{user_id} and /api/chat/report unaffected. Frontend (390x844 mobile viewport): After mock-OTP login as a fresh user, /chat shows the FlatList with 5 rows in correct order — 3 active conversations (Ananya Reddy, Arjun Mehta Pending, Priya Sharma) FIRST, then 2 unmatched rows (Priya Bhatia, Anjali Iyer) at the BOTTOM. Unmatched rows render the gray 'Unmatched' badge (NOT 'Pending'), italic muted preview text 'Anjali/Priya ended this conversation', and a lock icon on the avatar. Tapping conversation-row-mock_unmatched_anjali_iyer opens the read-only GiftedChatScreen: header shows 'Anjali Iyer' + 'Conversation ended' subtitle, 3-dot actions menu present, 9 seeded messages rendered, lock banner reads 'Anjali Iyer has unmatched with you. This conversation is now read-only. If you experienced inappropriate behavior, you can still report this user from the menu above.', and 0 visible composer text inputs (composer correctly disabled). /history tab still shows both Anjali Iyer (Unmatched) and Priya Bhatia (Unmatched) rows. Zero pageerrors, zero console errors. Deprecated packages detected: NONE for this feature. SafeAreaView issues detected: NONE. Mocked APIs: Auth (Email OTP returned in response) — used as documented.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_chat_unmatched_tab.py",
+    "/app/backend/tests/test_match_history.py",
+    "/app/backend/tests/test_chat_read_guard.py",
+    "/app/backend/tests/test_api.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Auto-seed in /app/backend/server.py:2723-2726 is correctly wrapped in best-effort try/except so a seed failure never blocks the conversations response — good defensive design.",
+    "chat_service.get_conversations at /app/backend/chat_service.py:195-202 correctly excludes conversations the CURRENT user unmatched (unmatched_by != user_id), so only the OTHER-party unmatched cases appear in the Chat tab — matches the product spec.",
+    "Sorting at /app/backend/chat_service.py:233-238 is solid: active_pending bucket sorted by last_message_at desc, unmatched bucket sorted by unmatched_at desc, then concatenated to push unmatched to bottom. Verified via E2E ordering check.",
+    "ConversationItem at /app/frontend/app/(tabs)/chat.tsx:1143-1219 correctly drives off both conversation.is_unmatched and conversation.status === 'unmatched' (defensive OR), renders the Unmatched badge as a separate branch from Pending (no overlap), uses unmatched_at for the time stamp instead of last_message_at, and routes the tap via setSelectedConversation which then mounts GiftedChatScreen with isReadOnly=true. testID 'conversation-row-{other_user_id}' is reliable for automation."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_chat_unmatched_tab.py (new — 8 pytest tests for the auto-seed-on-conversations feature: auth, conversations content, sort order, messages, idempotency, regression)"
+  ],
+  "success_rate": {
+    "backend": "100% (29/29 pytest; 8/8 new for this feature)",
+    "frontend": "100% (Chat tab list order, Unmatched badge, italic preview, lock avatar, tap → read-only chat with disabled composer & lock banner, History tab cross-check — all PASS, 0 errors)"
+  },
+  "seed_data_creation": "Each test uses a fresh email unmatched_test_{ts}@example.com / chattab_test_{ts}@example.com to verify the auto-seed fires on first /api/chat/conversations/{user_id} call. Anjali Iyer (mock_unmatched_anjali_iyer) + Priya Bhatia (mock_unmatched_priya_bhatia) and their conversations are seeded by seed_unmatched_for_user (idempotent).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "EXPO_PUBLIC_BACKEND_URL (NOT EXPO_BACKEND_URL) is the public URL. Frontend auth pattern: POST /api/auth/send-email-otp returns OTP in body, then POST /api/auth/verify-otp; persist via localStorage keys '@film_companion_auth' (JSON with user_id, session_token, user) + '@film_companion_onboarding_complete'='true', then page.goto chosen route with wait_until='domcontentloaded' (networkidle hangs on this Expo build). testIDs for verification: conversation-row-mock_unmatched_anjali_iyer, conversation-row-mock_unmatched_priya_bhatia (chat tab); history-row-mock_unmatched_anjali_iyer, history-row-mock_unmatched_priya_bhatia (history). The auto-seed now fires on BOTH /api/user/match-history/{user_id} AND /api/chat/conversations/{user_id}; both are idempotent and safe to call repeatedly.",
+  "rca_of_issue": null
+}

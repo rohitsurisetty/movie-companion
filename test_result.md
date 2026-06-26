@@ -9772,3 +9772,62 @@ agent_communication:
         - /app/backend/mock_unmatched_data.py
         - /app/frontend/app/history.tsx
         - /app/frontend/app/(tabs)/chat.tsx (read-only mode)
+
+  - agent: "main"
+    message: |
+      🆕 NEW VALIDATION REQUEST — JUNE 26, 2026 — Unmatched Profiles in Main Chat Tab
+      
+      CONTEXT:
+      User explicitly requested that unmatched mock profiles (Anjali Iyer & Priya Bhatia)
+      should appear directly in the main Chat tab (not just under History), so they can
+      test the unmatch/report flow natively from the Chat list.
+      
+      WHAT WAS CHANGED THIS SESSION:
+      1. /app/backend/server.py (api_get_conversations, ~line 2712):
+         GET /api/chat/conversations/{user_id} now auto-calls
+         seed_unmatched_for_user(db, user_id) at the top (idempotent, best-effort).
+         This ensures Anjali & Priya appear in the main Chat tab the FIRST time
+         a user opens it, without needing to visit History first.
+      
+      2. /app/backend/chat_service.py (get_conversations, ~line 152):
+         Already returns unmatched conversations where the OTHER party initiated
+         the unmatch (i.e., unmatched_by != current user). They are tagged with
+         is_unmatched=true, is_read_only=true and sorted to the bottom.
+      
+      3. /app/frontend/app/(tabs)/chat.tsx (ConversationItem, ~line 1147):
+         Renders an "Unmatched" badge for is_unmatched conversations and uses
+         italic muted preview styling (pendingPreview / unmatchedPreview).
+         Tapping an unmatched item should navigate to the existing read-only chat.
+      
+      WHAT TO VERIFY:
+      Backend:
+        A. POST /api/auth/send-email-otp with testuser@example.com → verify-otp.
+           Capture user_id.
+        B. GET /api/chat/conversations/{user_id} — expect HTTP 200,
+           conversations array MUST include items with:
+             - other_user.name == "Anjali Iyer" AND "Priya Bhatia"
+             - is_unmatched == true
+             - is_read_only == true
+             - status == "unmatched"
+             - unmatched_at present
+        C. GET /api/chat/messages/{unmatched_conversation_id} returns message history.
+      
+      Frontend:
+        1. Login flow → land on home tab.
+        2. Navigate to Chat tab.
+        3. Confirm Anjali Iyer & Priya Bhatia appear in the conversation list
+           with "Unmatched" badge (not "Pending"), italic muted last-message preview.
+        4. Tap one of them → opens read-only chat view (input disabled,
+           "View Profile" + "Report" actions available).
+        5. Verify the existing active conversations still appear above the
+           unmatched ones (sort order preserved).
+      
+      Test user: testuser@example.com (see /app/memory/test_credentials.md).
+      OTP is returned in the send-otp response body (mock auth).
+      
+      Files to inspect if anything fails:
+        - /app/backend/server.py            (~2712 api_get_conversations)
+        - /app/backend/chat_service.py      (~152 get_conversations, ~195 unmatched_raw)
+        - /app/backend/mock_unmatched_data.py
+        - /app/frontend/app/(tabs)/chat.tsx (~1147 ConversationItem, ~2067 styles)
+

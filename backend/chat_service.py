@@ -150,74 +150,92 @@ async def get_messages(conversation_id: str, limit: int = 50, before: Optional[s
 
 
 async def get_conversations(user_id: str) -> List[Dict]:
-    """Get all active conversations for a user, including pending ones where user is sender"""
-    # Find active conversations
-    active_cursor = _db.chat_conversations.find(
-        {
-            "participants": user_id,
-            "status": "active"
-        },
-        {"_id": 0}
-    ).sort("last_message_at", -1)
-    
-    active_conversations = await active_cursor.to_list(length=100)
-    
-    # Also find pending conversations where this user is the initiator (sender)
-    # These are message requests the user has sent but not yet accepted
-    # Check both initiated_by field OR if the first message was sent by this user
-    pending_cursor = _db.chat_conversations.find(
-        {
-            "participants": user_id,
-            "status": "pending"
-        },
-        {"_id": 0}
-    ).sort("last_message_at", -1)
-    
-    all_pending = await pending_cursor.to_list(length=50)
-    
-    # Filter pending conversations to only include ones this user initiated
+    """Get all conversations relevant to a user.
+
+    Returns three categories:
+      * active – live two-way conversations
+      * pending – outgoing message requests the user initiated
+      * unmatched – conversations the OTHER side ended (kept visible to this
+        user as a read-only entry so they can still review history,
+        report, or mark "did you meet?"). Conversations the user themself
+        unmatched are NOT returned here.
+    """
+    # 1. Active conversations
+    active_conversations = await _db.chat_conversations.find(
+        {"participants": user_id, "status": "active"},
+        {"_id": 0},
+    ).sort("last_message_at", -1).to_list(length=100)
+
+    # 2. Pending where this user is the initiator
+    all_pending = await _db.chat_conversations.find(
+        {"participants": user_id, "status": "pending"},
+        {"_id": 0},
+    ).sort("last_message_at", -1).to_list(length=50)
+
     pending_conversations = []
     for conv in all_pending:
-        # Check if initiated_by field exists and matches user
         if conv.get("initiated_by") == user_id:
             pending_conversations.append(conv)
         elif not conv.get("initiated_by"):
-            # For older conversations without initiated_by, check first message sender
             first_msg = await _db.chat_messages.find_one(
                 {"conversation_id": conv["conversation_id"]},
                 {"_id": 0, "sender_id": 1},
-                sort=[("created_at", 1)]
+                sort=[("created_at", 1)],
             )
             if first_msg and first_msg.get("sender_id") == user_id:
                 pending_conversations.append(conv)
-                # Backfill the initiated_by field
                 await _db.chat_conversations.update_one(
                     {"conversation_id": conv["conversation_id"]},
-                    {"$set": {"initiated_by": user_id}}
+                    {"$set": {"initiated_by": user_id}},
                 )
-    
-    # Combine and enrich all conversations
-    all_conversations = active_conversations + pending_conversations
-    
+
+    # 3. Unmatched conversations — only those the OTHER party ended.
+    # If the current user unmatched, we hide it from their chat list (they
+    # took the action). The other party still sees it read-only.
+    unmatched_raw = await _db.chat_conversations.find(
+        {
+            "participants": user_id,
+            "status": "unmatched",
+            "unmatched_by": {"$ne": user_id},
+        },
+        {"_id": 0},
+    ).sort("unmatched_at", -1).to_list(length=100)
+
+    # Tag unmatched convos so the frontend renders the read-only state.
+    for conv in unmatched_raw:
+        conv["is_read_only"] = True
+        conv["is_unmatched"] = True
+
+    all_conversations = active_conversations + pending_conversations + unmatched_raw
+
     result = []
     for conv in all_conversations:
         other_user_id = [p for p in conv["participants"] if p != user_id][0]
-        
-        # Get other user's basic info from mock profiles or users collection
         other_user = await get_user_info(other_user_id)
-        
         result.append({
             **conv,
             "other_user_id": other_user_id,
             "unread": conv.get("unread_count", {}).get(user_id, 0),
             "other_user": other_user,
-            "is_pending": conv.get("status") == "pending"  # Flag for UI to show "Pending" badge
+            "is_pending": conv.get("status") == "pending",
+            "is_unmatched": conv.get("status") == "unmatched",
+            "is_read_only": conv.get("status") == "unmatched",
         })
-    
-    # Sort by last_message_at
-    result.sort(key=lambda x: x.get("last_message_at", ""), reverse=True)
-    
-    return result
+
+    # Order: active/pending sorted by last_message_at desc;
+    # unmatched sorted by unmatched_at desc and pushed to the bottom.
+    def sort_key(c):
+        if c.get("status") == "unmatched":
+            return (1, c.get("unmatched_at") or "")
+        return (0, c.get("last_message_at") or "")
+
+    # Negate timestamps for desc within each bucket by reversing per bucket.
+    active_pending = [c for c in result if c.get("status") != "unmatched"]
+    unmatched_list = [c for c in result if c.get("status") == "unmatched"]
+    active_pending.sort(key=lambda x: x.get("last_message_at") or "", reverse=True)
+    unmatched_list.sort(key=lambda x: x.get("unmatched_at") or "", reverse=True)
+
+    return active_pending + unmatched_list
 
 
 async def get_user_info(user_id: str) -> Dict:
