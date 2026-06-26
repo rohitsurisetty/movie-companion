@@ -392,7 +392,6 @@ PROTOTYPE_V1_PATH = "/app/Film_Companion_Prototype_V1.html"
 @api_router.get("/prototype/v1")
 async def serve_prototype_v1():
     """Serve the Film Companion V1 prototype HTML inline (opens in browser)."""
-    import os
     if not os.path.exists(PROTOTYPE_V1_PATH):
         raise HTTPException(status_code=404, detail="Prototype not found")
     return FileResponse(PROTOTYPE_V1_PATH, media_type="text/html")
@@ -401,7 +400,6 @@ async def serve_prototype_v1():
 @api_router.get("/prototype/v1/download")
 async def download_prototype_v1():
     """Force-download the Film Companion V1 prototype HTML."""
-    import os
     if not os.path.exists(PROTOTYPE_V1_PATH):
         raise HTTPException(status_code=404, detail="Prototype not found")
     return FileResponse(
