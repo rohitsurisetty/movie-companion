@@ -27,11 +27,28 @@ export default function PublicProfilePreviewStep({ data, onEdit, onContinue }: P
     return data.visibilityToggles?.[key] !== false;
   };
 
-  // Build photos array: prefer user-uploaded pictures, fall back to single profile picture.
+  // Build photos array: prefer uploaded pictures from this onboarding session,
+  // then fall back to any persisted picture URLs.
   const photos: string[] = (() => {
-    const pics = Array.isArray(data.pictures) ? data.pictures.filter(Boolean) : [];
-    if (pics.length > 0) return pics as string[];
-    if (data.profilePicture) return [data.profilePicture];
+    const anyData = data as unknown as {
+      uploadedPictures?: unknown;
+      pictures?: unknown;
+      profilePicture?: unknown;
+    };
+    // 1. Onboarding session uploads (set by PhotoUploadStep -> handlePhotoUploadComplete)
+    const uploaded = Array.isArray(anyData.uploadedPictures)
+      ? (anyData.uploadedPictures.filter(Boolean) as string[])
+      : [];
+    if (uploaded.length > 0) return uploaded;
+    // 2. Persisted profile pictures array
+    const pics = Array.isArray(anyData.pictures)
+      ? (anyData.pictures.filter(Boolean) as string[])
+      : [];
+    if (pics.length > 0) return pics;
+    // 3. Single primary picture fallback
+    if (typeof anyData.profilePicture === 'string' && anyData.profilePicture) {
+      return [anyData.profilePicture];
+    }
     return [];
   })();
 
