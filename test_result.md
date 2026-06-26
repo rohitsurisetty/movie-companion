@@ -9831,3 +9831,94 @@ agent_communication:
         - /app/backend/mock_unmatched_data.py
         - /app/frontend/app/(tabs)/chat.tsx (~1147 ConversationItem, ~2067 styles)
 
+
+  - task: "Match History — View Profile & Delete from Chat History"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/app/history.tsx, /app/backend/chat_service.py, /app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          🔧 IMPLEMENTED — JUNE 26, 2026 — Match History: "View Profile" Bug Fix + "Delete from Chat History"
+          
+          USER ISSUE:
+          1) "View Profile" in Match History was broken — opening the profile modal showed empty/no data.
+          2) Need a "Delete from chat history" option (with confirmation Alert) in the action sheet.
+          
+          ROOT CAUSE (View Profile bug):
+          - In ActionSheet items, onPress did `onClose(); onAction();`.
+          - The parent's `onClose` was `() => { setShow...(false); setSelectedItem(null); }`.
+          - So `selectedItem` was nulled BEFORE the downstream modal (`ProfileViewModal`) read it.
+          - The modal then opened with empty `userId`/`userName` and silently failed.
+          
+          FIX (frontend — /app/frontend/app/history.tsx):
+          - Removed the "close-before-action" pattern inside the action sheet items —
+            each action button now just calls its handler directly.
+          - Each handler (`handleViewProfile`, `handleReport`, `handleDidYouMeet`,
+            `handleGoToChat`, `handleViewChat`) now closes its own parent action sheet
+            and KEEPS `selectedItem` set until the downstream modal closes.
+          - Downstream modals (`ProfileViewModal`, `ReportModal`, `DidYouMeetModal`)
+            now clear `selectedItem` in their own onClose handler.
+          - Added `handleDeleteFromHistory()` — snapshots `selectedItem`, closes the
+            action sheet, shows `Alert.alert` with Cancel/Delete (destructive),
+            calls `POST /api/chat/delete`, removes the row from local state on success.
+          - Added a new "Delete from chat history" item (trash-outline icon, red) to
+            BOTH ActiveMatchActionSheet AND UnmatchedActionSheet.
+          
+          BACKEND (already in place, verified working):
+          - `POST /api/chat/delete` body: { user_id, conversation_id } — soft-deletes
+            via `$addToSet: deleted_by_users` on the conversation doc.
+          - `chat_service.get_match_history` excludes conversations where the user is
+            in `deleted_by_users` ({ "deleted_by_users": { "$ne": user_id } }).
+          
+          AUTO-SEEDED TEST DATA:
+          - `mock_unmatched_anjali_iyer` (Anjali Iyer) and `mock_unmatched_priya_bhatia`
+            (Priya Bhatia) auto-seeded when the user opens Match History via
+            `mock_unmatched_data.seed_unmatched_for_user`.
+          - These mocks DO have user_profiles + user_pictures rows so View Profile
+            will return real data.
+          
+          WHAT TO VERIFY:
+          
+          Backend:
+          A. POST /api/auth/send-email-otp with testuser@example.com → verify-otp.
+             Capture user_id.
+          B. GET /api/user/match-history/{user_id} returns Anjali + Priya (both
+             with status=unmatched, was_unmatched_by_other=true).
+          C. POST /api/chat/delete { user_id, conversation_id: anjali_conv_id }
+             returns 200 success.
+          D. GET /api/user/match-history/{user_id} again — Anjali entry must be GONE
+             (Priya still present).
+          E. Reseed (force) so both come back for further testing if needed.
+          
+          Frontend:
+          1. Login → navigate to Match History (/history).
+          2. Confirm Anjali Iyer & Priya Bhatia visible with "Unmatched" badge.
+          3. Tap Anjali → UnmatchedActionSheet opens with 4 items:
+             View Chat (Read-only), Did you meet?, Report,
+             "Delete from chat history" (NEW — trash icon, red).
+          4. Tap View Profile path: there isn't a View Profile on the unmatched sheet
+             (by design, only View Chat is allowed). For ACTIVE matches we'd see
+             View Profile — but the user only has unmatched seeded by default.
+             ⚠️ To test View Profile UI fix end-to-end, an ACTIVE match conversation
+             with the test user is required. Verify the code path instead by:
+             - Looking at the code change ensuring `handleViewProfile` no longer
+               races with selectedItem being nulled.
+             - Alternatively, manually create an active conversation via
+               /api/chat/init-mock-conversations/{user_id} and confirm View Profile
+               opens the modal with real profile data and pictures.
+          5. Tap "Delete from chat history" on Anjali's row:
+             - Native Alert.alert should pop with two buttons: Cancel + Delete.
+             - Tap Delete → row disappears from list immediately.
+             - Pull-to-refresh / re-enter screen → Anjali should still NOT appear.
+          6. Repeat for Priya. After deleting both, list should be empty (or only
+             non-unmatched entries remain).
+          
+          Files to inspect if anything fails:
+            - /app/frontend/app/history.tsx (action sheets + handlers)
+            - /app/backend/server.py (~3076 api_delete_chat)
+            - /app/backend/chat_service.py (delete_chat_history, get_match_history filter)

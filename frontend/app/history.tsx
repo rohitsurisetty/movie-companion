@@ -21,6 +21,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { getUserId, useUserStore } from '../src/store';
 import { Avatar } from '../src/components/Avatar';
+import { PremiumProfileView } from '../src/components/PremiumProfileView';
 
 const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -562,6 +563,7 @@ const ActiveMatchActionSheet = ({
   onViewProfile,
   onReport,
   onDidYouMeet,
+  onDeleteFromHistory,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -569,6 +571,7 @@ const ActiveMatchActionSheet = ({
   onViewProfile: () => void;
   onReport: () => void;
   onDidYouMeet: () => void;
+  onDeleteFromHistory: () => void;
 }) => {
   const insets = useSafeAreaInsets();
   
@@ -580,26 +583,33 @@ const ActiveMatchActionSheet = ({
         <View style={[styles.actionSheetContainer, { paddingBottom: insets.bottom + 16 }]}>
           <View style={styles.actionSheetHandle} />
           
-          <TouchableOpacity style={styles.actionSheetItem} onPress={() => { onClose(); onGoToChat(); }} testID="active-action-go-to-chat">
+          <TouchableOpacity style={styles.actionSheetItem} onPress={onGoToChat} testID="active-action-go-to-chat">
             <Ionicons name="chatbubble-outline" size={24} color={COLORS.text} />
             <Text style={styles.actionSheetText}>Go to Chat</Text>
           </TouchableOpacity>
           
-          <TouchableOpacity style={styles.actionSheetItem} onPress={() => { onClose(); onViewProfile(); }} testID="active-action-view-profile">
+          <TouchableOpacity style={styles.actionSheetItem} onPress={onViewProfile} testID="active-action-view-profile">
             <Ionicons name="person-outline" size={24} color={COLORS.text} />
             <Text style={styles.actionSheetText}>View Profile</Text>
           </TouchableOpacity>
           
           <View style={styles.actionSheetDivider} />
           
-          <TouchableOpacity style={styles.actionSheetItem} onPress={() => { onClose(); onDidYouMeet(); }} testID="active-action-did-you-meet">
+          <TouchableOpacity style={styles.actionSheetItem} onPress={onDidYouMeet} testID="active-action-did-you-meet">
             <Ionicons name="cafe-outline" size={24} color={COLORS.text} />
             <Text style={styles.actionSheetText}>Did you meet?</Text>
           </TouchableOpacity>
           
-          <TouchableOpacity style={styles.actionSheetItem} onPress={() => { onClose(); onReport(); }} testID="active-action-report">
+          <TouchableOpacity style={styles.actionSheetItem} onPress={onReport} testID="active-action-report">
             <Ionicons name="flag-outline" size={24} color={COLORS.primary} />
             <Text style={[styles.actionSheetText, { color: COLORS.primary }]}>Report</Text>
+          </TouchableOpacity>
+          
+          <View style={styles.actionSheetDivider} />
+          
+          <TouchableOpacity style={styles.actionSheetItem} onPress={onDeleteFromHistory} testID="active-action-delete-history">
+            <Ionicons name="trash-outline" size={24} color={COLORS.primary} />
+            <Text style={[styles.actionSheetText, { color: COLORS.primary }]}>Delete from chat history</Text>
           </TouchableOpacity>
           
           <TouchableOpacity style={styles.actionSheetCancel} onPress={onClose}>
@@ -618,6 +628,7 @@ const UnmatchedActionSheet = ({
   onViewChat,
   onReport,
   onDidYouMeet,
+  onDeleteFromHistory,
   userName,
 }: {
   visible: boolean;
@@ -625,6 +636,7 @@ const UnmatchedActionSheet = ({
   onViewChat: () => void;
   onReport: () => void;
   onDidYouMeet: () => void;
+  onDeleteFromHistory: () => void;
   userName: string;
 }) => {
   const insets = useSafeAreaInsets();
@@ -644,21 +656,28 @@ const UnmatchedActionSheet = ({
             </Text>
           </View>
           
-          <TouchableOpacity style={styles.actionSheetItem} onPress={() => { onClose(); onViewChat(); }} testID="unmatched-action-view-chat">
+          <TouchableOpacity style={styles.actionSheetItem} onPress={onViewChat} testID="unmatched-action-view-chat">
             <Ionicons name="chatbubbles-outline" size={24} color={COLORS.text} />
             <Text style={styles.actionSheetText}>View Chat (Read-only)</Text>
           </TouchableOpacity>
           
           <View style={styles.actionSheetDivider} />
           
-          <TouchableOpacity style={styles.actionSheetItem} onPress={() => { onClose(); onDidYouMeet(); }} testID="unmatched-action-did-you-meet">
+          <TouchableOpacity style={styles.actionSheetItem} onPress={onDidYouMeet} testID="unmatched-action-did-you-meet">
             <Ionicons name="cafe-outline" size={24} color={COLORS.text} />
             <Text style={styles.actionSheetText}>Did you meet?</Text>
           </TouchableOpacity>
           
-          <TouchableOpacity style={styles.actionSheetItem} onPress={() => { onClose(); onReport(); }} testID="unmatched-action-report">
+          <TouchableOpacity style={styles.actionSheetItem} onPress={onReport} testID="unmatched-action-report">
             <Ionicons name="flag-outline" size={24} color={COLORS.primary} />
             <Text style={[styles.actionSheetText, { color: COLORS.primary }]}>Report</Text>
+          </TouchableOpacity>
+          
+          <View style={styles.actionSheetDivider} />
+          
+          <TouchableOpacity style={styles.actionSheetItem} onPress={onDeleteFromHistory} testID="unmatched-action-delete-history">
+            <Ionicons name="trash-outline" size={24} color={COLORS.primary} />
+            <Text style={[styles.actionSheetText, { color: COLORS.primary }]}>Delete from chat history</Text>
           </TouchableOpacity>
           
           <Text style={styles.actionSheetNote}>
@@ -727,6 +746,7 @@ export default function HistoryScreen() {
   
   const handleGoToChat = () => {
     if (!selectedItem) return;
+    setShowActiveActions(false);
     
     // Create a conversation object to pass to the chat screen
     const conversationData = {
@@ -748,10 +768,12 @@ export default function HistoryScreen() {
     
     // Navigate to chat tab - it will use the selected conversation
     router.push('/(tabs)/chat');
+    setSelectedItem(null);
   };
   
   const handleViewChat = async () => {
     if (!selectedItem) return;
+    setShowUnmatchedActions(false);
     
     // For read-only chat, check access first
     try {
@@ -790,12 +812,24 @@ export default function HistoryScreen() {
     } catch (error) {
       console.error('Error checking chat access:', error);
       Alert.alert('Error', 'Could not access chat. Please try again.');
+    } finally {
+      setSelectedItem(null);
     }
   };
   
   const handleViewProfile = () => {
     if (!selectedItem) return;
+    // Close the action sheets but keep selectedItem set so ProfileViewModal can use it
+    setShowActiveActions(false);
+    setShowUnmatchedActions(false);
     setShowProfileModal(true);
+  };
+  
+  const handleOpenReportModal = () => {
+    if (!selectedItem) return;
+    setShowActiveActions(false);
+    setShowUnmatchedActions(false);
+    setShowReportModal(true);
   };
   
   const handleReport = async (reason: string, details: string) => {
@@ -820,7 +854,54 @@ export default function HistoryScreen() {
   
   const handleDidYouMeet = () => {
     if (!selectedItem) return;
+    setShowActiveActions(false);
+    setShowUnmatchedActions(false);
     setShowDidYouMeetModal(true);
+  };
+  
+  const handleDeleteFromHistory = () => {
+    if (!selectedItem) return;
+    // Snapshot the item so it's safe to clear selectedItem after the alert
+    const item = selectedItem;
+    setShowActiveActions(false);
+    setShowUnmatchedActions(false);
+
+    Alert.alert(
+      'Delete from chat history?',
+      `This will remove your chat with ${item.other_user_name} from your history. The other person's view is not affected.`,
+      [
+        { text: 'Cancel', style: 'cancel', onPress: () => setSelectedItem(null) },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const res = await fetch(`${API_BASE}/api/chat/delete`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  user_id: userId,
+                  conversation_id: item.conversation_id,
+                }),
+              });
+
+              if (res.ok) {
+                // Remove from local state immediately for snappy UX
+                setHistory((prev) => prev.filter((h) => h.conversation_id !== item.conversation_id));
+              } else {
+                Alert.alert('Error', 'Could not delete chat history. Please try again.');
+              }
+            } catch (err) {
+              console.error('Delete chat history error:', err);
+              Alert.alert('Error', 'Could not delete chat history. Please try again.');
+            } finally {
+              setSelectedItem(null);
+            }
+          },
+        },
+      ],
+      { cancelable: true }
+    );
   };
 
   // Dev-only helper to seed mock unmatched conversations (Anjali + Priya)
@@ -907,8 +988,9 @@ export default function HistoryScreen() {
         onClose={() => { setShowActiveActions(false); setSelectedItem(null); }}
         onGoToChat={handleGoToChat}
         onViewProfile={handleViewProfile}
-        onReport={() => setShowReportModal(true)}
+        onReport={handleOpenReportModal}
         onDidYouMeet={handleDidYouMeet}
+        onDeleteFromHistory={handleDeleteFromHistory}
       />
       
       {/* Unmatched Action Sheet */}
@@ -916,15 +998,16 @@ export default function HistoryScreen() {
         visible={showUnmatchedActions}
         onClose={() => { setShowUnmatchedActions(false); setSelectedItem(null); }}
         onViewChat={handleViewChat}
-        onReport={() => setShowReportModal(true)}
+        onReport={handleOpenReportModal}
         onDidYouMeet={handleDidYouMeet}
+        onDeleteFromHistory={handleDeleteFromHistory}
         userName={selectedItem?.other_user_name || 'this user'}
       />
       
       {/* Report Modal - Full flow like chat */}
       <ReportModal
         visible={showReportModal}
-        onClose={() => { setShowReportModal(false); }}
+        onClose={() => { setShowReportModal(false); setSelectedItem(null); }}
         userName={selectedItem?.other_user_name || 'this user'}
         onReport={handleReport}
       />
@@ -932,7 +1015,7 @@ export default function HistoryScreen() {
       {/* Did You Meet Modal */}
       <DidYouMeetModal
         visible={showDidYouMeetModal}
-        onClose={() => setShowDidYouMeetModal(false)}
+        onClose={() => { setShowDidYouMeetModal(false); setSelectedItem(null); }}
         otherUserName={selectedItem?.other_user_name || 'this person'}
         conversationId={selectedItem?.conversation_id || ''}
         userId={userId}
@@ -941,7 +1024,7 @@ export default function HistoryScreen() {
       {/* Profile View Modal */}
       <ProfileViewModal
         visible={showProfileModal}
-        onClose={() => setShowProfileModal(false)}
+        onClose={() => { setShowProfileModal(false); setSelectedItem(null); }}
         userId={selectedItem?.other_user_id || ''}
         userName={selectedItem?.other_user_name || ''}
       />

@@ -1,0 +1,64 @@
+{
+  "summary": "Match History delete-chat-history + View Profile fix tested. Backend: 37/37 pytest PASS (8 new in test_chat_delete.py + 29 regression). POST /api/chat/delete returns 200 on first delete, 400 on re-delete (idempotency due to $addToSet modified_count=0), 400 on unknown conv, 422 on missing fields. get_match_history correctly filters via {deleted_by_users: {$ne: user_id}} and the filter persists across multiple GETs. Mock auto-seed of Anjali Iyer + Priya Bhatia returns was_unmatched_by_other=true with full names. Frontend (390x844 mobile viewport, testuser@example.com → user_657fdfed13c6 with 5 seeded conversations: 3 active/pending + 2 unmatched mocks): (1) /history screen renders Anjali Iyer + Priya Bhatia rows each with the yellow 'Unmatched' badge and dates 'Ended 3 days ago' / 'Ended Yesterday' — verified via [data-testid^=\"history-row-\"]. (2) Tapping the Anjali row opens the UnmatchedActionSheet bottom sheet (screenshot 2) showing header 'Anjali Iyer has unmatched with you' + ALL 4 expected items: View Chat (Read-only), Did you meet?, Report, AND THE NEW 'Delete from chat history' with trash-outline icon \\uf5f6 and red color (COLORS.primary). All 4 testIDs unmatched-action-view-chat / -did-you-meet / -report / -delete-history are present and clickable. (3) View Profile fix code review confirmed: handleViewProfile() at history.tsx:820-826 closes both action sheets via setShow*Actions(false) WITHOUT calling the parent's onClose (which would null selectedItem); then sets showProfileModal=true and ProfileViewModal receives selectedItem?.other_user_id which is still set. No race with selectedItem clearing. CRITICAL FRONTEND ISSUE FOUND: Alert.alert is a no-op on react-native-web@0.21.0 (verified at /app/frontend/node_modules/react-native-web/dist/exports/Alert/index.js — body is literally `static alert() {}`). Therefore tapping 'Delete from chat history' on the WEB preview closes the action sheet (setShowUnmatchedActions(false) runs synchronously) but the confirmation dialog NEVER appears, the user cannot confirm, POST /api/chat/delete is never called, and the row is NEVER removed from the UI on web. Confirmed empirically: after tapping delete, ANJALI STILL IN UI: True, BACKEND IDS still contain Anjali, no /api/chat/delete log line. window.confirm/alert overrides captured nothing meaningful (msg='null') because react-native-web's Alert doesn't delegate to window APIs. On native iOS/Android this works because Alert.alert maps to the native UIAlertController/AlertDialog — only the Expo web preview is affected. Mocked APIs: Auth (Email OTP) + Anjali/Priya auto-seed — as documented.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "history.tsx → handleDeleteFromHistory (Alert.alert confirmation)",
+        "issue": "Alert.alert is a no-op on react-native-web@0.21.0 (verified: node_modules/react-native-web/dist/exports/Alert/index.js implements `static alert() {}`). On Expo web preview, tapping 'Delete from chat history' closes the action sheet but the native confirmation dialog with 'Cancel'/'Delete' buttons never renders. The user has no way to confirm, POST /api/chat/delete is never called, and the row is never removed. Works correctly on native iOS/Android. Reference: /app/frontend/app/history.tsx:869-904",
+        "testID": "unmatched-action-delete-history / active-action-delete-history",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Match History → Delete from chat history (web preview only)",
+        "issue": "Because Alert.alert is a no-op on react-native-web, the entire delete confirmation → POST /api/chat/delete → soft-delete-filter chain is silently broken on the Expo web preview. The backend endpoint itself is fully functional and verified (8/8 tests pass). Suggested fix: branch on Platform.OS === 'web' and render an in-app Modal-based confirmation (or use a cross-platform alert lib) instead of relying on Alert.alert.",
+        "affected_testIDs": ["unmatched-action-delete-history", "active-action-delete-history"]
+      }
+    ],
+    "design_issues": [],
+    "react_native_issues": [
+      {
+        "component": "Alert (react-native-web@0.21.0)",
+        "issue": "react-native-web ships Alert.alert as a no-op (`static alert() {}`), so any Alert.alert(...) call on the web platform silently does nothing. This affects the new Delete-from-chat-history confirmation in /app/frontend/app/history.tsx:869, and may affect other call sites (DidYouMeetModal error path uses Alert.alert too at history.tsx:807,814). Recommendation: add a small platform-aware helper, e.g. `webConfirm(title, message): Promise<boolean>` using window.confirm or a custom Modal, and use it for confirmation dialogs."
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_chat_delete.py",
+    "/app/backend/tests/test_match_history.py",
+    "/app/backend/tests/test_chat_unmatched_tab.py",
+    "/app/backend/tests/test_chat_read_guard.py",
+    "/app/backend/tests/test_api.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Replace `Alert.alert(...)` in handleDeleteFromHistory (history.tsx:869) with a platform-aware confirmation: on `Platform.OS === 'web'` render an in-app Modal with Cancel + Delete buttons (matching the styled Modal already used in this file), and keep `Alert.alert` for native. Without this, the new Delete feature is broken on the web preview that the testing pipeline uses.",
+    "Audit all other Alert.alert(...) callers (DidYouMeetModal error path at history.tsx:807/814, Seed mock dialog at history.tsx:910, chat.tsx, etc.) and migrate to the same platform-aware helper so error and confirmation dialogs are not silently lost on web.",
+    "(Optional) Consider returning HTTP 200 from POST /api/chat/delete even when modified_count==0 (i.e. already-deleted) — currently it returns 400 which is technically a bug for an idempotent soft-delete and could surface as a confusing 'Could not delete chat history' toast if a user double-taps. Not blocking."
+  ],
+  "critical_code_review_comments": [
+    "View Profile fix at history.tsx:820-826 is correct: handleViewProfile only flips visibility flags and does NOT route through the action sheet's onClose (which would null selectedItem). ProfileViewModal at history.tsx:1024-1030 reads selectedItem?.other_user_id which remains set, eliminating the original empty-userId race. The action sheets' own onClose handlers still null selectedItem when the user dismisses (overlay tap / Cancel), which is the correct behavior.",
+    "handleDeleteFromHistory at history.tsx:862-905 snapshots `selectedItem` into a local `item` const before opening Alert.alert, so even if React re-renders or the user dismisses, the API call has the correct conv_id — good defensive coding. The optimistic local removal via setHistory(prev=>prev.filter(...)) is correct. The only issue is that Alert.alert never fires on web.",
+    "Backend POST /api/chat/delete (server.py:3076-3092) is structurally fine but returns 400 'Could not delete chat' when modified_count==0. For a soft-delete this conflates 'already deleted' with 'permission denied / not found'. Consider returning 200 with {already_deleted: true} when the conv exists + user is a participant but $addToSet did not modify (i.e. user already in deleted_by_users array).",
+    "delete_chat_history (chat_service.py:883-905) correctly verifies participation before $addToSet; cannot be abused by a non-participant. Good.",
+    "get_match_history filter `deleted_by_users: {$ne: user_id}` (chat_service.py:802) is correct semantically — matches docs both when the field is missing and when the array doesn't contain user_id."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_chat_delete.py (new)",
+    "/app/test_reports/pytest/pytest_results.xml (regenerated)"
+  ],
+  "success_rate": {
+    "backend": "100% (37/37 pytest pass: 8 new test_chat_delete + 29 regression)",
+    "frontend": "Partial: UI rendering 100% (rows + Unmatched badge + Delete menu item with red trash icon all verified), View Profile fix verified by code review, but Delete confirmation flow is BROKEN on web preview because react-native-web@0.21.0 exports Alert.alert as a no-op — no API call is made, no row is removed."
+  },
+  "seed_data_creation": "Auto-seed via GET /api/user/match-history/{user_id} created Anjali Iyer (mock_unmatched_anjali_iyer) + Priya Bhatia (mock_unmatched_priya_bhatia) unmatched conversations for testuser@example.com (user_657fdfed13c6). Per-run unique TEST_chatdelete_primary_<timestamp>@example.com + TEST_chatdelete_second_<timestamp>@example.com users created by test_chat_delete.py to avoid soft-delete state pollution across pytest runs. No cleanup is strictly needed since these are test-only mock unmatched conversations and the soft-delete is per-user.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "EXPO_PUBLIC_BACKEND_URL is the public env var (NOT EXPO_BACKEND_URL). Auth bootstrap from Playwright must use page.evaluate(fetch(...)) — urllib from the container hits 403 on the public URL. After auth, set localStorage['@film_companion_auth']=JSON + '@film_companion_onboarding_complete'='true' and goto /history. Anjali + Priya auto-seed only fires on GET /api/user/match-history/{user_id}, so call that once before navigating to /history. CRITICAL: To test Alert.alert flows on web you CANNOT rely on window.confirm/window.alert overrides — react-native-web@0.21.0 ships Alert as a no-op (verified at node_modules/react-native-web/dist/exports/Alert/index.js). To validate the destructive button onPress on web, the implementation must first migrate to a Platform-aware modal. Once migrated, test by clicking the in-app confirm button and asserting (a) POST /api/chat/delete in backend logs, (b) row removed from [data-testid^=history-row-] list, (c) backend /api/user/match-history no longer contains the deleted other_user_id, and (d) reload persists. Per-run unique emails in test_chat_delete.py use time.time() suffix; do NOT reuse the same email across runs because soft-deletes persist in mongo and would break the baseline assertion.",
+  "rca_of_issue": "ROOT CAUSE: react-native-web@0.21.0 (declared in /app/frontend/package.json) implements `Alert.alert` as a no-op stub — see /app/frontend/node_modules/react-native-web/dist/exports/Alert/index.js: `class Alert { static alert() {} } export default Alert;`. The new Delete-from-chat-history feature in /app/frontend/app/history.tsx:869 calls `Alert.alert('Delete from chat history?', ..., [Cancel, Delete])` to gate the destructive action. On native (iOS/Android) this would render the system alert dialog and the Delete button's onPress would fire POST /api/chat/delete. On the Expo web preview that the testing pipeline uses, Alert.alert is silently dropped: no dialog appears, no button onPress callback ever fires, no API call is made, and the UI row is never removed. The tap on the menu item DOES correctly close the action sheet (because setShowUnmatchedActions(false) runs synchronously before the Alert.alert call), giving the user the false impression that something happened — but nothing did. REPRODUCTION: 1) Open https://match-history-dev.preview.emergentagent.com/history with testuser@example.com (after email-OTP auth). 2) Tap the 'Anjali Iyer' row → UnmatchedActionSheet opens. 3) Tap 'Delete from chat history' (data-testid=unmatched-action-delete-history). 4) Observe: action sheet closes, no confirmation dialog appears, the Anjali row remains in the list. 5) Backend logs show ZERO POST /api/chat/delete requests for this user. MITIGATION: Replace Alert.alert with a platform-aware confirmation. Minimal patch: import { Platform } from 'react-native'; add a state `const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);` plus a Modal-based confirm in the JSX styled like the other in-file modals; in handleDeleteFromHistory, on Platform.OS === 'web' setShowDeleteConfirm(true) instead of calling Alert.alert, and wire the modal's Delete button to call the existing fetch + setHistory logic. Keep Alert.alert for native. This is a ~30-line change confined to history.tsx. Backend endpoint and get_match_history filter need no changes — they are correct."
+}

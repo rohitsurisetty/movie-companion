@@ -794,9 +794,12 @@ async def get_match_history(user_id: str) -> List[Dict]:
     
     # Get all conversations where user is a participant
     # Include both active and unmatched conversations
+    # IMPORTANT: exclude conversations the user has soft-deleted from their
+    # history view (deleted_by_users contains this user_id).
     all_conversations = await _db.chat_conversations.find({
         "participants": user_id,
-        "status": {"$in": ["active", "unmatched", "pending"]}
+        "status": {"$in": ["active", "unmatched", "pending"]},
+        "deleted_by_users": {"$ne": user_id},
     }).sort("created_at", -1).to_list(length=500)
     
     history = []
