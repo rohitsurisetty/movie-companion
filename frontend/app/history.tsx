@@ -14,14 +14,13 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, FlatList, 
-  ActivityIndicator, Alert, Modal, Image, Pressable, ScrollView, TextInput,
+  ActivityIndicator, Modal, Image, Pressable, ScrollView, TextInput,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { getUserId, useUserStore } from '../src/store';
 import { Avatar } from '../src/components/Avatar';
-import { PremiumProfileView } from '../src/components/PremiumProfileView';
 
 const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -425,142 +424,11 @@ const DidYouMeetModal = ({
   );
 };
 
-// ============ PROFILE VIEW MODAL ============
-const ProfileViewModal = ({
-  visible,
-  onClose,
-  userId,
-  userName,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  userId: string;
-  userName: string;
-}) => {
-  const [profile, setProfile] = useState<any>(null);
-  const [pictures, setPictures] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [currentPicIndex, setCurrentPicIndex] = useState(0);
-  const insets = useSafeAreaInsets();
-
-  useEffect(() => {
-    if (visible && userId) {
-      fetchProfileData();
-    }
-  }, [visible, userId]);
-
-  const fetchProfileData = async () => {
-    setLoading(true);
-    try {
-      // Fetch profile
-      const profileRes = await fetch(`${API_BASE}/api/user/profile/${userId}`);
-      if (profileRes.ok) {
-        const data = await profileRes.json();
-        setProfile(data.profile);
-      }
-
-      // Fetch pictures
-      const picsRes = await fetch(`${API_BASE}/api/user/pictures/${userId}`);
-      if (picsRes.ok) {
-        const data = await picsRes.json();
-        const pics = data.pictures || {};
-        const photoArray = [pics.picture_1, pics.picture_2, pics.picture_3, pics.picture_4, pics.picture_5]
-          .filter(Boolean);
-        setPictures(photoArray);
-      }
-    } catch (error) {
-      console.error('Error fetching profile:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  if (!visible) return null;
-
-  return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
-      <SafeAreaView style={styles.profileModal}>
-        {/* Header */}
-        <View style={styles.profileHeader}>
-          <TouchableOpacity onPress={onClose} style={styles.profileCloseBtn}>
-            <Ionicons name="chevron-down" size={28} color={COLORS.text} />
-          </TouchableOpacity>
-          <Text style={styles.profileHeaderTitle}>{userName}'s Profile</Text>
-          <View style={{ width: 44 }} />
-        </View>
-
-        {loading ? (
-          <View style={styles.profileLoading}>
-            <ActivityIndicator size="large" color={COLORS.primary} />
-          </View>
-        ) : (
-          <ScrollView style={styles.profileScroll} showsVerticalScrollIndicator={false}>
-            {/* Photo Gallery */}
-            {pictures.length > 0 && (
-              <View style={styles.profilePhotoGallery}>
-                <Image 
-                  source={{ uri: pictures[currentPicIndex] }} 
-                  style={styles.profileMainPhoto}
-                />
-                {pictures.length > 1 && (
-                  <View style={styles.profilePhotoDots}>
-                    {pictures.map((_, idx) => (
-                      <TouchableOpacity 
-                        key={idx} 
-                        style={[styles.profilePhotoDot, idx === currentPicIndex && styles.profilePhotoDotActive]}
-                        onPress={() => setCurrentPicIndex(idx)}
-                      />
-                    ))}
-                  </View>
-                )}
-              </View>
-            )}
-
-            {/* Profile Info */}
-            <View style={styles.profileInfo}>
-              <Text style={styles.profileName}>
-                {profile?.name || userName}{profile?.age ? `, ${profile.age}` : ''}
-              </Text>
-              {profile?.location?.city && (
-                <View style={styles.profileLocation}>
-                  <Ionicons name="location-outline" size={16} color={COLORS.textSecondary} />
-                  <Text style={styles.profileLocationText}>{profile.location.city}</Text>
-                </View>
-              )}
-
-              {profile?.bio && (
-                <View style={styles.profileSection}>
-                  <Text style={styles.profileSectionTitle}>About</Text>
-                  <Text style={styles.profileBio}>{profile.bio}</Text>
-                </View>
-              )}
-
-              {profile?.genres?.length > 0 && (
-                <View style={styles.profileSection}>
-                  <Text style={styles.profileSectionTitle}>Favorite Genres</Text>
-                  <View style={styles.profileTags}>
-                    {profile.genres.map((genre: string, idx: number) => (
-                      <View key={idx} style={styles.profileTag}>
-                        <Text style={styles.profileTagText}>{genre}</Text>
-                      </View>
-                    ))}
-                  </View>
-                </View>
-              )}
-            </View>
-          </ScrollView>
-        )}
-      </SafeAreaView>
-    </Modal>
-  );
-};
-
 // Action Sheet for Active Match
 const ActiveMatchActionSheet = ({
   visible,
   onClose,
   onGoToChat,
-  onViewProfile,
   onReport,
   onDidYouMeet,
   onDeleteFromHistory,
@@ -568,7 +436,6 @@ const ActiveMatchActionSheet = ({
   visible: boolean;
   onClose: () => void;
   onGoToChat: () => void;
-  onViewProfile: () => void;
   onReport: () => void;
   onDidYouMeet: () => void;
   onDeleteFromHistory: () => void;
@@ -586,11 +453,6 @@ const ActiveMatchActionSheet = ({
           <TouchableOpacity style={styles.actionSheetItem} onPress={onGoToChat} testID="active-action-go-to-chat">
             <Ionicons name="chatbubble-outline" size={24} color={COLORS.text} />
             <Text style={styles.actionSheetText}>Go to Chat</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity style={styles.actionSheetItem} onPress={onViewProfile} testID="active-action-view-profile">
-            <Ionicons name="person-outline" size={24} color={COLORS.text} />
-            <Text style={styles.actionSheetText}>View Profile</Text>
           </TouchableOpacity>
           
           <View style={styles.actionSheetDivider} />
@@ -704,10 +566,31 @@ export default function HistoryScreen() {
   const [showUnmatchedActions, setShowUnmatchedActions] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const [showDidYouMeetModal, setShowDidYouMeetModal] = useState(false);
-  const [showProfileModal, setShowProfileModal] = useState(false);
   // Cross-platform confirmation modal state (Alert.alert is a no-op on RN-Web)
   const [deleteConfirmItem, setDeleteConfirmItem] = useState<MatchHistoryItem | null>(null);
   const [deletingChat, setDeletingChat] = useState(false);
+
+  // Cross-platform info/confirm modal (replaces Alert.alert which is a no-op on web)
+  type AlertModalState = {
+    visible: boolean;
+    title: string;
+    message: string;
+    confirmText?: string;
+    cancelText?: string;
+    onConfirm?: () => void | Promise<void>;
+    iconName?: keyof typeof Ionicons.glyphMap;
+    iconColor?: string;
+    destructive?: boolean;
+  };
+  const [alertModal, setAlertModal] = useState<AlertModalState>({
+    visible: false,
+    title: '',
+    message: '',
+  });
+  const showAlert = (opts: Omit<AlertModalState, 'visible'>) =>
+    setAlertModal({ ...opts, visible: true });
+  const closeAlert = () =>
+    setAlertModal((s) => ({ ...s, visible: false }));
   
   // Get the setSelectedConversation from store to directly open chat
   const setSelectedConversation = useUserStore((s) => s.setSelectedConversation);
@@ -806,26 +689,25 @@ export default function HistoryScreen() {
           
           router.push('/(tabs)/chat');
         } else {
-          Alert.alert(
-            'Chat Unavailable',
-            'Sorry, this chat is no longer available.'
-          );
+          showAlert({
+            title: 'Chat Unavailable',
+            message: 'Sorry, this chat is no longer available.',
+            iconName: 'information-circle-outline',
+            iconColor: COLORS.warning,
+          });
         }
       }
     } catch (error) {
       console.error('Error checking chat access:', error);
-      Alert.alert('Error', 'Could not access chat. Please try again.');
+      showAlert({
+        title: 'Error',
+        message: 'Could not access chat. Please try again.',
+        iconName: 'alert-circle-outline',
+        iconColor: COLORS.primary,
+      });
     } finally {
       setSelectedItem(null);
     }
-  };
-  
-  const handleViewProfile = () => {
-    if (!selectedItem) return;
-    // Close the action sheets but keep selectedItem set so ProfileViewModal can use it
-    setShowActiveActions(false);
-    setShowUnmatchedActions(false);
-    setShowProfileModal(true);
   };
   
   const handleOpenReportModal = () => {
