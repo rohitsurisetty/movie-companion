@@ -705,6 +705,9 @@ export default function HistoryScreen() {
   const [showReportModal, setShowReportModal] = useState(false);
   const [showDidYouMeetModal, setShowDidYouMeetModal] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
+  // Cross-platform confirmation modal state (Alert.alert is a no-op on RN-Web)
+  const [deleteConfirmItem, setDeleteConfirmItem] = useState<MatchHistoryItem | null>(null);
+  const [deletingChat, setDeletingChat] = useState(false);
   
   // Get the setSelectedConversation from store to directly open chat
   const setSelectedConversation = useUserStore((s) => s.setSelectedConversation);
@@ -861,47 +864,53 @@ export default function HistoryScreen() {
   
   const handleDeleteFromHistory = () => {
     if (!selectedItem) return;
-    // Snapshot the item so it's safe to clear selectedItem after the alert
+    // Snapshot the item, close the action sheets, then open the cross-platform
+    // confirmation modal (Alert.alert is a no-op on react-native-web).
     const item = selectedItem;
     setShowActiveActions(false);
     setShowUnmatchedActions(false);
+    setSelectedItem(null);
+    setDeleteConfirmItem(item);
+  };
 
-    Alert.alert(
-      'Delete from chat history?',
-      `This will remove your chat with ${item.other_user_name} from your history. The other person's view is not affected.`,
-      [
-        { text: 'Cancel', style: 'cancel', onPress: () => setSelectedItem(null) },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const res = await fetch(`${API_BASE}/api/chat/delete`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  user_id: userId,
-                  conversation_id: item.conversation_id,
-                }),
-              });
+  const handleConfirmDelete = async () => {
+    const item = deleteConfirmItem;
+    if (!item || !userId) {
+      setDeleteConfirmItem(null);
+      return;
+    }
+    setDeletingChat(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/chat/delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: userId,
+          conversation_id: item.conversation_id,
+        }),
+      });
 
-              if (res.ok) {
-                // Remove from local state immediately for snappy UX
-                setHistory((prev) => prev.filter((h) => h.conversation_id !== item.conversation_id));
-              } else {
-                Alert.alert('Error', 'Could not delete chat history. Please try again.');
-              }
-            } catch (err) {
-              console.error('Delete chat history error:', err);
-              Alert.alert('Error', 'Could not delete chat history. Please try again.');
-            } finally {
-              setSelectedItem(null);
-            }
-          },
-        },
-      ],
-      { cancelable: true }
-    );
+      if (res.ok) {
+        // Remove from local state immediately for snappy UX
+        setHistory((prev) => prev.filter((h) => h.conversation_id !== item.conversation_id));
+        setDeleteConfirmItem(null);
+      } else {
+        // Treat 400 (already deleted) the same as success to keep UX consistent
+        if (res.status === 400) {
+          setHistory((prev) => prev.filter((h) => h.conversation_id !== item.conversation_id));
+          setDeleteConfirmItem(null);
+        } else {
+          Alert.alert('Error', 'Could not delete chat history. Please try again.');
+          setDeleteConfirmItem(null);
+        }
+      }
+    } catch (err) {
+      console.error('Delete chat history error:', err);
+      Alert.alert('Error', 'Could not delete chat history. Please try again.');
+      setDeleteConfirmItem(null);
+    } finally {
+      setDeletingChat(false);
+    }
   };
 
   // Dev-only helper to seed mock unmatched conversations (Anjali + Priya)
@@ -1028,6 +1037,58 @@ export default function HistoryScreen() {
         userId={selectedItem?.other_user_id || ''}
         userName={selectedItem?.other_user_name || ''}
       />
+
+      {/* Cross-platform Delete Confirmation Modal */}
+      <Modal
+        visible={!!deleteConfirmItem}
+        transparent
+        animationType="fade"
+        onRequestClose={() => !deletingChat && setDeleteConfirmItem(null)}
+      >
+        <Pressable
+          style={styles.deleteConfirmOverlay}
+          onPress={() => !deletingChat && setDeleteConfirmItem(null)}
+        >
+          <Pressable
+            style={styles.deleteConfirmCard}
+            onPress={() => { /* swallow */ }}
+          >
+            <View style={styles.deleteConfirmIcon}>
+              <Ionicons name="trash-outline" size={32} color={COLORS.primary} />
+            </View>
+            <Text style={styles.deleteConfirmTitle}>Delete from chat history?</Text>
+            <Text style={styles.deleteConfirmBody}>
+              This will remove your chat with{' '}
+              <Text style={styles.deleteConfirmBodyBold}>
+                {deleteConfirmItem?.other_user_name || 'this user'}
+              </Text>
+              {' '}from your history. The other person&apos;s view isn&apos;t affected.
+            </Text>
+            <View style={styles.deleteConfirmButtons}>
+              <TouchableOpacity
+                style={[styles.deleteConfirmBtn, styles.deleteConfirmBtnCancel]}
+                onPress={() => setDeleteConfirmItem(null)}
+                disabled={deletingChat}
+                testID="delete-confirm-cancel"
+              >
+                <Text style={styles.deleteConfirmBtnCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.deleteConfirmBtn, styles.deleteConfirmBtnConfirm]}
+                onPress={handleConfirmDelete}
+                disabled={deletingChat}
+                testID="delete-confirm-confirm"
+              >
+                {deletingChat ? (
+                  <ActivityIndicator color="#FFF" size="small" />
+                ) : (
+                  <Text style={styles.deleteConfirmBtnConfirmText}>Delete</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1623,5 +1684,78 @@ const styles = StyleSheet.create({
   profileTagText: {
     fontSize: 14,
     color: COLORS.text,
+  },
+  // ============ DELETE CONFIRMATION MODAL ============
+  deleteConfirmOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  deleteConfirmCard: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: COLORS.bgCard,
+    borderRadius: 20,
+    paddingHorizontal: 24,
+    paddingVertical: 24,
+    alignItems: 'center',
+  },
+  deleteConfirmIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: 'rgba(229, 9, 20, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  deleteConfirmTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.text,
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  deleteConfirmBody: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 24,
+  },
+  deleteConfirmBodyBold: {
+    color: COLORS.text,
+    fontWeight: '600',
+  },
+  deleteConfirmButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+  },
+  deleteConfirmBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 48,
+  },
+  deleteConfirmBtnCancel: {
+    backgroundColor: COLORS.bgInput,
+  },
+  deleteConfirmBtnCancelText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+  },
+  deleteConfirmBtnConfirm: {
+    backgroundColor: COLORS.primary,
+  },
+  deleteConfirmBtnConfirmText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#FFF',
   },
 });

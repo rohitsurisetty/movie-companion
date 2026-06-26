@@ -1,0 +1,42 @@
+{
+  "summary": "RETEST PASSED. Match History Delete-from-chat-history + View Profile fixes verified end-to-end on Expo web preview (390x844 mobile viewport, testuser@example.com → user_657fdfed13c6). The new state-driven Modal in /app/frontend/app/history.tsx (lines 1041-1091) fully replaces the broken Alert.alert flow and works on react-native-web. Backend sanity: 8/8 tests in test_chat_delete.py PASS (same as iteration_6). Full frontend flow validated: (1) Login via email OTP (POST /api/auth/send-email-otp → POST /api/auth/verify-otp with {type:'email', identifier, otp}) succeeded. (2) GET /api/user/match-history/{user_id} returned 5 rows including Anjali Iyer + Priya Bhatia each with was_unmatched_by_other=true and yellow 'Unmatched' badge rendered. (3) Tapping the Anjali row (data-testid=history-row-mock_unmatched_anjali_iyer) opened the UnmatchedActionSheet. (4) Tapping 'Delete from chat history' (data-testid=unmatched-action-delete-history) immediately opened the new cross-platform confirmation Modal — verified: title text 'Delete from chat history?' rendered, body contains 'Anjali Iyer' (bolded), red trash icon visible, Cancel button (data-testid=delete-confirm-cancel) and Delete button (data-testid=delete-confirm-confirm) both visible and tappable (see /tmp/confirm_modal.png). (5) Tapping Cancel closed the modal (modal_still_visible=False) and the Anjali row remained in the list (5 rows preserved). (6) Reopening the action sheet → Delete → confirming with Delete button triggered exactly ONE POST /api/chat/delete with body {user_id:'user_657fdfed13c6', conversation_id:'mock_unmatched_anjali_iyer_user_657fdfed13c6'}; response 200; the Anjali row disappeared from the FlatList immediately (optimistic local removal via setHistory filter). (7) Page reload → GET /api/user/match-history confirmed backend now returns only ['Ananya Reddy','Arjun Mehta','Priya Sharma','Priya Bhatia'] — Anjali is filtered out by the {deleted_by_users: {$ne: user_id}} filter. (8) Priya Bhatia (the other unmatched mock) remained in the list both immediately and after reload, confirming the soft-delete is correctly scoped per-conversation. View Profile fix not directly re-clicked in this run (already verified by code review in iteration_6: handleViewProfile only flips visibility flags without calling action sheet's onClose, so selectedItem stays set for ProfileViewModal). Mocked APIs as declared: Auth (Email OTP) + Anjali/Priya auto-seed via GET match-history.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/chat/delete", "issue": "Still returns 400 when modified_count==0 (re-delete of already-deleted conv). Frontend now treats 400 as success (history.tsx:899-902) so UX is not broken, but the endpoint is technically non-idempotent. Consider returning 200 with {already_deleted:true}."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "Alert (react-native-web@0.21.0)", "issue": "react-native-web ships Alert.alert as a no-op. The delete flow is now fixed via in-app Modal, but Alert.alert is still used elsewhere in history.tsx for error toasts and the dev seed dialog (lines 854, 903, 909, 919-944). On web these silently swallow errors — user gets no feedback if POST /api/chat/delete fails with a non-400 status, or if the seed endpoint fails. Out of scope for this task per main agent's note but worth tracking. Reference: /app/frontend/app/history.tsx:854, 903, 909, 919"}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_chat_delete.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "No retest required for this scope — Delete-from-chat-history works end-to-end on web preview.",
+    "(Optional, separate ticket) Migrate the remaining Alert.alert(...) call sites in history.tsx (error paths at 854/903/909 and dev seed dialog at 919) to a platform-aware helper so error feedback isn't silently lost on web.",
+    "(Optional, low-priority) Return 200 with {already_deleted:true} from POST /api/chat/delete when the conv exists + user is a participant but $addToSet modified 0 docs, to make the endpoint truly idempotent. Frontend already tolerates the current 400 behavior."
+  ],
+  "critical_code_review_comments": [
+    "Modal-based confirmation at history.tsx:1041-1091 is well-structured: transparent + fade animation, overlay tap-to-dismiss with deletingChat guard, inner card swallows the press, ActivityIndicator on the Delete button while deletingChat. Both buttons disabled during the in-flight request. Good UX.",
+    "handleDeleteFromHistory at history.tsx:865-874 correctly snapshots selectedItem into a local const before closing both action sheets and clearing selectedItem, then sets deleteConfirmItem — this avoids any race where selectedItem becomes null before the user confirms.",
+    "handleConfirmDelete at history.tsx:876-914 reads from deleteConfirmItem (not selectedItem), so even if the user opened another row in the meantime the correct conv_id is sent. Treats 400 as success for the already-deleted edge — matches the backend's current non-idempotent behavior.",
+    "View Profile fix from iteration_6 still verified by code: handleViewProfile (lines ~820) closes action sheets via setShow*Actions(false) without calling parent onClose, leaving selectedItem set for ProfileViewModal — no regression."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (8/8 test_chat_delete.py pass)",
+    "frontend": "100% — Delete confirmation modal renders, Cancel works, Delete works (POST /api/chat/delete fired, row removed optimistically, persists across reload, Priya unaffected)"
+  },
+  "seed_data_creation": "Auto-seeded via GET /api/user/match-history/{user_id}: Anjali Iyer (mock_unmatched_anjali_iyer) + Priya Bhatia (mock_unmatched_priya_bhatia) unmatched conversations. NOTE: After this run Anjali is now soft-deleted (deleted_by_users contains user_657fdfed13c6) — subsequent test runs against the SAME user will not see Anjali in the baseline. To re-test, either pick a different test user, or call a re-seed endpoint that clears deleted_by_users, or use DELETE on the conv document directly in mongo. Priya Bhatia remains available.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Use EXPO_PUBLIC_BACKEND_URL (NOT EXPO_BACKEND_URL). Auth payload for /api/auth/verify-otp is {type:'email', identifier:<email>, otp} — NOT {email, otp}. Response shape: {user_id, email, session_token, name, is_new_user} (flat, no `user` wrapper). The /history row testID uses other_user_id (e.g. history-row-mock_unmatched_anjali_iyer), NOT conversation_id. POST /api/chat/delete payload: {user_id, conversation_id}. Anjali Iyer was deleted for user_657fdfed13c6 during this run — future runs targeting this same user will only see Priya Bhatia among unmatched mocks. New confirmation modal testIDs: delete-confirm-cancel + delete-confirm-confirm. The full Delete flow is now fully testable on Expo web preview without needing Alert.alert hacks.",
+  "rca_of_issue": "Iteration_6 RCA (Alert.alert no-op on react-native-web) is RESOLVED. Fix implemented in /app/frontend/app/history.tsx: handleDeleteFromHistory now sets deleteConfirmItem state instead of calling Alert.alert; a new in-app <Modal> at lines 1041-1091 renders the confirmation dialog with testIDs delete-confirm-cancel and delete-confirm-confirm; handleConfirmDelete (lines 876-914) performs the POST /api/chat/delete and updates local state. Verified end-to-end on the Expo web preview — backend receives the POST, the row is removed optimistically, the deletion persists across reload, and Priya Bhatia is not affected."
+}
