@@ -1399,7 +1399,13 @@ export default function SwipeScreen() {
           <Ionicons name={colors.modeIcon} size={22} color={colors.primary} />
           <Text style={[styles.headerTitle, { color: colors.text }]}>{colors.modeName}</Text>
         </View>
-        <View style={styles.profileBtn} />
+        <TouchableOpacity
+          style={styles.profileBtn}
+          onPress={() => router.push('/filters')}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Ionicons name="options" size={24} color={colors.text} />
+        </TouchableOpacity>
       </View>
 
       {/* Progress indicator */}

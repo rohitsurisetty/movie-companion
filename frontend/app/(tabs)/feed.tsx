@@ -567,41 +567,53 @@ export default function FeedScreen() {
       <SafeAreaView style={styles.container} edges={['top']}>
         {/* Header with Mode Toggle */}
         <View style={styles.header}>
-          {/* Mode Toggle - Top Left */}
-          <View style={styles.headerModeToggle}>
+          {/* Top row with Mode Toggle and Filters Icon */}
+          <View style={styles.headerTopRow}>
+            {/* Mode Toggle - Top Left */}
+            <View style={styles.headerModeToggle}>
+              <TouchableOpacity
+                style={[
+                  styles.headerModeButton,
+                  mode === 'buddy' && styles.headerModeButtonActiveBuddy,
+                ]}
+                onPress={() => setMode('buddy')}
+              >
+                <Ionicons 
+                  name="people" 
+                  size={14} 
+                  color={mode === 'buddy' ? '#FFF' : COLORS.textSecondary} 
+                />
+                <Text style={[
+                  styles.headerModeText,
+                  mode === 'buddy' && styles.headerModeTextActive,
+                ]}>Buddy</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.headerModeButton,
+                  mode === 'date' && styles.headerModeButtonActiveDate,
+                ]}
+                onPress={() => setMode('date')}
+              >
+                <Ionicons 
+                  name="heart" 
+                  size={14} 
+                  color={mode === 'date' ? '#FFF' : COLORS.textSecondary} 
+                />
+                <Text style={[
+                  styles.headerModeText,
+                  mode === 'date' && styles.headerModeTextActive,
+                ]}>Date</Text>
+              </TouchableOpacity>
+            </View>
+            
+            {/* Filters Icon - Top Right */}
             <TouchableOpacity
-              style={[
-                styles.headerModeButton,
-                mode === 'buddy' && styles.headerModeButtonActiveBuddy,
-              ]}
-              onPress={() => setMode('buddy')}
+              style={styles.filtersBtn}
+              onPress={() => router.push('/filters')}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             >
-              <Ionicons 
-                name="people" 
-                size={14} 
-                color={mode === 'buddy' ? '#FFF' : COLORS.textSecondary} 
-              />
-              <Text style={[
-                styles.headerModeText,
-                mode === 'buddy' && styles.headerModeTextActive,
-              ]}>Buddy</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.headerModeButton,
-                mode === 'date' && styles.headerModeButtonActiveDate,
-              ]}
-              onPress={() => setMode('date')}
-            >
-              <Ionicons 
-                name="heart" 
-                size={14} 
-                color={mode === 'date' ? '#FFF' : COLORS.textSecondary} 
-              />
-              <Text style={[
-                styles.headerModeText,
-                mode === 'date' && styles.headerModeTextActive,
-              ]}>Date</Text>
+              <Ionicons name="options-outline" size={24} color={COLORS.text} />
             </TouchableOpacity>
           </View>
           
@@ -719,6 +731,18 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
+  },
+  headerTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  filtersBtn: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerModeToggle: {
     flexDirection: 'row',
