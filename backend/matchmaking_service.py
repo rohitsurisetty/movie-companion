@@ -41,9 +41,9 @@ MOCK_USERS = [
         "gender": "Female",
         "location": "Mumbai",
         "avatar": "av2",
-        "profile_picture": "https://images.unsplash.com/photo-1512310604669-443f26c35f52?w=400&h=600&fit=crop",
+        "profile_picture": "https://images.unsplash.com/photo-1631005436794-ccaa79de61ba?w=400&h=600&fit=crop",
         "pictures": [
-            "https://images.unsplash.com/photo-1512310604669-443f26c35f52?w=400&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1631005436794-ccaa79de61ba?w=400&h=600&fit=crop",
             "https://images.unsplash.com/photo-1617627143750-d86bc21e42bb?w=400&h=600&fit=crop"
         ],
         "bio": "Film enthusiast who believes a good movie is the best first date. Looking for someone who appreciates storytelling as much as I do.",
@@ -116,10 +116,10 @@ MOCK_USERS = [
         "gender": "Female",
         "location": "Bangalore",
         "avatar": "av3",
-        "profile_picture": "https://images.unsplash.com/photo-1631005436794-ccaa79de61ba?w=400&h=600&fit=crop",
+        "profile_picture": "https://images.unsplash.com/photo-1619516388835-2b60acc4049e?w=400&h=600&fit=crop",
         "pictures": [
-            "https://images.unsplash.com/photo-1631005436794-ccaa79de61ba?w=400&h=600&fit=crop",
-            "https://images.unsplash.com/photo-1619516388835-2b60acc4049e?w=400&h=600&fit=crop"
+            "https://images.unsplash.com/photo-1619516388835-2b60acc4049e?w=400&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1710967074868-2041e4f44c17?w=400&h=600&fit=crop"
         ],
         "bio": "Indie film lover. Give me a slow-burn drama over a blockbuster any day. Currently obsessed with A24 films.",
         "partnerPreference": "Men",
@@ -1032,10 +1032,10 @@ MOCK_USERS = [
         "gender": "Female",
         "location": "Chennai",
         "avatar": "av2",
-        "profile_picture": "https://images.pexels.com/photos/26208424/pexels-photo-26208424.jpeg?w=400&h=600&fit=crop",
+        "profile_picture": "https://images.unsplash.com/photo-1557296387-5358ad7997bb?w=400&h=600&fit=crop",
         "pictures": [
-            "https://images.pexels.com/photos/26208424/pexels-photo-26208424.jpeg?w=400&h=600&fit=crop",
-            "https://images.unsplash.com/photo-1619516388835-2b60acc4049e?w=400&h=600&fit=crop"
+            "https://images.unsplash.com/photo-1557296387-5358ad7997bb?w=400&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1463335361701-e90f4c5045d0?w=400&h=600&fit=crop"
         ],
         "bio": "AR Rahman melodies + Sunday rain + good company = perfect date. Tamil cinema runs in my veins. Kamal Haasan supremacy!",
         "partnerPreference": "Men",
@@ -1072,10 +1072,10 @@ MOCK_USERS = [
         "gender": "Female",
         "location": "Mumbai",
         "avatar": "av3",
-        "profile_picture": "https://images.pexels.com/photos/14928074/pexels-photo-14928074.jpeg?w=400&h=600&fit=crop",
+        "profile_picture": "https://images.unsplash.com/photo-1497487231007-0a45e7b4b68a?w=400&h=600&fit=crop",
         "pictures": [
-            "https://images.pexels.com/photos/14928074/pexels-photo-14928074.jpeg?w=400&h=600&fit=crop",
-            "https://images.unsplash.com/photo-1680711552692-76a8bd810398?w=400&h=600&fit=crop"
+            "https://images.unsplash.com/photo-1497487231007-0a45e7b4b68a?w=400&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1552113125-81af17f36b57?w=400&h=600&fit=crop"
         ],
         "bio": "Horror movie enthusiast who watches scary films alone at 3 AM. Looking for a brave soul to share the scares with!",
         "partnerPreference": "Men",
@@ -1112,10 +1112,10 @@ MOCK_USERS = [
         "gender": "Female",
         "location": "Kolkata",
         "avatar": "av5",
-        "profile_picture": "https://images.unsplash.com/photo-1558377235-76f53857000b?w=400&h=600&fit=crop",
+        "profile_picture": "https://images.unsplash.com/photo-1622207691293-5cd80466dab3?w=400&h=600&fit=crop",
         "pictures": [
-            "https://images.unsplash.com/photo-1558377235-76f53857000b?w=400&h=600&fit=crop",
-            "https://images.unsplash.com/photo-1674278882093-3870ef98e826?w=400&h=600&fit=crop"
+            "https://images.unsplash.com/photo-1622207691293-5cd80466dab3?w=400&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1516239482977-b550ba7253f2?w=400&h=600&fit=crop"
         ],
         "bio": "Bengali cinema lover with a soft spot for Satyajit Ray. Can discuss Feluda theories for hours. Looking for my intellectual match!",
         "partnerPreference": "Men",
