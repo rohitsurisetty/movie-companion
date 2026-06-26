@@ -1092,20 +1092,33 @@ def apply_hard_filters(
         user_looking_for = current_user.get("partnerPreference", "Anyone")
         candidate_gender = candidate.get("gender", "")
         
+        # Normalize gender values (handle "Man"/"Male", "Woman"/"Female" variations)
+        def normalize_gender(g):
+            if not g:
+                return ""
+            g_lower = g.lower()
+            if g_lower in ["male", "man"]:
+                return "Male"
+            elif g_lower in ["female", "woman"]:
+                return "Female"
+            return g
+        
+        normalized_candidate_gender = normalize_gender(candidate_gender)
+        normalized_user_gender = normalize_gender(current_user.get("gender", ""))
+        
         if user_looking_for != "Anyone":
-            if user_looking_for == "Men" and candidate_gender != "Male":
+            if user_looking_for == "Men" and normalized_candidate_gender != "Male":
                 continue
-            if user_looking_for == "Women" and candidate_gender != "Female":
+            if user_looking_for == "Women" and normalized_candidate_gender != "Female":
                 continue
         
         # Check if candidate is looking for user's gender
         candidate_looking_for = candidate.get("partnerPreference", "Anyone")
-        user_gender = current_user.get("gender", "")
         
         if candidate_looking_for != "Anyone":
-            if candidate_looking_for == "Men" and user_gender != "Male":
+            if candidate_looking_for == "Men" and normalized_user_gender != "Male":
                 continue
-            if candidate_looking_for == "Women" and user_gender != "Female":
+            if candidate_looking_for == "Women" and normalized_user_gender != "Female":
                 continue
         
         # Track if this candidate passes all strict filters
