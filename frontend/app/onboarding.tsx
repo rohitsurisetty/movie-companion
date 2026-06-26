@@ -460,6 +460,16 @@ export default function OnboardingScreen() {
   // Show "Few more info" header when coming back from Tina with partial data
   const showPartialHeader = tinaCollectedFields.length > 0 && step > STEP_TINA_CHOICE;
 
+  // For the Public Profile Preview step, render full-screen (no onboarding chrome)
+  // so it visually matches the Profile/Match-section preview exactly.
+  if (step === STEP_PUBLIC_PREVIEW) {
+    return (
+      <View style={styles.container} testID="onboarding-screen">
+        {renderStep()}
+      </View>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container} testID="onboarding-screen">
       {/* Header */}

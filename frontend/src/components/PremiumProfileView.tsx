@@ -93,6 +93,13 @@ interface PremiumProfileViewProps {
   onSendMessage: (message: string) => Promise<boolean>;
   hasAlreadySentRequest?: boolean;
   isSendingMessage?: boolean;
+  // --- Optional overrides for self-preview contexts (e.g. signup, profile preview) ---
+  /** When provided, replaces the default Message CTA at the bottom. */
+  bottomCTAOverride?: React.ReactNode;
+  /** Override the floating close icon (defaults to chevron-down). */
+  closeIconName?: keyof typeof Ionicons.glyphMap;
+  /** Hide the match-card / explanation block (used when viewing your own profile). */
+  hideMatchCard?: boolean;
 }
 
 // ============ PHOTO CAROUSEL ============
@@ -436,6 +443,9 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
   onSendMessage,
   hasAlreadySentRequest = false,
   isSendingMessage = false,
+  bottomCTAOverride,
+  closeIconName = 'chevron-down',
+  hideMatchCard = false,
 }) => {
   const insets = useSafeAreaInsets();
   const scrollY = useRef(new Animated.Value(0)).current;
@@ -534,7 +544,7 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
         ]}
       >
         <TouchableOpacity style={styles.headerButton} onPress={onClose}>
-          <Ionicons name="chevron-down" size={26} color="#FFF" />
+          <Ionicons name={closeIconName} size={26} color="#FFF" />
         </TouchableOpacity>
         {/* Empty view for spacing */}
         <View style={{ width: 40 }} />
@@ -599,7 +609,7 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
           </View>
 
           {/* Match Compatibility */}
-          {profile.match_level && (
+          {!hideMatchCard && profile.match_level && (
             <View style={[styles.matchCard, { borderColor: 'rgba(255, 215, 0, 0.3)' }]}>
               <View style={styles.matchCardHeader}>
                 <Ionicons name="sparkles" size={16} color={COLORS.gold} />
@@ -800,7 +810,9 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
       {/* Fixed Bottom CTA */}
       {!showMessageDialog && (
         <View style={[styles.bottomCTA, { paddingBottom: insets.bottom + 12 }]}>
-          {requestSent ? (
+          {bottomCTAOverride ? (
+            bottomCTAOverride
+          ) : requestSent ? (
             <View style={[styles.messageBtn, styles.messageBtnSent]}>
               <Ionicons name="checkmark-circle" size={20} color={COLORS.success} />
               <Text style={[styles.messageBtnText, { color: COLORS.success }]}>Request Sent</Text>
