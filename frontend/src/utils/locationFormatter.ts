@@ -158,7 +158,23 @@ export function formatLocationForPrivacy(fullLocation: string): string {
   };
 
   // Filter parts
-  const filteredParts = parts.filter(part => !shouldRemovePart(part));
+  let filteredParts = parts.filter(part => !shouldRemovePart(part));
+  
+  // Additional cleanup: Remove "Sector X" patterns and replace with proper area names
+  filteredParts = filteredParts.map(part => {
+    // If part contains "Sector" followed by number/letter and area name, extract just the area name
+    // e.g., "Sector 6 HSR" -> "HSR Layout", "Sector 4 BTM" -> "BTM Layout"
+    const sectorMatch = part.match(/sector\s*\d*\s*(hsr|btm|electronic\s*city|whitefield|koramangala|indiranagar|jayanagar)/i);
+    if (sectorMatch) {
+      const areaName = sectorMatch[1].toUpperCase();
+      if (areaName === 'HSR') return 'HSR Layout';
+      if (areaName === 'BTM') return 'BTM Layout';
+      return sectorMatch[1].charAt(0).toUpperCase() + sectorMatch[1].slice(1).toLowerCase();
+    }
+    // If part is just "Sector X" without area name, skip it
+    if (/^sector\s*\d+$/i.test(part.trim())) return null;
+    return part;
+  }).filter(Boolean) as string[];
 
   // If we filtered too much, fall back to city detection
   if (filteredParts.length === 0) {

@@ -915,9 +915,14 @@ export default function FiltersScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Header with floating action when scrolled */}
+      {/* Header with back button and floating action when scrolled */}
       <View style={styles.headerBar}>
-        <Text style={styles.headerTitle}>Preferences & Filters</Text>
+        <View style={styles.headerLeft}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+            <Ionicons name="arrow-back" size={24} color={COLORS.text} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Preferences & Filters</Text>
+        </View>
         {showFloatingBtn ? (
           <TouchableOpacity 
             style={styles.floatingHeaderBtn} 
@@ -1134,8 +1139,21 @@ const styles = StyleSheet.create({
   loadingText: { fontSize: 16, color: COLORS.textSecondary },
   headerBar: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: SPACING.l, paddingVertical: SPACING.m,
+    paddingHorizontal: SPACING.m, paddingVertical: SPACING.m,
     borderBottomWidth: 1, borderBottomColor: COLORS.border,
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.s,
+  },
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: COLORS.bgCard,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: COLORS.text },
   optionalLabel: { fontSize: 12, color: COLORS.textMuted, fontStyle: 'italic' },

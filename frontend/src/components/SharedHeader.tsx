@@ -4,6 +4,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppStore, AppMode, getAuth } from '../store';
+import { useRouter } from 'expo-router';
 import Constants from 'expo-constants';
 
 const BACKEND_URL = Constants.expoConfig?.extra?.EXPO_PUBLIC_BACKEND_URL || process.env.EXPO_PUBLIC_BACKEND_URL || '';
@@ -105,12 +106,20 @@ export function SharedHeader({
   showModeIcon = true,
   onMenuPress,
   colors,
+  showFiltersIcon = true,
 }: {
   title?: string;
   showModeIcon?: boolean;
   onMenuPress: () => void;
   colors: ThemeColors;
+  showFiltersIcon?: boolean;
 }) {
+  const router = useRouter();
+  
+  const handleFiltersPress = () => {
+    router.push('/filters');
+  };
+  
   return (
     <View style={[headerStyles.header, { borderBottomColor: colors.border }]}>
       <TouchableOpacity
@@ -124,7 +133,17 @@ export function SharedHeader({
         {showModeIcon && <Ionicons name={colors.modeIcon} size={22} color={colors.primary} />}
         <Text style={[headerStyles.headerTitle, { color: colors.text }]}>{title || colors.modeName}</Text>
       </View>
-      <View style={headerStyles.placeholder} />
+      {showFiltersIcon ? (
+        <TouchableOpacity
+          style={headerStyles.filtersBtn}
+          onPress={handleFiltersPress}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Ionicons name="options-outline" size={24} color={colors.text} />
+        </TouchableOpacity>
+      ) : (
+        <View style={headerStyles.placeholder} />
+      )}
     </View>
   );
 }
@@ -191,5 +210,11 @@ const headerStyles = StyleSheet.create({
   },
   placeholder: {
     width: 40,
+  },
+  filtersBtn: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
