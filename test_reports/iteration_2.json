@@ -1,0 +1,47 @@
+{
+  "summary": "Match History + Unmatched Mocks feature fully validated end-to-end. Backend: 9/9 pytest tests passed (auth OTP, match-history seed, idempotency, read-only chat, seeded messages, report). Frontend (mobile 390x844): logged in as testuser@example.com via OTP, /history page shows both 'Anjali Iyer' and 'Priya Bhatia' with REAL names (no 'Unknown'), 'Unmatched' badge, correct dates. Tapping Anjali opens the 'Anjali Iyer has unmatched with you' action sheet; 'View Chat (Read-only)' opens the chat with all 9 seeded mock messages, 'Conversation ended' header, lock banner, and NO input textbox (verified inputs=[]). Report modal opens correctly from the unmatched action sheet for Priya. Idempotency verified - 2nd call to /api/user/match-history/{user_id} still returns exactly 1 Anjali + 1 Priya entry.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/chat/read/{conversation_id}?user_id=", "issue": "Pre-existing 500 in backend logs when user_id query param is empty string (called from chat.tsx on read tracking). Not blocking match-history flow. Should be guarded with 400."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/history list rows", "issues": ["No testID attributes on history rows or action-sheet items - relied on text selectors. Recommend adding testID='history-row-{user_id}', testID='unmatched-view-chat', testID='unmatched-report' for stable automation."]}
+    ],
+    "react_native_issues": [
+      {"component": "Pressable props.pointerEvents", "issue": "Deprecation warning: 'props.pointerEvents is deprecated. Use style.pointerEvents'. Triggered from the chat read-only view modal/overlay. Non-blocking."},
+      {"component": "shadow* style props", "issue": "Multiple 'shadow* style props are deprecated. Use boxShadow' warnings across screens. Non-blocking but should migrate."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_match_history.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "(Optional polish) Add testID attributes to history rows and unmatched action-sheet buttons (View Chat Read-only, Report) for more robust mobile testing.",
+    "(Minor) Guard POST /api/chat/read/{conversation_id} with a 400 when user_id is empty to stop log noise (500s).",
+    "(Minor) Migrate deprecated shadow* style props to boxShadow and Pressable pointerEvents prop to style.pointerEvents."
+  ],
+  "critical_code_review_comments": [
+    "Auto-seed in /api/user/match-history is correctly wrapped in try/except and is best-effort - good defensive pattern.",
+    "seed_unmatched_for_user idempotency check uses existence of BOTH conversations - works.",
+    "chat_service.get_user_info fallback chain: curated dict -> matchmaking_service.get_mock_user_by_id -> users collection. The mock_unmatched_* IDs resolve via the users collection upsert path correctly.",
+    "Read-only enforcement on /api/chat/unmatched checks unmatched_by != user_id - correct."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_match_history.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (9/9 pytest tests passed)",
+    "frontend": "100% (history list, real names, action sheet, read-only chat with seeded messages, report modal all working)"
+  },
+  "seed_data_creation": "Logged in via mock OTP as testuser@example.com which triggered auto-seed of Anjali Iyer (mock_unmatched_anjali_iyer) + Priya Bhatia (mock_unmatched_priya_bhatia) unmatched conversations with full chat scripts.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Match history unmatched-mocks fix is verified working end-to-end. Use page.evaluate fetch (not urllib) when calling backend from playwright - the preview env's WAF blocks default urllib user-agent (403). Auth can be pre-injected by setting localStorage '@film_companion_auth' and '@film_companion_onboarding_complete'='true' then navigating to /history.",
+  "rca_of_issue": null
+}

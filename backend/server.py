@@ -2983,8 +2983,18 @@ async def api_get_match_history(user_id: str):
     - See all their past matches (active and unmatched)
     - Report users even after they've unmatched
     - View read-only chat history if they were unmatched by someone
+
+    Side effect: ensures the demo Anjali/Priya unmatched conversations exist
+    for this user so they can manually test the post-unmatch flows. The seed
+    function is idempotent and skips if already done.
     """
     try:
+        # Best-effort seed; never block history fetch if seeding fails
+        try:
+            await seed_unmatched_for_user(db, user_id)
+        except Exception as seed_err:
+            logger.warning(f"Auto-seed unmatched mocks failed for {user_id}: {seed_err}")
+
         history = await get_match_history(user_id)
         return {"success": True, "history": history, "total": len(history)}
     except Exception as e:

@@ -224,6 +224,7 @@ async def get_user_info(user_id: str) -> Dict:
     """Get basic user info for chat display"""
     # Check if it's a mock user
     if user_id.startswith("mock_user_"):
+        # First try the small curated dict (has nicer chat avatars)
         mock_profiles = {
             "mock_user_001": {
                 "user_id": "mock_user_001",
@@ -291,7 +292,29 @@ async def get_user_info(user_id: str) -> Dict:
                 "age": 26
             },
         }
-        return mock_profiles.get(user_id, {"user_id": user_id, "name": "Unknown", "avatar": None, "location": "Unknown", "age": None})
+        if user_id in mock_profiles:
+            return mock_profiles[user_id]
+
+        # Fallback to the full MOCK_USERS catalogue (matchmaking_service has all 30)
+        # so users like mock_user_004, 006, 008, etc. resolve to a real name
+        # instead of "Unknown".
+        try:
+            from matchmaking_service import get_mock_user_by_id
+            full_mock = get_mock_user_by_id(user_id)
+            if full_mock:
+                return {
+                    "user_id": full_mock.get("user_id"),
+                    "name": full_mock.get("name", "Unknown"),
+                    "avatar": full_mock.get("profile_picture")
+                              or (full_mock.get("pictures", [None])[0]
+                                  if full_mock.get("pictures") else None),
+                    "location": full_mock.get("location"),
+                    "age": full_mock.get("age"),
+                }
+        except Exception as e:
+            logger.warning(f"Could not resolve mock user {user_id} via MOCK_USERS: {e}")
+
+        return {"user_id": user_id, "name": "Unknown", "avatar": None, "location": "Unknown", "age": None}
     
     # Try to find in users collection - get more comprehensive info
     user = await _db.users.find_one({"user_id": user_id}, {"_id": 0, "user_id": 1, "name": 1, "picture": 1, "dob": 1, "location": 1})

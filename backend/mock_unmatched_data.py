@@ -263,10 +263,36 @@ async def _seed_unmatched_conversation(
     )
 
 
-async def seed_unmatched_for_user(db, target_user_id: str) -> Dict:
-    """Public entry point — seeds Anjali & Priya unmatched conversations for the given user."""
+async def seed_unmatched_for_user(db, target_user_id: str, force: bool = False) -> Dict:
+    """Public entry point — seeds Anjali & Priya unmatched conversations for the given user.
+
+    Idempotent: if the two mock conversations already exist for this user, skip
+    re-seeding (unless force=True). This makes it safe to call from any endpoint
+    on every request without thrashing the DB.
+    """
     if not target_user_id:
         raise ValueError("target_user_id is required")
+
+    anjali_conv_id = _conv_id(target_user_id, ANJALI_USER_ID)
+    priya_conv_id = _conv_id(target_user_id, PRIYA_USER_ID)
+
+    if not force:
+        existing_anjali = await db.chat_conversations.find_one(
+            {"conversation_id": anjali_conv_id}
+        )
+        existing_priya = await db.chat_conversations.find_one(
+            {"conversation_id": priya_conv_id}
+        )
+        if existing_anjali and existing_priya:
+            return {
+                "success": True,
+                "target_user_id": target_user_id,
+                "already_seeded": True,
+                "seeded_users": [
+                    {"user_id": ANJALI_USER_ID, "name": ANJALI_PROFILE["name"]},
+                    {"user_id": PRIYA_USER_ID, "name": PRIYA_PROFILE["name"]},
+                ],
+            }
 
     # 1. Upsert the two mock users
     await _upsert_mock_user(db, ANJALI_PROFILE)
@@ -296,6 +322,7 @@ async def seed_unmatched_for_user(db, target_user_id: str) -> Dict:
     return {
         "success": True,
         "target_user_id": target_user_id,
+        "already_seeded": False,
         "seeded_users": [
             {"user_id": ANJALI_USER_ID, "name": ANJALI_PROFILE["name"]},
             {"user_id": PRIYA_USER_ID, "name": PRIYA_PROFILE["name"]},

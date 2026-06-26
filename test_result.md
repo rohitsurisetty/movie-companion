@@ -9709,3 +9709,66 @@ agent_communication:
       The implementation follows React Native best practices and addresses the exact issues reported in the bug report.
       
       Please summarize and finish.
+
+  - agent: "main"
+    message: |
+      🔍 RETEST REQUESTED — JUNE 26, 2026 — "Unknown" Names + Auto-Seed Match History
+      
+      CONTEXT:
+      User reported that Anjali Iyer & Priya Bhatia were not showing up in Match History,
+      and even when they did, names rendered as "Unknown". Previous agent applied two
+      fixes but never validated them with testing_agent.
+      
+      WHAT WAS CHANGED (already implemented):
+      1. /app/backend/server.py (lines ~2978-3002):
+         GET /api/user/match-history/{user_id} now auto-calls
+         seed_unmatched_for_user(db, user_id) at the top (idempotent, best-effort).
+         This guarantees Anjali (mock_unmatched_anjali_iyer) and Priya
+         (mock_unmatched_priya_bhatia) exist as unmatched conversations
+         the first time history is fetched.
+      
+      2. /app/backend/chat_service.py (lines ~223-360, get_user_info):
+         Now falls back to matchmaking_service.get_mock_user_by_id for any
+         user_id starting with "mock_user_" that isn't in the small curated
+         dict. Anjali & Priya use the "mock_unmatched_*" id prefix and are
+         resolved via the standard _db.users.find_one path (they are upserted
+         into the users collection by _upsert_mock_user).
+      
+      3. /app/backend/mock_unmatched_data.py:
+         New seeder. Inserts Anjali + Priya into users, user_profiles,
+         user_pictures, chat_conversations (status=unmatched, unmatched_by=them),
+         and chat_messages with realistic scripts.
+      
+      4. Frontend (history.tsx) — no longer needs a manual "seed" button;
+         it just loads /api/user/match-history/{user_id} and gets the seeded data.
+      
+      WHAT TO VERIFY (BACKEND + FRONTEND):
+      Backend:
+        A. POST /api/auth/send-email-otp + /api/auth/verify-otp to log in a fresh
+           test user (testuser@example.com). Capture user_id + session token.
+        B. GET /api/user/match-history/{user_id} — expect HTTP 200,
+           history array contains entries with other_user_name == "Anjali Iyer"
+           and "Priya Bhatia" (NOT "Unknown"), status=="unmatched",
+           was_unmatched_by_other==true.
+        C. GET /api/chat/unmatched/{conversation_id}?user_id={user_id} for both
+           Anjali & Priya conversations — expect is_read_only=true, name resolved.
+        D. POST /api/chat/report with conversation_id + reason — expect success.
+      
+      Frontend:
+        1. Login flow → land on home tab.
+        2. Navigate to History tab (or wherever match history is surfaced).
+        3. Confirm Anjali Iyer & Priya Bhatia both appear with real names
+           (not "Unknown") and a tag/badge showing they unmatched you.
+        4. Tap one of them → opens read-only chat view, input box disabled,
+           "View Profile" + "Report" buttons available.
+        5. Tap Report → submit → success toast.
+      
+      Test user: testuser@example.com (see /app/memory/test_credentials.md).
+      OTP is returned in the send-otp response body (mock auth).
+      
+      Files to inspect if anything fails:
+        - /app/backend/server.py            (~2978)
+        - /app/backend/chat_service.py      (~223, ~768)
+        - /app/backend/mock_unmatched_data.py
+        - /app/frontend/app/history.tsx
+        - /app/frontend/app/(tabs)/chat.tsx (read-only mode)
