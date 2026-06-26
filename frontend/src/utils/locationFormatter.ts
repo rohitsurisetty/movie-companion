@@ -91,7 +91,24 @@ function getLocationFromPincode(pincode: string): { area: string; city: string }
   return PINCODE_MAP[pincode] || null;
 }
 
-export function formatLocationForPrivacy(fullLocation: string): string {
+export function formatLocationForPrivacy(fullLocation: any): string {
+  // Defensive: backend may sometimes send a non-string (object, null, number).
+  // Coerce safely so we never crash with "trim is not a function".
+  if (fullLocation == null) {
+    return '';
+  }
+  if (typeof fullLocation !== 'string') {
+    // Support {city, state, country} shape gracefully.
+    if (typeof fullLocation === 'object') {
+      const obj: any = fullLocation;
+      const parts = [obj.area, obj.city, obj.state, obj.country]
+        .filter((p) => typeof p === 'string' && p.trim().length > 0);
+      if (parts.length === 0) return '';
+      fullLocation = parts.join(', ');
+    } else {
+      fullLocation = String(fullLocation);
+    }
+  }
   if (!fullLocation || fullLocation.trim() === '') {
     return '';
   }

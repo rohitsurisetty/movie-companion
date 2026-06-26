@@ -1,0 +1,37 @@
+{
+  "summary": "Bug fix VERIFIED for 'Unmatched profile privacy + crash on tapping avatar'. Backend regression: 29/29 pytest PASS (test_chat_unmatched_tab 8/8, test_chat_read_guard 4/4, test_match_history 9/9, test_api 8/8) — no behavioral change for unmatched conversations. Frontend (390x844 mobile viewport, after `sudo supervisorctl restart expo` to clear a stale Metro bundle cache): (1) Chat list — Anjali Iyer row and Priya Bhatia row now render the red initials gradient ('A' / 'P') with lock badge + 'Unmatched' badge; DOM inspection shows imgs=0 + 1 LinearGradient div per unmatched row (vs imgs=1 in the pre-fix cached bundle). (2) Read-only chat for Anjali Iyer — opens GiftedChatScreen with header 'Anjali Iyer' + 'Conversation ended', lock banner 'Anjali Iyer has unmatched with you. This conversation is now read-only.', composer hidden (0 text inputs). All 5 message-avatar slots next to her messages are now 36px red gradient 'A' initials with imgs=0 + 5 LinearGradient circular divs (previously imgs=5 photo thumbnails of the Unsplash URL). (3) Tapping any 'A' initial avatar in the message list does NOT throw 'fullLocation.trim is not a function' (0 trim/fullLocation errors, 0 PAGEERROR) and does NOT open ProfileBottomSheet — `!isReadOnly && <ProfileBottomSheet/>` gate at chat.tsx:1781 prevents the component from ever mounting. (4) 3-dot menu in read-only mode shows Delete Chat, Did you meet?, Report — 'View Profile' item count is 0 (absent). (5) Priya Bhatia read-only chat — identical behavior: imgs=0, gradients=5 'P' initials, banner present, composer=0, no trim error after tapping initial avatar. (6) Active-chat regression — tapping the chat header avatar for an ACTIVE conversation (mock_user_003 / Ananya Reddy) correctly opens ProfileBottomSheet with real photo carousel + name/age 'Ananya Reddy, 23' + location 'Bangalore' + Favorite Movies, with ZERO trim errors — confirming the defensive formatLocationForPrivacy still works for active flows and no regression was introduced. Deprecated packages detected: NONE for this fix. SafeAreaView issues detected: NONE. Mocked APIs: Auth (Email OTP returned in response) — used as documented in /app/memory/test_credentials.md.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_chat_unmatched_tab.py",
+    "/app/backend/tests/test_chat_read_guard.py",
+    "/app/backend/tests/test_match_history.py",
+    "/app/backend/tests/test_api.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "formatLocationForPrivacy in /app/frontend/src/utils/locationFormatter.ts:94-114 is now properly defensive: null/undefined returns '', objects with {area,city,state,country} are joined to a string, other primitives are coerced via String() before .trim(). This eliminates the original 'fullLocation.trim is not a function' crash from any caller, not just ProfileBottomSheet.",
+    "Defense-in-depth on the avatar/profile flow in /app/frontend/app/(tabs)/chat.tsx is well-designed: (a) convertToGiftedMessages:1277 forces avatar=undefined in read-only mode, (b) renderAvatar:1484-1490 returns a non-tappable <View> wrapping Avatar with imageUrl=undefined for read-only — so even if GiftedChat re-renders or showAvatarForEveryMessage changes, the photo can never leak, (c) ConversationItem:1166 forces imageUrl=undefined on unmatched list rows, (d) the ProfileBottomSheet is gated by !isReadOnly at chat.tsx:1781 so the component is never even mounted/rendered for unmatched conversations — this means the original crash code path is unreachable regardless of backend payload type.",
+    "Read-only menu at chat.tsx:1693-1709 correctly omits 'View Profile' entirely — only Delete Chat, Did you meet?, Report are present. Verified via DOM (View Profile count = 0).",
+    "Avatar.tsx:28 rejects any non-http(s) imageUrl and falls back to the LinearGradient initials — combined with the chat.tsx changes this provides a clean two-layer privacy guarantee."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (29/29 pytest, 0 regressions)",
+    "frontend": "100% (privacy: list & chat-message avatars are initials-only for both unmatched users; crash: 0 trim/fullLocation errors after tapping avatars; menu: View Profile absent in read-only; regression: active chat ProfileBottomSheet opens with photo+location+movies and 0 crashes)"
+  },
+  "seed_data_creation": "Reused existing auto-seed at GET /api/chat/conversations/{user_id}: Anjali Iyer (mock_unmatched_anjali_iyer) + Priya Bhatia (mock_unmatched_priya_bhatia) and their messages are seeded on demand and idempotent — no new seed required for this iteration.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "IMPORTANT: After code changes to chat.tsx/Avatar.tsx, Metro on this Expo build may keep serving a stale web bundle even though source on disk shows the fix. First test run BEFORE `sudo supervisorctl restart expo` reproduced the pre-fix DOM (imgs=1 in unmatched list row, imgs=5 photo thumbs in read-only chat). After Expo restart the new bundle was served and all checks passed. If future iterations touch chat avatar/photo logic, always restart Expo before running the Playwright check to avoid false negatives. Public URL var is EXPO_PUBLIC_BACKEND_URL (not EXPO_BACKEND_URL). To programmatically inspect the privacy state from Playwright: count document.querySelectorAll('img') and document.querySelectorAll('div').filter(d => style includes 'linear-gradient' && 'border-radius') within the read-only chat — imgs must be 0 and gradients must be >=1 per visible message-avatar slot. Auth bootstrap: page.evaluate fetch /api/auth/send-email-otp → verify-otp (urllib from the container hits 403, use in-browser fetch); then set localStorage keys '@film_companion_auth' (JSON with user_id, session_token, user) + '@film_companion_onboarding_complete'='true' and goto /chat with wait_until='domcontentloaded'.",
+  "rca_of_issue": "Original crash: ProfileBottomSheet → formatLocationForPrivacy(fullLocation) at locationFormatter.ts:95 invoked fullLocation.trim() unconditionally; when backend returned a non-string (object {city,state,country,area} or undefined) for the unmatched user's location, .trim threw 'trim is not a function (it is undefined)'. The crash was reachable from the read-only chat because the avatar TouchableOpacity called setShowProfile(true) which mounted ProfileBottomSheet even for unmatched users. Privacy issue: read-only message avatars and the chat-list row still used user.avatar (real photo URL) because (a) convertToGiftedMessages passed otherUser?.avatar unconditionally, (b) renderAvatar wrapped Avatar in a TouchableOpacity with user.avatar, (c) ConversationItem passed user?.avatar even when isUnmatched. FIX (verified): (1) locationFormatter coerces all non-string inputs safely before .trim — eliminates crash at source. (2) convertToGiftedMessages forces avatar=undefined in isReadOnly. (3) renderAvatar returns non-tappable initials in isReadOnly. (4) ProfileBottomSheet wrapped in !isReadOnly && — sheet is never mounted. (5) ConversationItem forces imageUrl=undefined for isUnmatched rows. Combined defense-in-depth means the photo and the crash are both unreachable for unmatched users."
+}

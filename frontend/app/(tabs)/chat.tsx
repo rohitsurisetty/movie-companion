@@ -1160,7 +1160,11 @@ const ConversationItem = ({
       testID={`conversation-row-${conversation.other_user_id}`}
     >
       <View style={[styles.conversationAvatar, isUnmatched && styles.conversationAvatarUnmatched]}>
-        <Avatar name={user?.name || 'U'} size={56} imageUrl={user?.avatar} />
+        <Avatar
+          name={user?.name || 'U'}
+          size={56}
+          imageUrl={isUnmatched ? undefined : user?.avatar}
+        />
         {!isPending && !isUnmatched && <View style={styles.onlineDot} />}
         {isUnmatched && (
           <View style={styles.lockBadge}>
@@ -1268,7 +1272,9 @@ const GiftedChatScreen = ({
       user: {
         _id: msg.sender_id,
         name: msg.sender_id === userId ? 'You' : otherUser?.name || 'Unknown',
-        avatar: msg.sender_id === userId ? undefined : otherUser?.avatar,
+        // Privacy: once the OTHER side has unmatched, never expose their photo.
+        // Force the avatar to the initials placeholder via Avatar component.
+        avatar: msg.sender_id === userId || isReadOnly ? undefined : otherUser?.avatar,
       },
     }));
   };
@@ -1471,7 +1477,18 @@ const GiftedChatScreen = ({
   const renderAvatar = (props: any) => {
     const user = props.currentMessage?.user;
     if (user?._id === userId) return null;
-    
+
+    // Privacy: in read-only mode (other party unmatched us), do NOT show
+    // their actual photo and do NOT let the user tap to open their profile.
+    // Show an initials-only avatar instead.
+    if (isReadOnly) {
+      return (
+        <View>
+          <Avatar name={user?.name || 'U'} size={36} imageUrl={undefined} />
+        </View>
+      );
+    }
+
     return (
       <TouchableOpacity onPress={() => setShowProfile(true)}>
         <Avatar name={user?.name || 'U'} size={36} imageUrl={user?.avatar} />
@@ -1759,13 +1776,16 @@ const GiftedChatScreen = ({
         </View>
       </Modal>
 
-      {/* Profile Sheet */}
-      <ProfileBottomSheet
-        visible={showProfile}
-        onClose={() => setShowProfile(false)}
-        userId={otherUserId}
-        userName={otherUser?.name || 'Unknown'}
-      />
+      {/* Profile Sheet — never shown for read-only/unmatched conversations
+          to fully protect the privacy of the user who unmatched. */}
+      {!isReadOnly && (
+        <ProfileBottomSheet
+          visible={showProfile}
+          onClose={() => setShowProfile(false)}
+          userId={otherUserId}
+          userName={otherUser?.name || 'Unknown'}
+        />
+      )}
 
       {/* Did You Meet Modal */}
       <DidYouMeetModal
