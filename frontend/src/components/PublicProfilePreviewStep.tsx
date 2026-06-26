@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, BORDER_RADIUS } from '../theme';
 import { ProfileData } from '../types';
 import { getPartialLocation } from '../utils/location';
+import { shadow } from '../utils/shadow';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_WIDTH = SCREEN_WIDTH - SPACING.l * 2;
@@ -397,11 +398,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.bgCard,
     borderRadius: BORDER_RADIUS.l,
     padding: SPACING.l,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 5,
+    ...shadow({ color: '#000', offsetY: 4, blur: 8, opacity: 0.2, elevation: 5 }),
   },
   cardHeader: {
     flexDirection: 'row',

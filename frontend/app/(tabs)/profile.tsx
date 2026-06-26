@@ -14,50 +14,15 @@ import { getPartialLocation, getSimplifiedLocation } from '../../src/utils/locat
 import { formatLocationForPrivacy } from '../../src/utils/locationFormatter';
 import { SharedHeader, ModeSwitcher, useAppMode } from '../../src/components/SharedHeader';
 import { PremiumProfileView } from '../../src/components/PremiumProfileView';
+import {
+  AVATAR_OPTIONS, GENDERS, RELATIONSHIP_INTENTS, PARTNER_PREFS, LANGUAGES,
+  MOVIE_FREQUENCIES, FILM_LANGUAGES, GENRES, RELIGIONS, MARITAL_STATUSES,
+  OTT_OPTIONS, FOOD_PREFS, SMOKING_OPTS, DRINKING_OPTS, EXERCISE_OPTS,
+  ZODIAC_SIGNS, PETS_OPTS, FAMILY_OPTS, SIBLINGS_OPTS, EDUCATION_OPTS,
+  TRAVEL_OPTS, WORK_OPTS, type EditModalType,
+} from '../../src/components/profile/constants';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
-
-// Avatar options
-const AVATAR_OPTIONS = [
-  { id: 'av1', color: '#E50914', icon: 'person' as const },
-  { id: 'av2', color: '#FFD700', icon: 'happy' as const },
-  { id: 'av3', color: '#4CAF50', icon: 'leaf' as const },
-  { id: 'av4', color: '#2196F3', icon: 'planet' as const },
-  { id: 'av5', color: '#9C27B0', icon: 'star' as const },
-  { id: 'av6', color: '#FF9800', icon: 'sunny' as const },
-];
-
-// Options for various fields
-const GENDERS = ['Man', 'Woman', 'Non-binary', 'Prefer not to say', 'Other'];
-const RELATIONSHIP_INTENTS = ['Casual', 'Friendship', 'Serious relationship', 'Exploring'];
-const PARTNER_PREFS = ['Men', 'Women', 'Anyone'];
-const LANGUAGES = ['English', 'Hindi', 'Telugu', 'Tamil', 'Kannada', 'Malayalam', 'Bengali', 'Marathi', 'Gujarati', 'Punjabi', 'Urdu'];
-const MOVIE_FREQUENCIES = ['More than twice a week', 'Twice a week', 'Once a week', 'Twice a month', 'Once a month', 'Rarely'];
-const FILM_LANGUAGES = ['Hindi', 'English', 'Telugu', 'Tamil', 'Malayalam', 'Kannada', 'Korean', 'Others'];
-const GENRES = ['Action', 'Romance', 'Comedy', 'Thriller', 'Horror', 'Sci-Fi', 'Drama', 'Documentary'];
-const RELIGIONS = ['Hindu', 'Muslim', 'Christian', 'Sikh', 'Buddhist', 'Jain', 'Atheist', 'Other', 'Prefer not to say'];
-const MARITAL_STATUSES = ['Single', 'Divorced', 'Widowed', 'Separated'];
-const OTT_OPTIONS = ['OTT Person', 'Theatre Person', 'Both OTT & Theatre', 'Neither'];
-const FOOD_PREFS = ['Vegetarian', 'Non-vegetarian', 'Vegan', 'Eggetarian', 'Jain'];
-const SMOKING_OPTS = ['Never', 'Socially', 'Regularly', 'Trying to quit'];
-const DRINKING_OPTS = ['Never', 'Socially', 'Regularly', 'Sober'];
-const EXERCISE_OPTS = ['Daily', 'Often', 'Sometimes', 'Never'];
-const ZODIAC_SIGNS = ['Aries', 'Taurus', 'Gemini', 'Cancer', 'Leo', 'Virgo', 'Libra', 'Scorpio', 'Sagittarius', 'Capricorn', 'Aquarius', 'Pisces'];
-const PETS_OPTS = ['Dog lover', 'Cat lover', 'Both', 'No pets', 'Other'];
-const FAMILY_OPTS = ['Want kids', "Don't want kids", 'Open to kids', 'Have kids'];
-const SIBLINGS_OPTS = ['Only child', 'Have siblings'];
-const EDUCATION_OPTS = ['High School', "Bachelor's", "Master's", 'PhD', 'Other'];
-const TRAVEL_OPTS = ['Frequently', 'Occasionally', 'Rarely', 'Never'];
-const WORK_OPTS = ['IT/Software', 'Business Owner', 'Lawyer', 'Teacher', 'Others'];
-
-type EditModalType = 
-  | 'avatar' | 'name' | 'gender' | 'location' | 'bio'
-  | 'relationshipIntent' | 'partnerPreference' | 'languagesSpoken'
-  | 'movieFrequency' | 'ottTheatre' | 'filmLanguages' | 'genres'
-  | 'height' | 'religion' | 'maritalStatus' | 'foodPreference'
-  | 'smoking' | 'drinking' | 'exercise' | 'zodiac' | 'pets'
-  | 'familyPlanning' | 'siblings' | 'education' | 'travel' | 'workProfile'
-  | 'topMovies' | null;
 
 // Single Select Modal
 function SingleSelectModal({

@@ -10,6 +10,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePathname } from 'expo-router';
 import { useTina } from '../context/TinaContext';
+import { shadow } from '../utils/shadow';
 
 // Tina avatar
 const TINA_AVATAR = 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&h=200&fit=crop&crop=face';
@@ -141,11 +142,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#1A1A1A',
-    shadowColor: '#FF6B6B',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    elevation: 10,
+    ...shadow({ color: '#FF6B6B', offsetY: 4, blur: 12, opacity: 0.4, elevation: 10 }),
   },
   glowOuter: {
     position: 'absolute',

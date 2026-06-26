@@ -8,6 +8,7 @@ import Animated, {
   Easing, withSequence,
 } from 'react-native-reanimated';
 import { COLORS, SPACING, BORDER_RADIUS } from '../src/theme';
+import { shadow } from '../src/utils/shadow';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -164,11 +165,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: SPACING.s,
-    shadowColor: COLORS.primary,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.5,
-    shadowRadius: 20,
-    elevation: 10,
+    ...shadow({ color: COLORS.primary, offsetX: 0, offsetY: 0, blur: 20, opacity: 0.5, elevation: 10 }),
   },
   enterBtnText: {
     fontSize: 18,
@@ -199,9 +196,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(139,0,0,0.9)',
     borderRightWidth: 1,
     borderRightColor: 'rgba(100,0,0,0.5)',
-    shadowColor: '#000',
-    shadowOffset: { width: 2, height: 0 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
+    ...shadow({ color: '#000', offsetX: 2, offsetY: 0, blur: 4, opacity: 0.3 }),
   },
 });

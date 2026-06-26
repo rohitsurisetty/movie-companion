@@ -19,8 +19,8 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { getUserId, useUserStore } from '../src/store';
+import { Avatar } from '../src/components/Avatar';
 
 const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -64,28 +64,7 @@ interface MatchHistoryItem {
   meeting_status: string | null;
 }
 
-// Avatar Component
-const Avatar = ({ name, size = 50, imageUrl }: { name: string; size?: number; imageUrl?: string | null }) => {
-  if (imageUrl && imageUrl.startsWith('http')) {
-    return (
-      <Image 
-        source={{ uri: imageUrl }} 
-        style={{ width: size, height: size, borderRadius: size / 2 }}
-      />
-    );
-  }
-  
-  return (
-    <LinearGradient 
-      colors={[COLORS.primary, '#FF6B6B']} 
-      style={{ width: size, height: size, borderRadius: size / 2, alignItems: 'center', justifyContent: 'center' }}
-    >
-      <Text style={{ color: '#FFF', fontSize: size * 0.4, fontWeight: 'bold' }}>
-        {name?.charAt(0).toUpperCase() || '?'}
-      </Text>
-    </LinearGradient>
-  );
-};
+// Avatar Component → shared at src/components/Avatar.tsx
 
 // Format timestamp
 const formatDate = (dateStr: string | null) => {
@@ -145,6 +124,8 @@ const HistoryItem = ({
       onPress={onPress}
       activeOpacity={0.7}
       disabled={userUnmatched}
+      testID={`history-row-${item.other_user_id}`}
+      accessibilityLabel={`Match history row for ${item.other_user_name}`}
     >
       <View style={styles.historyAvatar}>
         {/* Show avatar for active matches or if user was unmatched by other */}
@@ -599,24 +580,24 @@ const ActiveMatchActionSheet = ({
         <View style={[styles.actionSheetContainer, { paddingBottom: insets.bottom + 16 }]}>
           <View style={styles.actionSheetHandle} />
           
-          <TouchableOpacity style={styles.actionSheetItem} onPress={() => { onClose(); onGoToChat(); }}>
+          <TouchableOpacity style={styles.actionSheetItem} onPress={() => { onClose(); onGoToChat(); }} testID="active-action-go-to-chat">
             <Ionicons name="chatbubble-outline" size={24} color={COLORS.text} />
             <Text style={styles.actionSheetText}>Go to Chat</Text>
           </TouchableOpacity>
           
-          <TouchableOpacity style={styles.actionSheetItem} onPress={() => { onClose(); onViewProfile(); }}>
+          <TouchableOpacity style={styles.actionSheetItem} onPress={() => { onClose(); onViewProfile(); }} testID="active-action-view-profile">
             <Ionicons name="person-outline" size={24} color={COLORS.text} />
             <Text style={styles.actionSheetText}>View Profile</Text>
           </TouchableOpacity>
           
           <View style={styles.actionSheetDivider} />
           
-          <TouchableOpacity style={styles.actionSheetItem} onPress={() => { onClose(); onDidYouMeet(); }}>
+          <TouchableOpacity style={styles.actionSheetItem} onPress={() => { onClose(); onDidYouMeet(); }} testID="active-action-did-you-meet">
             <Ionicons name="cafe-outline" size={24} color={COLORS.text} />
             <Text style={styles.actionSheetText}>Did you meet?</Text>
           </TouchableOpacity>
           
-          <TouchableOpacity style={styles.actionSheetItem} onPress={() => { onClose(); onReport(); }}>
+          <TouchableOpacity style={styles.actionSheetItem} onPress={() => { onClose(); onReport(); }} testID="active-action-report">
             <Ionicons name="flag-outline" size={24} color={COLORS.primary} />
             <Text style={[styles.actionSheetText, { color: COLORS.primary }]}>Report</Text>
           </TouchableOpacity>
@@ -663,19 +644,19 @@ const UnmatchedActionSheet = ({
             </Text>
           </View>
           
-          <TouchableOpacity style={styles.actionSheetItem} onPress={() => { onClose(); onViewChat(); }}>
+          <TouchableOpacity style={styles.actionSheetItem} onPress={() => { onClose(); onViewChat(); }} testID="unmatched-action-view-chat">
             <Ionicons name="chatbubbles-outline" size={24} color={COLORS.text} />
             <Text style={styles.actionSheetText}>View Chat (Read-only)</Text>
           </TouchableOpacity>
           
           <View style={styles.actionSheetDivider} />
           
-          <TouchableOpacity style={styles.actionSheetItem} onPress={() => { onClose(); onDidYouMeet(); }}>
+          <TouchableOpacity style={styles.actionSheetItem} onPress={() => { onClose(); onDidYouMeet(); }} testID="unmatched-action-did-you-meet">
             <Ionicons name="cafe-outline" size={24} color={COLORS.text} />
             <Text style={styles.actionSheetText}>Did you meet?</Text>
           </TouchableOpacity>
           
-          <TouchableOpacity style={styles.actionSheetItem} onPress={() => { onClose(); onReport(); }}>
+          <TouchableOpacity style={styles.actionSheetItem} onPress={() => { onClose(); onReport(); }} testID="unmatched-action-report">
             <Ionicons name="flag-outline" size={24} color={COLORS.primary} />
             <Text style={[styles.actionSheetText, { color: COLORS.primary }]}>Report</Text>
           </TouchableOpacity>

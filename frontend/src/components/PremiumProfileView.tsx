@@ -181,7 +181,7 @@ const PhotoCarousel = ({
 
       {/* Tap hint areas - visual feedback for navigation */}
       {photoList.length > 1 && (
-        <View style={carouselStyles.tapHintContainer} pointerEvents="none">
+        <View style={[carouselStyles.tapHintContainer, { pointerEvents: 'none' as const }]}>
           {currentIndex > 0 && (
             <View style={carouselStyles.tapHintLeft}>
               <Ionicons name="chevron-back" size={24} color="rgba(255,255,255,0.5)" />
@@ -213,8 +213,7 @@ const PhotoCarousel = ({
       {/* Bottom Gradient */}
       <LinearGradient
         colors={['transparent', 'rgba(0,0,0,0.4)', 'rgba(10,10,10,1)']}
-        style={carouselStyles.gradient}
-        pointerEvents="none"
+        style={[carouselStyles.gradient, { pointerEvents: 'none' as const }]}
       />
     </View>
   );
@@ -531,9 +530,8 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
       <Animated.View 
         style={[
           styles.floatingHeader, 
-          { top: insets.top + 12, opacity: floatingHeaderOpacity }
+          { top: insets.top + 12, opacity: floatingHeaderOpacity, pointerEvents: showStickyHeader ? 'none' : 'auto' }
         ]}
-        pointerEvents={showStickyHeader ? 'none' : 'auto'}
       >
         <TouchableOpacity style={styles.headerButton} onPress={onClose}>
           <Ionicons name="chevron-down" size={26} color="#FFF" />
@@ -550,9 +548,9 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
             top: insets.top, 
             opacity: stickyHeaderOpacity,
             backgroundColor: COLORS.bg,
+            pointerEvents: showStickyHeader ? 'auto' : 'none',
           },
         ]}
-        pointerEvents={showStickyHeader ? 'auto' : 'none'}
       >
         <TouchableOpacity style={styles.stickyBackBtn} onPress={onClose}>
           <Ionicons name="chevron-down" size={22} color={COLORS.text} />

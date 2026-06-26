@@ -10,6 +10,7 @@ import MultiSlider from '@ptomasroos/react-native-multi-slider';
 import { COLORS, SPACING, BORDER_RADIUS } from '../src/theme';
 import { FiltersData, initialFiltersData, FilterSection, HeightFilter, AgeFilter } from '../src/types';
 import { saveFilters, getFilters } from '../src/store';
+import { shadow } from '../src/utils/shadow';
 
 const MAX_KM = 500;
 const ITEM_HEIGHT = 44;
@@ -161,11 +162,7 @@ const rangeSliderStyles = StyleSheet.create({
     borderColor: COLORS.primary,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 5,
+    ...shadow({ color: '#000', offsetY: 2, blur: 4, opacity: 0.25, elevation: 5 }),
   },
   markerInner: {
     width: 8,

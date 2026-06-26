@@ -2909,8 +2909,14 @@ async def api_set_meeting_status(req: MeetingStatusRequest):
 
 
 @api_router.post("/chat/read/{conversation_id}")
-async def api_mark_read(conversation_id: str, user_id: str):
+async def api_mark_read(conversation_id: str, user_id: str = ""):
     """Mark messages as read"""
+    # Guard: user_id must be a non-empty string. Previously a missing/empty
+    # value caused a 500 deep inside the Mongo update path.
+    if not user_id or not user_id.strip():
+        raise HTTPException(status_code=400, detail="user_id query parameter is required")
+    if not conversation_id or not conversation_id.strip():
+        raise HTTPException(status_code=400, detail="conversation_id is required")
     try:
         success = await mark_messages_read(user_id, conversation_id)
         return {"success": success}

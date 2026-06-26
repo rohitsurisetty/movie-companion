@@ -23,6 +23,7 @@ import { saveSwipeState, getSwipeState, getFilters, getProfile, clearAll } from 
 import { useAppMode, ModeSwitcher } from '../../src/components/SharedHeader';
 import InAppProfilePreview from '../../src/components/InAppProfilePreview';
 import { formatLocationForPrivacy } from '../../src/utils/locationFormatter';
+import { shadow } from '../../src/utils/shadow';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const CARD_WIDTH = SCREEN_WIDTH * 0.88;
@@ -254,11 +255,7 @@ function MovieDetailsBottomSheet({
 
 const detailStyles = StyleSheet.create({
   bottomSheet: { 
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 5,
+    ...shadow({ color: '#000', offsetY: -4, blur: 4, opacity: 0.25, elevation: 5 }),
   },
   handleArea: { 
     alignItems: 'center', 
@@ -1626,11 +1623,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 12,
     borderRadius: BORDER_RADIUS.full,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 5,
+    ...shadow({ color: '#000', offsetY: 2, blur: 4, opacity: 0.25, elevation: 5 }),
   },
   undoToastText: { fontSize: 14, fontWeight: '600' },
 });

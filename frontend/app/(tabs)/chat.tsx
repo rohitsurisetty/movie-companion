@@ -12,6 +12,8 @@ import { GiftedChat, Bubble, InputToolbar, Send, Composer, IMessage, MessageImag
 import { useAppMode } from '../../src/components/SharedHeader';
 import { getUserId, useUserStore } from '../../src/store';
 import { formatLocationForPrivacy } from '../../src/utils/locationFormatter';
+import { Avatar } from '../../src/components/Avatar';
+import { UNMATCH_REASONS, REPORT_REASONS } from '../../src/components/chat/constants';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
@@ -90,27 +92,7 @@ interface BackendMessage {
 }
 
 // ============ AVATAR COMPONENT ============
-const Avatar = ({ name, size = 50, imageUrl }: { name: string; size?: number; imageUrl?: string }) => {
-  if (imageUrl && imageUrl.startsWith('http')) {
-    return (
-      <Image 
-        source={{ uri: imageUrl }} 
-        style={{ width: size, height: size, borderRadius: size / 2 }}
-      />
-    );
-  }
-  
-  return (
-    <LinearGradient 
-      colors={[COLORS.primary, '#FF6B6B']} 
-      style={[styles.avatar, { width: size, height: size, borderRadius: size / 2 }]}
-    >
-      <Text style={[styles.avatarText, { fontSize: size * 0.4 }]}>
-        {name?.charAt(0).toUpperCase() || '?'}
-      </Text>
-    </LinearGradient>
-  );
-};
+// Shared Avatar lives in src/components/Avatar.tsx now.
 
 // ============ PROFILE BOTTOM SHEET ============
 const ProfileBottomSheet = ({ 
@@ -791,28 +773,10 @@ const ComingSoonModal = ({
 );
 
 // ============ UNMATCH REASONS ============
-const UNMATCH_REASONS = [
-  { id: 'not_interesting', label: 'Conversation not interesting', icon: 'chatbubble-ellipses-outline' },
-  { id: 'not_my_type', label: 'Not my type', icon: 'heart-dislike-outline' },
-  { id: 'different_expectations', label: 'Different expectations', icon: 'git-compare-outline' },
-  { id: 'found_someone', label: 'Found someone else', icon: 'people-outline' },
-  { id: 'not_active', label: 'Not active enough', icon: 'time-outline' },
-  { id: 'other', label: 'Other', icon: 'ellipsis-horizontal-outline' },
-];
+// Moved to src/components/chat/constants.ts (UNMATCH_REASONS)
 
 // ============ REPORT REASONS ============
-const REPORT_REASONS = [
-  { id: 'fake_profile', label: 'Fake profile', icon: 'person-remove-outline' },
-  { id: 'spam_scam', label: 'Spam or scam', icon: 'warning-outline' },
-  { id: 'harassment', label: 'Harassment', icon: 'hand-left-outline' },
-  { id: 'sexual_content', label: 'Sexual content', icon: 'eye-off-outline' },
-  { id: 'inappropriate', label: 'Inappropriate behaviour', icon: 'alert-circle-outline' },
-  { id: 'hate_speech', label: 'Hate speech', icon: 'megaphone-outline' },
-  { id: 'underage', label: 'Underage user', icon: 'shield-outline' },
-  { id: 'safety_concern', label: 'Safety concern', icon: 'fitness-outline' },
-  { id: 'offline_misconduct', label: 'Offline misconduct', icon: 'location-outline' },
-  { id: 'other', label: 'Other', icon: 'ellipsis-horizontal-outline' },
-];
+// Moved to src/components/chat/constants.ts (REPORT_REASONS)
 
 // ============ PROFESSIONAL UNMATCH MODAL ============
 const UnmatchModal = ({
@@ -1296,8 +1260,10 @@ const GiftedChatScreen = ({
         const giftedMessages = convertToGiftedMessages(data.messages || []);
         setMessages(giftedMessages);
         
-        // Mark as read
-        await fetch(`${API_BASE}/api/chat/read/${conversation.conversation_id}?user_id=${userId}`, { method: 'POST' });
+        // Mark as read (only if we actually have a userId — avoid 400/500)
+        if (userId) {
+          await fetch(`${API_BASE}/api/chat/read/${conversation.conversation_id}?user_id=${encodeURIComponent(userId)}`, { method: 'POST' });
+        }
         
         // Fetch suggestions if there are messages
         if (data.messages && data.messages.length > 0) {

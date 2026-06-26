@@ -13,6 +13,7 @@ import { getUserId } from '../../src/store';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { formatLocationForPrivacy } from '../../src/utils/locationFormatter';
 import { PremiumProfileView } from '../../src/components/PremiumProfileView';
+import { shadow } from '../../src/utils/shadow';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const TILE_GAP = 12;
@@ -1288,11 +1289,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderRadius: 16,
     gap: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 5,
+    ...shadow({ color: '#000', offsetY: 4, blur: 8, opacity: 0.3, elevation: 5 }),
     borderWidth: 1,
     borderColor: 'rgba(0, 210, 106, 0.3)',
   },
