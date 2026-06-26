@@ -1,0 +1,40 @@
+{
+  "summary": "PASSED. Both new prototype endpoints verified on the public preview URL (https://match-history-dev.preview.emergentagent.com). 12/12 pytest tests pass in /app/backend/tests/test_prototype_v1.py. (1) GET /api/prototype/v1 → 200, Content-Type: text/html; charset=utf-8, body begins with <!DOCTYPE html>, contains 'Film Companion · Prototype V1' title and data-name=\"Welcome\" screen label, NO Content-Disposition header. (2) GET /api/prototype/v1/download → 200, Content-Type: text/html; charset=utf-8, Content-Disposition: attachment; filename=\"Film_Companion_Prototype_V1.html\", body matches /app/Film_Companion_Prototype_V1.html byte-for-byte (86,697 bytes, SHA256 verified). FINDING (infrastructure, NOT a backend bug): the public Cloudflare-fronted ingress injects a ~919-byte bot-detection script before </body> into HTML responses that do NOT have Content-Disposition: attachment. So the public inline-view response is 87,616 bytes vs the 86,697 disk file. Verified by hitting the internal port 8001 directly — both endpoints return exactly 86,697 bytes there matching disk. The download endpoint is unaffected by this injection (Cloudflare skips attachment responses), so the user-facing share-with-investors flow works correctly: the downloaded .html file is byte-identical to the source on disk. Inline view still renders fully (CDN injects only an extra invisible iframe script, doesn't strip or alter the original markup).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/prototype/v1", "issue": "Inline-view response is rewritten by the Cloudflare ingress (+919 bytes of bot-detection script appended before </body>). Original file content is fully preserved and the page renders correctly, but the response body is no longer byte-identical to disk on the public URL. This is environment-level, not a code bug — the download endpoint is unaffected because attachment responses bypass the CDN rewrite. No action required."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_prototype_v1.py",
+    "/app/test_reports/pytest/pytest_prototype_v1.xml"
+  ],
+  "action_items": [
+    "None — both endpoints work as specified. Safe to share the URLs with investors/colleagues.",
+    "Optional (informational only): mention to the user that the inline-view URL passes through Cloudflare and has a ~1KB invisible bot-detection script injected, but the /download URL delivers the file bit-perfect."
+  ],
+  "critical_code_review_comments": [
+    "server.py:392-411 — clean implementation. FileResponse handles streaming, ETag, range requests automatically. media_type='text/html' explicit, filename param on the download endpoint produces correct Content-Disposition: attachment header.",
+    "Minor: the `import os` is duplicated inside both endpoint functions (lines 395 and 404). Pull it to module top to follow the rest of server.py. Non-blocking.",
+    "Both endpoints are public (no auth). Acceptable given the intent (sharing a static prototype), but worth flagging since /api/* usually implies authenticated context in this app."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_prototype_v1.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (12/12 prototype-endpoint tests pass)",
+    "frontend": "N/A — backend-only scope per request"
+  },
+  "seed_data_creation": "None — endpoints serve a static file from disk.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Public ingress URL: EXPO_PUBLIC_BACKEND_URL=https://match-history-dev.preview.emergentagent.com. Note that ANY HTML response served without Content-Disposition: attachment will get ~919 bytes of Cloudflare bot-detection JS appended before </body> on the public URL. Internal localhost:8001 is clean. Reusable tests at /app/backend/tests/test_prototype_v1.py.",
+  "rca_of_issue": "N/A — no bug. The two initial test failures (length mismatch on view endpoint, view-vs-download body mismatch) were caused by Cloudflare CDN injection on the public ingress, not by the backend. Confirmed by direct-to-localhost:8001 fetch which returns exactly 86,697 bytes matching the disk file SHA256 on both endpoints. Tests were tightened to accept the CDN injection on the inline endpoint while still asserting the full original file content is present, and still requiring byte-perfect disk match on the download endpoint (which IS untouched by the CDN). All 12 tests now pass."
+}

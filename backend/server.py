@@ -1,4 +1,5 @@
 from fastapi import FastAPI, APIRouter, Request, Response, HTTPException, BackgroundTasks
+from fastapi.responses import FileResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -382,6 +383,32 @@ class FiltersRequest(BaseModel):
 @api_router.get("/")
 async def root():
     return {"message": "Film Companion API"}
+
+
+# ============ PROTOTYPE V1 - Static HTML prototype for investors/colleagues ============
+PROTOTYPE_V1_PATH = "/app/Film_Companion_Prototype_V1.html"
+
+
+@api_router.get("/prototype/v1")
+async def serve_prototype_v1():
+    """Serve the Film Companion V1 prototype HTML inline (opens in browser)."""
+    import os
+    if not os.path.exists(PROTOTYPE_V1_PATH):
+        raise HTTPException(status_code=404, detail="Prototype not found")
+    return FileResponse(PROTOTYPE_V1_PATH, media_type="text/html")
+
+
+@api_router.get("/prototype/v1/download")
+async def download_prototype_v1():
+    """Force-download the Film Companion V1 prototype HTML."""
+    import os
+    if not os.path.exists(PROTOTYPE_V1_PATH):
+        raise HTTPException(status_code=404, detail="Prototype not found")
+    return FileResponse(
+        PROTOTYPE_V1_PATH,
+        media_type="text/html",
+        filename="Film_Companion_Prototype_V1.html",
+    )
 
 
 @api_router.post("/auth/session")
