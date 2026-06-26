@@ -733,7 +733,12 @@ export default function HistoryScreen() {
       });
     } catch (error) {
       console.error('Error submitting report:', error);
-      Alert.alert('Error', 'Could not submit report. Please try again.');
+      showAlert({
+        title: 'Error',
+        message: 'Could not submit report. Please try again.',
+        iconName: 'alert-circle-outline',
+        iconColor: COLORS.primary,
+      });
     }
   };
   
@@ -782,13 +787,23 @@ export default function HistoryScreen() {
           setHistory((prev) => prev.filter((h) => h.conversation_id !== item.conversation_id));
           setDeleteConfirmItem(null);
         } else {
-          Alert.alert('Error', 'Could not delete chat history. Please try again.');
+          showAlert({
+            title: 'Error',
+            message: 'Could not delete chat history. Please try again.',
+            iconName: 'alert-circle-outline',
+            iconColor: COLORS.primary,
+          });
           setDeleteConfirmItem(null);
         }
       }
     } catch (err) {
       console.error('Delete chat history error:', err);
-      Alert.alert('Error', 'Could not delete chat history. Please try again.');
+      showAlert({
+        title: 'Error',
+        message: 'Could not delete chat history. Please try again.',
+        iconName: 'alert-circle-outline',
+        iconColor: COLORS.primary,
+      });
       setDeleteConfirmItem(null);
     } finally {
       setDeletingChat(false);
@@ -798,32 +813,46 @@ export default function HistoryScreen() {
   // Dev-only helper to seed mock unmatched conversations (Anjali + Priya)
   const handleSeedMockData = async () => {
     if (!userId) return;
-    Alert.alert(
-      'Seed Test Data',
-      'This will create two mock unmatched conversations (Anjali Iyer & Priya Bhatia) with chat history. Continue?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Seed',
-          onPress: async () => {
-            try {
-              const res = await fetch(`${API_BASE}/api/dev/seed-unmatched-mocks/${userId}`, {
-                method: 'POST',
-              });
-              if (res.ok) {
-                await fetchHistory(userId);
-                Alert.alert('Done', 'Mock data seeded. Pull to refresh if you don\'t see it.');
-              } else {
-                Alert.alert('Error', 'Could not seed mock data.');
-              }
-            } catch (e) {
-              console.error('Seed error', e);
-              Alert.alert('Error', 'Could not seed mock data.');
-            }
-          },
-        },
-      ],
-    );
+    showAlert({
+      title: 'Seed Test Data',
+      message:
+        'This will create two mock unmatched conversations (Anjali Iyer & Priya Bhatia) with chat history. Continue?',
+      confirmText: 'Seed',
+      cancelText: 'Cancel',
+      iconName: 'flask-outline',
+      iconColor: COLORS.warning,
+      onConfirm: async () => {
+        try {
+          const res = await fetch(`${API_BASE}/api/dev/seed-unmatched-mocks/${userId}`, {
+            method: 'POST',
+          });
+          if (res.ok) {
+            await fetchHistory(userId);
+            showAlert({
+              title: 'Done',
+              message: "Mock data seeded. Pull to refresh if you don't see it.",
+              iconName: 'checkmark-circle-outline',
+              iconColor: COLORS.success || '#4CAF50',
+            });
+          } else {
+            showAlert({
+              title: 'Error',
+              message: 'Could not seed mock data.',
+              iconName: 'alert-circle-outline',
+              iconColor: COLORS.primary,
+            });
+          }
+        } catch (e) {
+          console.error('Seed error', e);
+          showAlert({
+            title: 'Error',
+            message: 'Could not seed mock data.',
+            iconName: 'alert-circle-outline',
+            iconColor: COLORS.primary,
+          });
+        }
+      },
+    });
   };
 
   return (
@@ -878,7 +907,6 @@ export default function HistoryScreen() {
         visible={showActiveActions}
         onClose={() => { setShowActiveActions(false); setSelectedItem(null); }}
         onGoToChat={handleGoToChat}
-        onViewProfile={handleViewProfile}
         onReport={handleOpenReportModal}
         onDidYouMeet={handleDidYouMeet}
         onDeleteFromHistory={handleDeleteFromHistory}
@@ -911,14 +939,68 @@ export default function HistoryScreen() {
         conversationId={selectedItem?.conversation_id || ''}
         userId={userId}
       />
-      
-      {/* Profile View Modal */}
-      <ProfileViewModal
-        visible={showProfileModal}
-        onClose={() => { setShowProfileModal(false); setSelectedItem(null); }}
-        userId={selectedItem?.other_user_id || ''}
-        userName={selectedItem?.other_user_name || ''}
-      />
+
+      {/* Cross-platform Alert Modal (replaces Alert.alert which is a no-op on web) */}
+      <Modal
+        visible={alertModal.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={closeAlert}
+      >
+        <Pressable style={styles.deleteConfirmOverlay} onPress={closeAlert}>
+          <Pressable style={styles.deleteConfirmCard} onPress={() => { /* swallow */ }}>
+            {alertModal.iconName ? (
+              <View style={styles.deleteConfirmIcon}>
+                <Ionicons
+                  name={alertModal.iconName}
+                  size={32}
+                  color={alertModal.iconColor || COLORS.primary}
+                />
+              </View>
+            ) : null}
+            <Text style={styles.deleteConfirmTitle}>{alertModal.title}</Text>
+            <Text style={styles.deleteConfirmBody}>{alertModal.message}</Text>
+            <View style={styles.deleteConfirmButtons}>
+              {alertModal.onConfirm ? (
+                <>
+                  <TouchableOpacity
+                    style={[styles.deleteConfirmBtn, styles.deleteConfirmBtnCancel]}
+                    onPress={closeAlert}
+                    testID="alert-modal-cancel"
+                  >
+                    <Text style={styles.deleteConfirmBtnCancelText}>
+                      {alertModal.cancelText || 'Cancel'}
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.deleteConfirmBtn, styles.deleteConfirmBtnConfirm]}
+                    onPress={async () => {
+                      const fn = alertModal.onConfirm;
+                      closeAlert();
+                      if (fn) await fn();
+                    }}
+                    testID="alert-modal-confirm"
+                  >
+                    <Text style={styles.deleteConfirmBtnConfirmText}>
+                      {alertModal.confirmText || 'OK'}
+                    </Text>
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <TouchableOpacity
+                  style={[styles.deleteConfirmBtn, styles.deleteConfirmBtnConfirm, { flex: 1 }]}
+                  onPress={closeAlert}
+                  testID="alert-modal-ok"
+                >
+                  <Text style={styles.deleteConfirmBtnConfirmText}>
+                    {alertModal.confirmText || 'OK'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {/* Cross-platform Delete Confirmation Modal */}
       <Modal
