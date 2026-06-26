@@ -9922,3 +9922,30 @@ agent_communication:
             - /app/frontend/app/history.tsx (action sheets + handlers)
             - /app/backend/server.py (~3076 api_delete_chat)
             - /app/backend/chat_service.py (delete_chat_history, get_match_history filter)
+
+      - working: true
+        agent: "testing"
+        comment: |
+          ✅ VERIFIED END-TO-END (June 26, 2026 — iteration_7)
+          
+          Backend: 8/8 pytest in /app/backend/tests/test_chat_delete.py PASS.
+          
+          Frontend (Expo web preview, 390x844, testuser@example.com):
+          - Cross-platform confirmation Modal replaces broken Alert.alert on RN-Web.
+          - Action sheet items now have proper test IDs:
+            * unmatched-action-delete-history
+            * active-action-delete-history
+            * delete-confirm-cancel / delete-confirm-confirm
+          - Cancel: closes modal, row preserved.
+          - Confirm: exactly one `POST /api/chat/delete` (200 OK), row removed
+            from FlatList immediately. Backend logs confirmed.
+          - Page reload: deleted row absent from /api/user/match-history.
+            Other rows (Priya + active matches) intact.
+          - View Profile fix verified by code review — handleViewProfile no
+            longer races with selectedItem clearing.
+          
+          NO BLOCKERS. Minor optional follow-ups (out of scope):
+          - Other Alert.alert call sites in history.tsx (error paths) silently
+            no-op on web.
+          - POST /api/chat/delete returns 400 on re-delete (non-idempotent);
+            frontend tolerates this.
