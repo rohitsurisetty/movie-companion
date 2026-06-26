@@ -37,14 +37,14 @@ MOCK_USERS = [
     {
         "user_id": "mock_user_001",
         "name": "Priya Sharma",
-        "age": 26,
+        "age": 24,
         "gender": "Female",
         "location": "Mumbai",
         "avatar": "av2",
-        "profile_picture": "https://images.pexels.com/photos/17533630/pexels-photo-17533630.jpeg?w=400&h=600&fit=crop",
+        "profile_picture": "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=400&h=600&fit=crop",
         "pictures": [
-            "https://images.pexels.com/photos/17533630/pexels-photo-17533630.jpeg?w=400&h=600&fit=crop",
-            "https://images.pexels.com/photos/33265568/pexels-photo-33265568.jpeg?w=400&h=600&fit=crop"
+            "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=400&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400&h=600&fit=crop"
         ],
         "bio": "Film enthusiast who believes a good movie is the best first date. Looking for someone who appreciates storytelling as much as I do.",
         "partnerPreference": "Men",
@@ -112,14 +112,14 @@ MOCK_USERS = [
     {
         "user_id": "mock_user_003",
         "name": "Ananya Reddy",
-        "age": 26,
+        "age": 23,
         "gender": "Female",
         "location": "Bangalore",
         "avatar": "av3",
-        "profile_picture": "https://images.pexels.com/photos/29553412/pexels-photo-29553412.jpeg?w=400&h=600&fit=crop",
+        "profile_picture": "https://images.unsplash.com/photo-1618590067690-2db34a87750a?w=400&h=600&fit=crop",
         "pictures": [
-            "https://images.pexels.com/photos/29553412/pexels-photo-29553412.jpeg?w=400&h=600&fit=crop",
-            "https://images.pexels.com/photos/31521632/pexels-photo-31521632.jpeg?w=400&h=600&fit=crop"
+            "https://images.unsplash.com/photo-1618590067690-2db34a87750a?w=400&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1580489944761-15a19d654956?w=400&h=600&fit=crop"
         ],
         "bio": "Indie film lover. Give me a slow-burn drama over a blockbuster any day. Currently obsessed with A24 films.",
         "partnerPreference": "Men",
@@ -187,14 +187,14 @@ MOCK_USERS = [
     {
         "user_id": "mock_user_005",
         "name": "Neha Gupta",
-        "age": 27,
+        "age": 24,
         "gender": "Female",
         "location": "Pune",
         "avatar": "av5",
-        "profile_picture": "https://images.pexels.com/photos/14994313/pexels-photo-14994313.jpeg?w=400&h=600&fit=crop",
+        "profile_picture": "https://images.unsplash.com/photo-1583183639754-7e992e58e0df?w=400&h=600&fit=crop",
         "pictures": [
-            "https://images.pexels.com/photos/14994313/pexels-photo-14994313.jpeg?w=400&h=600&fit=crop",
-            "https://images.unsplash.com/photo-1706943262473-fc393f495501?w=400&h=600&fit=crop"
+            "https://images.unsplash.com/photo-1583183639754-7e992e58e0df?w=400&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1573911932098-5e3e90f59f15?w=400&h=600&fit=crop"
         ],
         "bio": "Horror movie addict who watches scary films alone at midnight. Need a movie buddy who won't judge my screaming!",
         "partnerPreference": "Men",
@@ -262,14 +262,14 @@ MOCK_USERS = [
     {
         "user_id": "mock_user_007",
         "name": "Sanjana Iyer",
-        "age": 25,
+        "age": 23,
         "gender": "Female",
         "location": "Hyderabad",
         "avatar": "av2",
-        "profile_picture": "https://images.unsplash.com/flagged/photo-1551854716-8b811be39e7e?w=400&h=600&fit=crop",
+        "profile_picture": "https://images.pexels.com/photos/2116230/pexels-photo-2116230.jpeg?w=400&h=600&fit=crop",
         "pictures": [
-            "https://images.unsplash.com/flagged/photo-1551854716-8b811be39e7e?w=400&h=600&fit=crop",
-            "https://images.unsplash.com/photo-1580489944761-15a19d654956?w=400&h=600&fit=crop"
+            "https://images.pexels.com/photos/2116230/pexels-photo-2116230.jpeg?w=400&h=600&fit=crop",
+            "https://images.pexels.com/photos/17188444/pexels-photo-17188444.jpeg?w=400&h=600&fit=crop"
         ],
         "bio": "K-drama convert who still loves Tollywood. Weekends are for binge-watching. Looking for someone to share popcorn and theories with!",
         "partnerPreference": "Men",
@@ -337,14 +337,14 @@ MOCK_USERS = [
     {
         "user_id": "mock_user_009",
         "name": "Meera Nair",
-        "age": 28,
+        "age": 24,
         "gender": "Female",
         "location": "Kochi",
         "avatar": "av3",
-        "profile_picture": "https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?w=400&h=600&fit=crop",
+        "profile_picture": "https://images.pexels.com/photos/1310522/pexels-photo-1310522.jpeg?w=400&h=600&fit=crop",
         "pictures": [
-            "https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?w=400&h=600&fit=crop",
-            "https://images.unsplash.com/photo-1706943262459-3ef6ce03305c?w=400&h=600&fit=crop"
+            "https://images.pexels.com/photos/1310522/pexels-photo-1310522.jpeg?w=400&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1552699611-e2c208d5d9cf?w=400&h=600&fit=crop"
         ],
         "bio": "Malayalam cinema fan who also loves French New Wave. Yes, I watch films with subtitles by choice. Cinephile looking for fellow film buff.",
         "partnerPreference": "Men",
@@ -412,14 +412,14 @@ MOCK_USERS = [
     {
         "user_id": "mock_user_011",
         "name": "Riya Patel",
-        "age": 26,
+        "age": 23,
         "gender": "Female",
         "location": "Ahmedabad",
         "avatar": "av5",
-        "profile_picture": "https://images.unsplash.com/photo-1729101143873-d80050bae219?w=400&h=600&fit=crop",
+        "profile_picture": "https://images.unsplash.com/photo-1585980516944-df4fcf837ea6?w=400&h=600&fit=crop",
         "pictures": [
-            "https://images.unsplash.com/photo-1729101143873-d80050bae219?w=400&h=600&fit=crop",
-            "https://images.unsplash.com/photo-1659293554631-d7a38642c5e3?w=400&h=600&fit=crop"
+            "https://images.unsplash.com/photo-1585980516944-df4fcf837ea6?w=400&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1611880147493-7542bdb0f024?w=400&h=600&fit=crop"
         ],
         "bio": "90s kid who grew up on FRIENDS and Bollywood. Love feel-good movies and romantic comedies. Looking for my lobster!",
         "partnerPreference": "Men",
@@ -487,10 +487,15 @@ MOCK_USERS = [
     {
         "user_id": "mock_user_013",
         "name": "Tanya Saxena",
-        "age": 24,
+        "age": 22,
         "gender": "Female",
         "location": "Jaipur",
         "avatar": "av2",
+        "profile_picture": "https://images.unsplash.com/photo-1554727242-741c14fa561c?w=400&h=600&fit=crop",
+        "pictures": [
+            "https://images.unsplash.com/photo-1554727242-741c14fa561c?w=400&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1592621385612-4d7129426394?w=400&h=600&fit=crop"
+        ],
         "bio": "New to dating apps! Love action movies and Marvel. Yes, I cried during Endgame. Looking for someone to watch movies with on lazy Sundays.",
         "partnerPreference": "Men",
         "relationshipIntent": ["Long-term relationship", "Something casual"],
@@ -557,13 +562,14 @@ MOCK_USERS = [
     {
         "user_id": "mock_user_015",
         "name": "Ishita Das",
-        "age": 27,
+        "age": 24,
         "gender": "Female",
         "location": "Kolkata",
         "avatar": "av3",
-        "profile_picture": "https://images.unsplash.com/photo-1706943262117-b35de4ba50b4?w=400&h=600&fit=crop",
+        "profile_picture": "https://images.unsplash.com/photo-1524686599807-08a16b19fefd?w=400&h=600&fit=crop",
         "pictures": [
-            "https://images.unsplash.com/photo-1706943262117-b35de4ba50b4?w=400&h=600&fit=crop"
+            "https://images.unsplash.com/photo-1524686599807-08a16b19fefd?w=400&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1494354145959-25cb82edf23d?w=400&h=600&fit=crop"
         ],
         "bio": "Bengali cinema runs in my blood. Also love international dramas. Looking for someone who appreciates slow cinema and meaningful stories.",
         "partnerPreference": "Men",
@@ -631,13 +637,14 @@ MOCK_USERS = [
     {
         "user_id": "mock_user_017",
         "name": "Kavya Menon",
-        "age": 30,
+        "age": 24,
         "gender": "Female",
         "location": "Chennai",
         "avatar": "av5",
-        "profile_picture": "https://images.pexels.com/photos/34061448/pexels-photo-34061448.jpeg?auto=compress&w=400&h=600&fit=crop",
+        "profile_picture": "https://images.pexels.com/photos/4861411/pexels-photo-4861411.jpeg?w=400&h=600&fit=crop",
         "pictures": [
-            "https://images.pexels.com/photos/34061448/pexels-photo-34061448.jpeg?auto=compress&w=400&h=600&fit=crop"
+            "https://images.pexels.com/photos/4861411/pexels-photo-4861411.jpeg?w=400&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1658860518767-8b3552d63254?w=400&h=600&fit=crop"
         ],
         "bio": "Music-lover who judges films by their soundtrack. AR Rahman fan. Love musicals and films with great background scores.",
         "partnerPreference": "Men",
@@ -705,13 +712,14 @@ MOCK_USERS = [
     {
         "user_id": "mock_user_019",
         "name": "Sneha Krishnan",
-        "age": 25,
+        "age": 23,
         "gender": "Female",
         "location": "Hyderabad",
         "avatar": "av2",
-        "profile_picture": "https://images.pexels.com/photos/37145167/pexels-photo-37145167.jpeg?auto=compress&w=400&h=600&fit=crop",
+        "profile_picture": "https://images.unsplash.com/photo-1617798087373-0144fa7ff297?w=400&h=600&fit=crop",
         "pictures": [
-            "https://images.pexels.com/photos/37145167/pexels-photo-37145167.jpeg?auto=compress&w=400&h=600&fit=crop"
+            "https://images.unsplash.com/photo-1617798087373-0144fa7ff297?w=400&h=600&fit=crop",
+            "https://images.pexels.com/photos/32697980/pexels-photo-32697980.jpeg?w=400&h=600&fit=crop"
         ],
         "bio": "Fantasy and adventure lover. Harry Potter shaped my childhood. Now into GoT-style epics. Looking for my adventure partner!",
         "partnerPreference": "Men",
@@ -780,14 +788,14 @@ MOCK_USERS = [
     {
         "user_id": "mock_user_021",
         "name": "Aanya Malhotra",
-        "age": 24,
+        "age": 22,
         "gender": "Female",
         "location": "Bangalore",
         "avatar": "av2",
-        "profile_picture": "https://images.unsplash.com/photo-1631005438015-a2d58390d01e?w=400&h=600&fit=crop",
+        "profile_picture": "https://images.unsplash.com/photo-1546961329-78bef0414d7c?w=400&h=600&fit=crop",
         "pictures": [
-            "https://images.unsplash.com/photo-1631005438015-a2d58390d01e?w=400&h=600&fit=crop",
-            "https://images.pexels.com/photos/17533630/pexels-photo-17533630.jpeg?w=400&h=600&fit=crop"
+            "https://images.unsplash.com/photo-1546961329-78bef0414d7c?w=400&h=600&fit=crop",
+            "https://images.pexels.com/photos/30512447/pexels-photo-30512447.jpeg?w=400&h=600&fit=crop"
         ],
         "bio": "Tech girl by day, Netflix binger by night. Looking for someone to decode life's mysteries with, one movie at a time.",
         "partnerPreference": "Men",
@@ -820,14 +828,14 @@ MOCK_USERS = [
     {
         "user_id": "mock_user_022",
         "name": "Diya Singhania",
-        "age": 27,
+        "age": 24,
         "gender": "Female",
         "location": "Mumbai",
         "avatar": "av3",
-        "profile_picture": "https://images.unsplash.com/photo-1618559850638-2aed8a8e8cdc?w=400&h=600&fit=crop",
+        "profile_picture": "https://images.unsplash.com/photo-1662695089339-a2c24231a3ac?w=400&h=600&fit=crop",
         "pictures": [
-            "https://images.unsplash.com/photo-1618559850638-2aed8a8e8cdc?w=400&h=600&fit=crop",
-            "https://images.unsplash.com/photo-1708534419572-6e6614a53ca1?w=400&h=600&fit=crop"
+            "https://images.unsplash.com/photo-1662695089339-a2c24231a3ac?w=400&h=600&fit=crop",
+            "https://images.pexels.com/photos/6248741/pexels-photo-6248741.jpeg?w=400&h=600&fit=crop"
         ],
         "bio": "Bollywood romantic at heart. Grew up on SRK films and still believe in 'Pyaar dosti hai'. Seeking my DDLJ moment!",
         "partnerPreference": "Men",
@@ -860,14 +868,14 @@ MOCK_USERS = [
     {
         "user_id": "mock_user_023",
         "name": "Kiara Verma",
-        "age": 25,
+        "age": 23,
         "gender": "Female",
         "location": "Delhi",
         "avatar": "av5",
-        "profile_picture": "https://images.unsplash.com/photo-1708534246051-7f47b279e94b?w=400&h=600&fit=crop",
+        "profile_picture": "https://images.pexels.com/photos/13341178/pexels-photo-13341178.jpeg?w=400&h=600&fit=crop",
         "pictures": [
-            "https://images.unsplash.com/photo-1708534246051-7f47b279e94b?w=400&h=600&fit=crop",
-            "https://images.unsplash.com/photo-1739429942851-9083ee185d3d?w=400&h=600&fit=crop"
+            "https://images.pexels.com/photos/13341178/pexels-photo-13341178.jpeg?w=400&h=600&fit=crop",
+            "https://images.pexels.com/photos/18040012/pexels-photo-18040012.jpeg?w=400&h=600&fit=crop"
         ],
         "bio": "Marvel fangirl who cried during Iron Man's snap. If you can debate Avengers theories over chai, we're soulmates!",
         "partnerPreference": "Men",
@@ -940,14 +948,14 @@ MOCK_USERS = [
     {
         "user_id": "mock_user_025",
         "name": "Saanvi Reddy",
-        "age": 23,
+        "age": 22,
         "gender": "Female",
         "location": "Hyderabad",
         "avatar": "av3",
-        "profile_picture": "https://images.pexels.com/photos/13236864/pexels-photo-13236864.png?w=400&h=600&fit=crop",
+        "profile_picture": "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=400&h=600&fit=crop",
         "pictures": [
-            "https://images.pexels.com/photos/13236864/pexels-photo-13236864.png?w=400&h=600&fit=crop",
-            "https://images.unsplash.com/photo-1622049605334-72e1e4432346?w=400&h=600&fit=crop"
+            "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=400&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1580489944761-15a19d654956?w=400&h=600&fit=crop"
         ],
         "bio": "Telugu cinema enthusiast who believes RRR deserved every Oscar. Animation lover since childhood. Let's watch Ghibli together!",
         "partnerPreference": "Men",
@@ -980,14 +988,14 @@ MOCK_USERS = [
     {
         "user_id": "mock_user_026",
         "name": "Aditi Sharma",
-        "age": 28,
+        "age": 24,
         "gender": "Female",
         "location": "Pune",
         "avatar": "av5",
-        "profile_picture": "https://images.pexels.com/photos/5194107/pexels-photo-5194107.jpeg?w=400&h=600&fit=crop",
+        "profile_picture": "https://images.unsplash.com/photo-1618590067690-2db34a87750a?w=400&h=600&fit=crop",
         "pictures": [
-            "https://images.pexels.com/photos/5194107/pexels-photo-5194107.jpeg?w=400&h=600&fit=crop",
-            "https://images.pexels.com/photos/11624988/pexels-photo-11624988.jpeg?w=400&h=600&fit=crop"
+            "https://images.unsplash.com/photo-1618590067690-2db34a87750a?w=400&h=600&fit=crop",
+            "https://images.pexels.com/photos/2116230/pexels-photo-2116230.jpeg?w=400&h=600&fit=crop"
         ],
         "bio": "A24 films are my love language. Looking for someone who appreciates slow cinema and meaningful conversations over filter coffee.",
         "partnerPreference": "Men",
@@ -1020,14 +1028,14 @@ MOCK_USERS = [
     {
         "user_id": "mock_user_027",
         "name": "Rhea Iyer",
-        "age": 24,
+        "age": 22,
         "gender": "Female",
         "location": "Chennai",
         "avatar": "av2",
-        "profile_picture": "https://images.pexels.com/photos/37798732/pexels-photo-37798732.jpeg?w=400&h=600&fit=crop",
+        "profile_picture": "https://images.pexels.com/photos/1310522/pexels-photo-1310522.jpeg?w=400&h=600&fit=crop",
         "pictures": [
-            "https://images.pexels.com/photos/37798732/pexels-photo-37798732.jpeg?w=400&h=600&fit=crop",
-            "https://images.pexels.com/photos/33265568/pexels-photo-33265568.jpeg?w=400&h=600&fit=crop"
+            "https://images.pexels.com/photos/1310522/pexels-photo-1310522.jpeg?w=400&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1552699611-e2c208d5d9cf?w=400&h=600&fit=crop"
         ],
         "bio": "AR Rahman melodies + Sunday rain + good company = perfect date. Tamil cinema runs in my veins. Kamal Haasan supremacy!",
         "partnerPreference": "Men",
@@ -1060,14 +1068,14 @@ MOCK_USERS = [
     {
         "user_id": "mock_user_028",
         "name": "Zara Khan",
-        "age": 26,
+        "age": 23,
         "gender": "Female",
         "location": "Mumbai",
         "avatar": "av3",
-        "profile_picture": "https://images.pexels.com/photos/29553412/pexels-photo-29553412.jpeg?w=400&h=600&fit=crop",
+        "profile_picture": "https://images.unsplash.com/photo-1583183639754-7e992e58e0df?w=400&h=600&fit=crop",
         "pictures": [
-            "https://images.pexels.com/photos/29553412/pexels-photo-29553412.jpeg?w=400&h=600&fit=crop",
-            "https://images.pexels.com/photos/31521632/pexels-photo-31521632.jpeg?w=400&h=600&fit=crop"
+            "https://images.unsplash.com/photo-1583183639754-7e992e58e0df?w=400&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1573911932098-5e3e90f59f15?w=400&h=600&fit=crop"
         ],
         "bio": "Horror movie enthusiast who watches scary films alone at 3 AM. Looking for a brave soul to share the scares with!",
         "partnerPreference": "Men",
@@ -1100,14 +1108,14 @@ MOCK_USERS = [
     {
         "user_id": "mock_user_029",
         "name": "Ira Banerjee",
-        "age": 27,
+        "age": 24,
         "gender": "Female",
         "location": "Kolkata",
         "avatar": "av5",
-        "profile_picture": "https://images.pexels.com/photos/14994313/pexels-photo-14994313.jpeg?w=400&h=600&fit=crop",
+        "profile_picture": "https://images.unsplash.com/photo-1585980516944-df4fcf837ea6?w=400&h=600&fit=crop",
         "pictures": [
-            "https://images.pexels.com/photos/14994313/pexels-photo-14994313.jpeg?w=400&h=600&fit=crop",
-            "https://images.unsplash.com/photo-1706943262473-fc393f495501?w=400&h=600&fit=crop"
+            "https://images.unsplash.com/photo-1585980516944-df4fcf837ea6?w=400&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1611880147493-7542bdb0f024?w=400&h=600&fit=crop"
         ],
         "bio": "Bengali cinema lover with a soft spot for Satyajit Ray. Can discuss Feluda theories for hours. Looking for my intellectual match!",
         "partnerPreference": "Men",
@@ -1140,14 +1148,14 @@ MOCK_USERS = [
     {
         "user_id": "mock_user_030",
         "name": "Aisha Nair",
-        "age": 25,
+        "age": 23,
         "gender": "Female",
         "location": "Kochi",
         "avatar": "av2",
-        "profile_picture": "https://images.unsplash.com/photo-1706943262459-3ef6ce03305c?w=400&h=600&fit=crop",
+        "profile_picture": "https://images.unsplash.com/photo-1554727242-741c14fa561c?w=400&h=600&fit=crop",
         "pictures": [
-            "https://images.unsplash.com/photo-1706943262459-3ef6ce03305c?w=400&h=600&fit=crop",
-            "https://images.unsplash.com/photo-1516239482977-b550ba7253f2?w=400&h=600&fit=crop"
+            "https://images.unsplash.com/photo-1554727242-741c14fa561c?w=400&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1592621385612-4d7129426394?w=400&h=600&fit=crop"
         ],
         "bio": "Malayalam new wave cinema is life! Kumbalangi Nights is my comfort film. Looking for someone who appreciates good storytelling.",
         "partnerPreference": "Men",
@@ -1180,14 +1188,14 @@ MOCK_USERS = [
     {
         "user_id": "mock_user_031",
         "name": "Navya Gupta",
-        "age": 24,
+        "age": 22,
         "gender": "Female",
         "location": "Noida",
         "avatar": "av3",
-        "profile_picture": "https://images.unsplash.com/photo-1463335361701-e90f4c5045d0?w=400&h=600&fit=crop",
+        "profile_picture": "https://images.pexels.com/photos/4861411/pexels-photo-4861411.jpeg?w=400&h=600&fit=crop",
         "pictures": [
-            "https://images.unsplash.com/photo-1463335361701-e90f4c5045d0?w=400&h=600&fit=crop",
-            "https://images.unsplash.com/photo-1622782045716-a05bcc4f5ae8?w=400&h=600&fit=crop"
+            "https://images.pexels.com/photos/4861411/pexels-photo-4861411.jpeg?w=400&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1658860518767-8b3552d63254?w=400&h=600&fit=crop"
         ],
         "bio": "K-drama addict trying to find my own Korean romance. Also love Bollywood masala entertainers. Life's too short for boring movies!",
         "partnerPreference": "Men",
@@ -1220,14 +1228,14 @@ MOCK_USERS = [
     {
         "user_id": "mock_user_032",
         "name": "Tara Mehta",
-        "age": 26,
+        "age": 23,
         "gender": "Female",
         "location": "Ahmedabad",
         "avatar": "av5",
-        "profile_picture": "https://images.unsplash.com/photo-1622049605334-72e1e4432346?w=400&h=600&fit=crop",
+        "profile_picture": "https://images.unsplash.com/photo-1617798087373-0144fa7ff297?w=400&h=600&fit=crop",
         "pictures": [
-            "https://images.unsplash.com/photo-1622049605334-72e1e4432346?w=400&h=600&fit=crop",
-            "https://images.pexels.com/photos/37145167/pexels-photo-37145167.jpeg?w=400&h=600&fit=crop"
+            "https://images.unsplash.com/photo-1617798087373-0144fa7ff297?w=400&h=600&fit=crop",
+            "https://images.pexels.com/photos/32697980/pexels-photo-32697980.jpeg?w=400&h=600&fit=crop"
         ],
         "bio": "Fantasy and sci-fi nerd. Harry Potter house: Ravenclaw. If you can discuss the ending of Inception, let's talk!",
         "partnerPreference": "Men",
@@ -1260,14 +1268,14 @@ MOCK_USERS = [
     {
         "user_id": "mock_user_033",
         "name": "Simran Kaur",
-        "age": 25,
+        "age": 23,
         "gender": "Female",
         "location": "Chandigarh",
         "avatar": "av2",
-        "profile_picture": "https://images.unsplash.com/photo-1708534419572-6e6614a53ca1?w=400&h=600&fit=crop",
+        "profile_picture": "https://images.unsplash.com/photo-1524686599807-08a16b19fefd?w=400&h=600&fit=crop",
         "pictures": [
-            "https://images.unsplash.com/photo-1708534419572-6e6614a53ca1?w=400&h=600&fit=crop",
-            "https://images.unsplash.com/photo-1618559850638-2aed8a8e8cdc?w=400&h=600&fit=crop"
+            "https://images.unsplash.com/photo-1524686599807-08a16b19fefd?w=400&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1494354145959-25cb82edf23d?w=400&h=600&fit=crop"
         ],
         "bio": "Punjabi by heart, rom-com lover by choice. Looking for my Shah Rukh Khan in a world full of ordinary heroes!",
         "partnerPreference": "Men",
@@ -1300,14 +1308,14 @@ MOCK_USERS = [
     {
         "user_id": "mock_user_034",
         "name": "Nisha Pillai",
-        "age": 27,
+        "age": 24,
         "gender": "Female",
         "location": "Trivandrum",
         "avatar": "av3",
-        "profile_picture": "https://images.unsplash.com/photo-1739429942851-9083ee185d3d?w=400&h=600&fit=crop",
+        "profile_picture": "https://images.pexels.com/photos/30512447/pexels-photo-30512447.jpeg?w=400&h=600&fit=crop",
         "pictures": [
-            "https://images.unsplash.com/photo-1739429942851-9083ee185d3d?w=400&h=600&fit=crop",
-            "https://images.pexels.com/photos/17533630/pexels-photo-17533630.jpeg?w=400&h=600&fit=crop"
+            "https://images.pexels.com/photos/30512447/pexels-photo-30512447.jpeg?w=400&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1546961329-78bef0414d7c?w=400&h=600&fit=crop"
         ],
         "bio": "Documentary filmmaker who believes every life is a story worth telling. Looking for someone with depth and passion for cinema.",
         "partnerPreference": "Men",
@@ -1340,14 +1348,14 @@ MOCK_USERS = [
     {
         "user_id": "mock_user_035",
         "name": "Pooja Singh",
-        "age": 23,
+        "age": 22,
         "gender": "Female",
         "location": "Lucknow",
         "avatar": "av5",
-        "profile_picture": "https://images.pexels.com/photos/15007244/pexels-photo-15007244.jpeg?w=400&h=600&fit=crop",
+        "profile_picture": "https://images.unsplash.com/photo-1662695089339-a2c24231a3ac?w=400&h=600&fit=crop",
         "pictures": [
-            "https://images.pexels.com/photos/15007244/pexels-photo-15007244.jpeg?w=400&h=600&fit=crop",
-            "https://images.unsplash.com/photo-1631005438015-a2d58390d01e?w=400&h=600&fit=crop"
+            "https://images.unsplash.com/photo-1662695089339-a2c24231a3ac?w=400&h=600&fit=crop",
+            "https://images.pexels.com/photos/6248741/pexels-photo-6248741.jpeg?w=400&h=600&fit=crop"
         ],
         "bio": "Anime otaku who also loves Bollywood masala. My perfect weekend is Studio Ghibli marathon + biryani. Any takers?",
         "partnerPreference": "Men",
