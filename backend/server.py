@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, Request, Response, HTTPException, BackgroundTasks
+from fastapi import FastAPI, APIRouter, Request, Response, HTTPException, BackgroundTasks, UploadFile, File, Form
 from fastapi.responses import FileResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -75,6 +75,13 @@ from tina_service import (
     PROFILE_FIELDS,
     generate_welcome_back_message,
     get_user_onboarding_status,
+)
+
+# Tina voice (ElevenLabs) – TTS + STT for the "Voice Call with Tina" feature
+from tina_voice_service import (
+    synthesize_speech as tina_synthesize_speech,
+    transcribe_audio as tina_transcribe_audio,
+    is_voice_enabled as tina_voice_enabled,
 )
 
 # Import picture service for profile photos
@@ -3255,6 +3262,53 @@ async def tina_field_options_endpoint():
         return {"success": True, "fields": fields}
     except Exception as e:
         logger.error(f"Get field options error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Tina Voice (ElevenLabs) – Premium "Talk to Tina" feature
+# ---------------------------------------------------------------------------
+
+class TinaSpeakRequest(BaseModel):
+    text: str
+    voice_id: Optional[str] = None
+
+
+@api_router.get("/tina/voice/status")
+async def tina_voice_status_endpoint():
+    """Tells the client whether voice mode is currently available."""
+    return {"enabled": tina_voice_enabled()}
+
+
+@api_router.post("/tina/voice/speak")
+async def tina_voice_speak_endpoint(req: TinaSpeakRequest):
+    """Generate Tina's voice reply (Indian English female) and return a
+    base64-encoded MP3 audio data URI suitable for `expo-audio`."""
+    try:
+        if not req.text or not req.text.strip():
+            raise HTTPException(status_code=400, detail="text is required")
+        audio_data_uri = tina_synthesize_speech(req.text, req.voice_id)
+        return {"success": True, "audio": audio_data_uri}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Tina TTS error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.post("/tina/voice/transcribe")
+async def tina_voice_transcribe_endpoint(audio: UploadFile = File(...)):
+    """Convert a user-recorded clip to text (ElevenLabs Scribe)."""
+    try:
+        raw = await audio.read()
+        if not raw:
+            raise HTTPException(status_code=400, detail="Empty audio file")
+        text = tina_transcribe_audio(raw, filename=audio.filename or "tina_voice.m4a")
+        return {"success": True, "text": text}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Tina STT error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

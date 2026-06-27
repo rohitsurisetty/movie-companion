@@ -11,7 +11,8 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Find nearby movie companions"
+        "NSLocationWhenInUseUsageDescription": "Find nearby movie companions",
+        "NSMicrophoneUsageDescription": "Talk to Tina, your AI movie matchmaker"
       }
     },
     "android": {
@@ -42,7 +43,8 @@
         }
       ],
       "expo-web-browser",
-      "expo-font"
+      "expo-font",
+      "expo-audio"
     ],
     "experiments": {
       "typedRoutes": true

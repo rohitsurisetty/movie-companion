@@ -7,6 +7,14 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  useAudioRecorder,
+  useAudioRecorderState,
+  useAudioPlayer,
+  RecordingPresets,
+  setAudioModeAsync,
+  AudioModule,
+} from 'expo-audio';
 import { useTina, UserProfileData, Message } from '../context/TinaContext';
 
 const { width, height: SCREEN_HEIGHT } = Dimensions.get('window');
