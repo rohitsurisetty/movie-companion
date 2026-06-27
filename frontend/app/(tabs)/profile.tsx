@@ -1856,15 +1856,6 @@ export default function ProfileScreen() {
       </Modal>
 
       {/* NOTE: All edit modals removed - now handled inline within EditProfileModalContent to avoid React Native nested modal issues */}
-
-      {/* Mode Switcher Modal */}
-      <ModeSwitcher
-        visible={showModeDrawer}
-        onClose={() => setShowModeDrawer(false)}
-        currentMode={mode}
-        onModeChange={setMode}
-        colors={colors}
-      />
     </SafeAreaView>
   );
 }

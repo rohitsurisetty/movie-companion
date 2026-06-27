@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Film Companion · Algorithm Whitepaper</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,800&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-font-smoothing:antialiased; }
+  html, body { background: #0A0509; color: #ECE9F0; font-family: 'Inter', system-ui, sans-serif; line-height: 1.65; }
+  .container { max-width: 900px; margin: 0 auto; padding: 60px 32px 100px; }
+
+  /* Header */
+  .header { border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 28px; margin-bottom: 42px; }
+  .eyebrow { font-size: 11px; letter-spacing: 2px; color: #E50914; font-weight: 700; text-transform: uppercase; }
+  h1 { font-family: 'Fraunces', serif; font-size: 44px; font-weight: 600; line-height: 1.15; margin-top: 12px; letter-spacing: -0.5px; }
+  .subtitle { font-size: 17px; color: rgba(255,255,255,0.65); margin-top: 14px; font-weight: 400; }
+  .meta { display:flex; gap: 16px; font-size: 12px; color: rgba(255,255,255,0.5); margin-top: 22px; flex-wrap: wrap; }
+  .meta span { padding: 6px 12px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 999px; }
+
+  /* Sections */
+  h2 { font-family: 'Fraunces', serif; font-size: 28px; font-weight: 600; margin-top: 56px; margin-bottom: 18px; letter-spacing: -0.3px; display:flex; align-items: center; gap: 12px; }
+  h3 { font-size: 19px; font-weight: 700; margin-top: 32px; margin-bottom: 12px; color: #fff; }
+  h4 { font-size: 15px; font-weight: 700; color: #E50914; margin-top: 22px; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.8px; }
+  p { color: rgba(255,255,255,0.85); margin-bottom: 14px; font-size: 15.5px; }
+
+  /* Engine cards */
+  .engines { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 16px; }
+  .engine { background: linear-gradient(135deg, rgba(229,9,20,0.08), rgba(229,9,20,0.02)); border: 1px solid rgba(229,9,20,0.2); border-radius: 16px; padding: 20px; }
+  .engine.alt { background: linear-gradient(135deg, rgba(33,150,243,0.08), rgba(33,150,243,0.02)); border-color: rgba(33,150,243,0.2); }
+  .engine .badge { font-size: 10px; letter-spacing: 2px; font-weight: 800; color: #E50914; }
+  .engine.alt .badge { color: #2196F3; }
+  .engine .title { font-family:'Fraunces',serif; font-size: 22px; font-weight: 600; margin: 6px 0 8px; }
+  .engine .desc { font-size: 14px; color: rgba(255,255,255,0.7); }
+
+  /* Pipeline boxes */
+  .pipeline { display:flex; align-items:stretch; gap:10px; flex-wrap: wrap; margin: 20px 0 8px; }
+  .step { flex:1; min-width: 200px; background: rgba(255,255,255,0.03); border-left: 3px solid #E50914; border-radius: 8px; padding: 14px 16px; }
+  .step .step-no { font-size: 10px; letter-spacing: 2px; color:#E50914; font-weight: 800; }
+  .step .step-title { font-size: 15px; font-weight: 700; margin: 4px 0 6px; }
+  .step .step-desc { font-size: 12.5px; color: rgba(255,255,255,0.6); line-height: 1.5; }
+  .step .step-meta { font-size:11px; color:#FFD700; margin-top: 6px; font-weight: 600; }
+
+  /* Tables */
+  table { width: 100%; border-collapse: collapse; margin: 14px 0 18px; font-size: 14px; }
+  th { text-align: left; padding: 10px 14px; background: rgba(255,255,255,0.05); font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: 0.8px; color: rgba(255,255,255,0.7); border-bottom: 1px solid rgba(255,255,255,0.1); }
+  td { padding: 11px 14px; border-bottom: 1px solid rgba(255,255,255,0.05); vertical-align: top; color: rgba(255,255,255,0.85); }
+  td code { background: rgba(229,9,20,0.1); color:#ff6b75; font-family:'JetBrains Mono', monospace; font-size: 12px; padding: 2px 6px; border-radius: 4px; }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+
+  /* Code blocks */
+  pre { background: #050308; border: 1px solid rgba(255,255,255,0.06); border-radius: 12px; padding: 18px 20px; font-family:'JetBrains Mono', monospace; font-size: 13px; line-height: 1.7; overflow-x: auto; color: #C9C5D5; margin: 14px 0 20px; }
+  pre .c { color: #FFD700; }
+  pre .k { color: #FF6B75; font-weight: 600; }
+  pre .v { color: #00D26A; }
+
+  /* Lists */
+  ul, ol { margin: 10px 0 16px 22px; }
+  li { margin-bottom: 8px; color: rgba(255,255,255,0.85); font-size: 15px; }
+  li strong { color: #fff; }
+
+  /* Callouts */
+  .callout { background: linear-gradient(135deg, rgba(255,215,0,0.06), rgba(255,215,0,0.01)); border: 1px solid rgba(255,215,0,0.25); border-radius: 14px; padding: 18px 22px; margin: 20px 0; }
+  .callout .label { font-size: 11px; letter-spacing: 2px; font-weight: 800; color: #FFD700; margin-bottom: 6px; }
+  .callout p:last-child { margin-bottom: 0; }
+
+  /* Investor takeaways */
+  .takeaways { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-top: 14px; }
+  .takeaway { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 12px; padding: 16px 18px; }
+  .takeaway-num { font-family:'Fraunces',serif; font-size: 28px; font-weight: 600; color:#E50914; line-height: 1; }
+  .takeaway-title { font-weight: 700; font-size: 14.5px; margin: 6px 0 6px; }
+  .takeaway-desc { font-size: 13px; color: rgba(255,255,255,0.65); line-height: 1.5; }
+
+  /* Footer */
+  .footer { margin-top: 70px; padding-top: 28px; border-top: 1px solid rgba(255,255,255,0.08); font-size: 12px; color: rgba(255,255,255,0.4); text-align: center; }
+
+  /* TOC */
+  .toc { background: rgba(255,255,255,0.03); border-left: 3px solid #E50914; border-radius: 6px; padding: 16px 22px; margin-bottom: 28px; }
+  .toc-title { font-size: 11px; letter-spacing: 2px; font-weight: 800; color: rgba(255,255,255,0.5); margin-bottom: 10px; }
+  .toc-list { list-style: none; margin: 0; }
+  .toc-list li { margin-bottom: 4px; font-size: 14px; color: rgba(255,255,255,0.8); }
+  .toc-list a { color: inherit; text-decoration: none; }
+  .toc-list a:hover { color: #E50914; }
+
+  @media print {
+    body { background: #fff; color: #111; }
+    .container { padding: 24px; max-width: none; }
+    h1, h2, h3, h4, p, li, td, .engine .desc, .step .step-desc, .takeaway-desc, .meta span { color: #111; }
+    .engine, .step, .callout, .takeaway, .toc { background: #fafafa; border-color: #ddd; }
+    pre { background: #f5f5f5; color: #111; border-color: #ddd; }
+    th { background: #f0f0f0; color: #333; }
+    .footer { color: #777; }
+  }
+
+  @media (max-width: 720px) {
+    .container { padding: 32px 18px 60px; }
+    h1 { font-size: 32px; }
+    .engines, .takeaways { grid-template-columns: 1fr; }
+    .pipeline { flex-direction: column; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- HEADER -->
+  <div class="header">
+    <div class="eyebrow">Algorithm Whitepaper · Confidential</div>
+    <h1>How Film Companion recommends people & movies</h1>
+    <div class="subtitle">A technical overview of the two AI engines that power matchmaking and personalised discovery on Film Companion.</div>
+    <div class="meta">
+      <span>Version 1.0 · June 2026</span>
+      <span>India-first · MVP</span>
+      <span>For Investor &amp; Internal Review</span>
+    </div>
+  </div>
+
+  <!-- TOC -->
+  <div class="toc">
+    <div class="toc-title">Contents</div>
+    <ol class="toc-list">
+      <li><a href="#overview">1. Overview — Two engines, one taste graph</a></li>
+      <li><a href="#people">2. Engine A — People Matchmaking</a></li>
+      <li><a href="#movies">3. Engine B — Movie Recommendation</a></li>
+      <li><a href="#weights">4. Signal weights at a glance</a></li>
+      <li><a href="#defensibility">5. Why this is defensible</a></li>
+    </ol>
+  </div>
+
+  <!-- OVERVIEW -->
+  <h2 id="overview">1 · Overview</h2>
+  <p>Film Companion is powered by <strong>two distinct AI engines</strong> that work in concert. Both feed from a single proprietary user model — the <strong>TasteVector</strong> — which gives us a defensible cross-product moat no competitor (Bumble, Hinge, Letterboxd) currently has.</p>
+
+  <div class="engines">
+    <div class="engine">
+      <div class="badge">ENGINE A</div>
+      <div class="title">People Matchmaking</div>
+      <div class="desc">"Who should I meet?" — Combines deterministic hard filters with GPT-4o ranking and natural-language explanations.</div>
+    </div>
+    <div class="engine alt">
+      <div class="badge">ENGINE B</div>
+      <div class="title">Movie Recommendation</div>
+      <div class="desc">"What should I watch?" — A multi-dimensional taste vector scored against TMDB's 1M+ catalogue using cosine similarity.</div>
+    </div>
+  </div>
+
+  <!-- PEOPLE -->
+  <h2 id="people">2 · People Matchmaking</h2>
+  <p>A 3-step pipeline. Average latency: <strong>3–8 s on cache miss, &lt; 50 ms on cache hit</strong>.</p>
+
+  <div class="pipeline">
+    <div class="step">
+      <div class="step-no">STEP 1</div>
+      <div class="step-title">Hard Filters</div>
+      <div class="step-desc">Deterministic rules narrow ~35 candidates → ~17 valid ones.</div>
+      <div class="step-meta">~5 ms · 100% rule-based</div>
+    </div>
+    <div class="step">
+      <div class="step-no">STEP 2</div>
+      <div class="step-title">AI Scoring</div>
+      <div class="step-desc">Batched GPT-4o call ranks the filtered pool and explains each match.</div>
+      <div class="step-meta">3–8 s · ~$0.001/req</div>
+    </div>
+    <div class="step">
+      <div class="step-no">STEP 3</div>
+      <div class="step-title">Cache &amp; Serve</div>
+      <div class="step-desc">Results cached by profile hash. Auto-invalidates on profile change.</div>
+      <div class="step-meta">Cache hit &lt; 50 ms</div>
+    </div>
+  </div>
+
+  <h3>2.1 Hard Filters (always applied)</h3>
+  <table>
+    <thead><tr><th>Filter</th><th>Logic</th></tr></thead>
+    <tbody>
+      <tr><td>Mode compatibility</td><td>Date users see only Date users; Buddy sees only Buddy. <strong>Always strict.</strong></td></tr>
+      <tr><td>Gender / Partner preference</td><td>Always strict, mutual: A wants Women → B must be Female <em>and</em> B wants Men.</td></tr>
+      <tr><td>Age range</td><td>Configurable 18–60 default. Supports "exclusive" + 5-year expand fallback.</td></tr>
+      <tr><td>Languages spoken</td><td>Multi-select with configurable strictness.</td></tr>
+      <tr><td>Relationship intent</td><td>Casual / Friendship / Serious / Exploring.</td></tr>
+      <tr><td>Film languages, Genres, OTT vs Theatre</td><td>Multi-select; honour user-selected exclusivity.</td></tr>
+      <tr><td>Lifestyle (smoking, drinking, religion, food, diet)</td><td>Honour user-selected exclusivity per attribute.</td></tr>
+    </tbody>
+  </table>
+
+  <p>Each filter supports three strictness modes:</p>
+  <ul>
+    <li><strong>Hard reject</strong> — <code>exclusive=true, expandIfRunOut=false</code></li>
+    <li><strong>Prefer strict, expand if pool empty</strong> — <code>exclusive=true, expandIfRunOut=true</code></li>
+    <li><strong>Soft preference</strong> — <code>exclusive=false</code></li>
+  </ul>
+
+  <h3>2.2 AI Scoring with GPT-4o</h3>
+  <p>The filtered ~17 candidates are sent to <code>gpt-4o</code> in a single batched request. The model receives both profiles in full and returns a ranked top 15:</p>
+  <pre>{
+  "user_id": "user_abc123",
+  "match_level": "Perfect Match | Great Match | Good Match | Potential Match",
+  "explanation": "You both share a deep love for Christopher Nolan's mind-bending films and rate slow-burn dramas highly. Priyanka's top 5 includes Inception and Parasite — exactly your vibe.",
+  "shared_interests": ["Sci-Fi", "Nolan films", "Slow-burn dramas"],
+  "compatibility_score": 87
+}</pre>
+
+  <p>The AI uses <strong>dynamic weighting</strong> (not fixed) across these signals:</p>
+  <ul>
+    <li>Movie genre overlap</li>
+    <li>Favourite movies similarity (Top 5)</li>
+    <li>Liked actors &amp; directors</li>
+    <li>Film &amp; spoken language preferences</li>
+    <li>Viewing habits (OTT vs Theatre, frequency)</li>
+    <li>Lifestyle compatibility</li>
+    <li>Relationship intent alignment</li>
+    <li>Personality match inferred from movie taste</li>
+  </ul>
+
+  <h3>2.3 Deterministic Fallback (LLM unavailable)</h3>
+  <p>If the LLM call fails or the key is missing, we drop to a simple deterministic scorer so the service never breaks:</p>
+  <pre><span class="c">// Fallback formula</span>
+score = (genre_overlap     × 10)
+      + (swipe_genre_overlap × 15)
+      + (top_movie_overlap   × 25)
+
+<span class="k">if</span> score ≥ 50  → "Great Match"
+<span class="k">if</span> score ≥ 30  → "Good Match"
+<span class="k">else</span>         → "Potential Match"</pre>
+
+  <!-- MOVIES -->
+  <h2 id="movies">3 · Movie Recommendation</h2>
+  <p>The technically differentiated piece — a <strong>proprietary high-dimensional Taste Vector</strong> built from every user signal, scored against TMDB's catalogue using cosine similarity.</p>
+
+  <h3>3.1 The TasteVector (15+ dimensions)</h3>
+  <p>For every user we maintain a sparse vector across the following dimensions. Each dimension has many keys (e.g. <code>genre_thriller</code>, <code>genre_drama</code>, …).</p>
+
+  <table>
+    <thead><tr><th>Prefix</th><th>What it captures</th><th>Example key</th></tr></thead>
+    <tbody>
+      <tr><td><code>genre_*</code></td><td>Genre affinity</td><td><code>genre_thriller = 3.2</code></td></tr>
+      <tr><td><code>actor_*</code></td><td>Actor preferences (billing-order weighted)</td><td><code>actor_dicaprio = 2.1</code></td></tr>
+      <tr><td><code>director_*</code></td><td>Director preferences <em>(strongest signal)</em></td><td><code>director_nolan = 4.5</code></td></tr>
+      <tr><td><code>writer_*</code></td><td>Screenwriter preferences</td><td><code>writer_aaron_sorkin = 1.8</code></td></tr>
+      <tr><td><code>composer_*</code></td><td>Music composer preferences</td><td><code>composer_zimmer = 1.2</code></td></tr>
+      <tr><td><code>dop_*</code></td><td>Cinematographer preferences</td><td><code>dop_deakins = 1.0</code></td></tr>
+      <tr><td><code>keyword_*</code></td><td>TMDB thematic keywords (up to 10/movie)</td><td><code>keyword_heist = 2.5</code></td></tr>
+      <tr><td><code>studio_*</code></td><td>Production company</td><td><code>studio_a24 = 1.5</code></td></tr>
+      <tr><td><code>country_*</code></td><td>Production country</td><td><code>country_kr = 2.0</code></td></tr>
+      <tr><td><code>era_*</code></td><td>Decade preferences</td><td><code>era_2010s = 1.8</code></td></tr>
+      <tr><td><code>lang_*</code></td><td>Language affinity (tiered)</td><td><code>lang_hi = 1.5</code></td></tr>
+      <tr><td><code>quality_*</code></td><td>Excellent / Good / Decent rating bands</td><td><code>quality_excellent = 0.9</code></td></tr>
+      <tr><td><code>content_*</code></td><td>Blockbuster vs Indie</td><td><code>content_blockbuster = 1.4</code></td></tr>
+      <tr><td><code>runtime_*</code></td><td>Short / Standard / Long / Epic</td><td><code>runtime_epic = 0.8</code></td></tr>
+      <tr><td><code>unwatched_*</code></td><td><strong>Negative</strong> signals from skipped movies</td><td><code>unwatched_genre_horror = -0.6</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3>3.2 Initial vector at signup</h3>
+  <table>
+    <thead><tr><th>Signal source</th><th>Weight</th></tr></thead>
+    <tbody>
+      <tr><td>Explicitly selected film languages</td><td><strong>1.5</strong></td></tr>
+      <tr><td>Explicitly selected genres</td><td><strong>1.5</strong></td></tr>
+      <tr><td>Top 5 movies (genres, era, quality)</td><td>1.5 → 1.1 (decreasing by rank)</td></tr>
+      <tr><td>Spoken languages (inferred)</td><td>0.7</td></tr>
+      <tr><td>Top-movie languages (inferred)</td><td>1.0</td></tr>
+    </tbody>
+  </table>
+
+  <h3>3.3 Continuous learning from every swipe</h3>
+  <p>Every right-swipe / left-swipe updates 15+ vector dimensions simultaneously.</p>
+
+  <table>
+    <thead><tr><th>Signal</th><th>Multiplier (× base weight)</th></tr></thead>
+    <tbody>
+      <tr><td>Director</td><td><strong>1.5</strong> (strongest)</td></tr>
+      <tr><td>Genre</td><td>1.0</td></tr>
+      <tr><td>Lead actor (billing 0–2)</td><td>1.0</td></tr>
+      <tr><td>Supporting actor (billing 3–4)</td><td>0.7</td></tr>
+      <tr><td>Cast (billing 5+)</td><td>0.4</td></tr>
+      <tr><td>Writer</td><td>0.8</td></tr>
+      <tr><td>Composer / Cinematographer</td><td>0.5</td></tr>
+      <tr><td>Keyword (up to 10)</td><td>varies</td></tr>
+      <tr><td><strong>Right-swipe base</strong></td><td>+1.0 (modulated by 1–5 star rating → 0.4–1.2)</td></tr>
+      <tr><td><strong>Left-swipe base</strong></td><td><strong>−0.4</strong> (asymmetric — dislikes hurt less than likes help)</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <div class="label">Reason tagging</div>
+    <p>When a user likes a movie they can optionally tag the reason — "story", "acting", "visuals", "music", "emotional", "entertaining", "thoughtful". These add <em>bonus quality signals</em> (e.g. tagging "story" boosts <code>quality_story_lover</code>, which later +5% boosts dramas/thrillers/mysteries in the feed).</p>
+  </div>
+
+  <h3>3.4 Scoring a movie</h3>
+  <pre><span class="c">// 1. Vector similarity</span>
+similarity = cosine_similarity(user_taste_vector, movie_vector)
+score      = (similarity + 1) / 2      <span class="c">// normalised to [0, 1]</span>
+
+<span class="c">// 2. Quality boost</span>
+<span class="k">if</span> rating ≥ 7.5 <span class="k">and</span> votes ≥ 1000:   score ×= <span class="v">1.15</span>
+<span class="k">elif</span> rating ≥ 7.0 <span class="k">and</span> votes ≥ 500: score ×= <span class="v">1.08</span>
+
+<span class="c">// 3. Language priority boost</span>
+<span class="k">if</span> primary_language:   score ×= <span class="v">1.25</span>   <span class="c">// user explicitly selected</span>
+<span class="k">elif</span> secondary_language: score ×= <span class="v">1.10</span>   <span class="c">// inferred from spoken/top movies</span>
+<span class="k">elif</span> related_language:   score ×= <span class="v">1.00</span>   <span class="c">// e.g. Telugu → Tamil, Malayalam, Kannada, Hindi</span>
+
+<span class="c">// 4. Negative-pattern penalty</span>
+<span class="k">if</span> matches "skipped" genres:    score ×= <span class="v">0.90</span>
+
+<span class="c">// 5. Reason-quality boost</span>
+"story lover"   + drama/thriller     → ×<span class="v">1.05</span>
+"visuals lover" + action/sci-fi      → ×<span class="v">1.05</span>
+"emotional"     + drama/romance       → ×<span class="v">1.05</span>
+
+<span class="c">// 6. Cold-start boost (first 10 swipes)</span>
+<span class="k">if</span> popularity > 50:               score ×= <span class="v">1.05</span>
+
+<span class="c">// 7. Personalisation noise — ±15% per-user variance</span>
+score ×= random(<span class="v">0.85</span>, <span class="v">1.15</span>)
+
+<span class="c">// 8. Final clamp to [0, 1]</span>
+final = min(score, <span class="v">1.0</span>)</pre>
+
+  <h3>3.5 Smart discovery tactics</h3>
+  <ul>
+    <li><strong>Indian-language affinity graph</strong> — A Telugu speaker is automatically also offered Tamil/Malayalam/Kannada/Hindi titles without an explicit filter.</li>
+    <li><strong>Score bracketing</strong> — Movies within 10% of each other are shuffled so two similar-taste users never see identical lists.</li>
+    <li><strong>Vector normalisation</strong> — After every update, the vector is normalised to unit length to prevent runaway weights.</li>
+    <li><strong>Hash-keyed caching</strong> — Profile-hash invalidates the cache on any meaningful profile change.</li>
+  </ul>
+
+  <!-- WEIGHTS -->
+  <h2 id="weights">4 · Signal weights at a glance</h2>
+  <p>Quick-reference cheat sheet of the strongest signals across both engines.</p>
+
+  <table>
+    <thead><tr><th>Signal</th><th>Engine</th><th>Direction</th><th>Strength</th></tr></thead>
+    <tbody>
+      <tr><td>Director match</td><td>Movie</td><td>Positive</td><td>★★★★★ (1.5×)</td></tr>
+      <tr><td>Top-movie title overlap</td><td>People</td><td>Positive</td><td>★★★★★ (×25 fallback)</td></tr>
+      <tr><td>Primary language match</td><td>Movie</td><td>Positive</td><td>★★★★★ (1.25× boost)</td></tr>
+      <tr><td>Explicit genre match</td><td>Both</td><td>Positive</td><td>★★★★ (1.5×)</td></tr>
+      <tr><td>High-rated movie</td><td>Movie</td><td>Positive</td><td>★★★ (1.15×)</td></tr>
+      <tr><td>Skip / left swipe</td><td>Movie</td><td>Negative</td><td>★★ (−0.4)</td></tr>
+      <tr><td>Unwatched-pattern penalty</td><td>Movie</td><td>Negative</td><td>★★ (0.9×)</td></tr>
+      <tr><td>Personalisation noise</td><td>Movie</td><td>Stochastic</td><td>±15%</td></tr>
+    </tbody>
+  </table>
+
+  <!-- DEFENSIBILITY -->
+  <h2 id="defensibility">5 · Why this is defensible</h2>
+  <p>Talking points you can use directly with investors:</p>
+
+  <div class="takeaways">
+    <div class="takeaway">
+      <div class="takeaway-num">01</div>
+      <div class="takeaway-title">Dual-engine architecture</div>
+      <div class="takeaway-desc">Most dating apps use cosine sim on demographics. We layer GPT-4o on top of strict filters so every match comes with a contextual, human-readable explanation users actually read.</div>
+    </div>
+    <div class="takeaway">
+      <div class="takeaway-num">02</div>
+      <div class="takeaway-title">Compounding taste graph</div>
+      <div class="takeaway-desc">Every swipe enriches 15+ vector dimensions. Two months in, the model is too high-dimensional to clone without our swipe history.</div>
+    </div>
+    <div class="takeaway">
+      <div class="takeaway-num">03</div>
+      <div class="takeaway-title">Cross-product synergy</div>
+      <div class="takeaway-desc">The same TasteVector powers both <em>who</em> you match with <em>and</em> <em>what</em> you watch. No competitor (Bumble, Hinge, Letterboxd) does both.</div>
+    </div>
+    <div class="takeaway">
+      <div class="takeaway-num">04</div>
+      <div class="takeaway-title">Cold-start solved</div>
+      <div class="takeaway-desc">Even a brand-new user with zero swipes gets meaningful recommendations from Top-5 movies + genres + languages + Tina onboarding chat.</div>
+    </div>
+    <div class="takeaway">
+      <div class="takeaway-num">05</div>
+      <div class="takeaway-title">India-first language graph</div>
+      <div class="takeaway-desc">Intelligently bridges related Indian languages (Telugu↔Tamil↔Malayalam↔Kannada↔Hindi) — a competitive moat in our home market.</div>
+    </div>
+    <div class="takeaway">
+      <div class="takeaway-num">06</div>
+      <div class="takeaway-title">Negative learning</div>
+      <div class="takeaway-desc">We learn from what users <em>skip</em>, not just like. Reduces echo chambers and surfaces more diverse content over time.</div>
+    </div>
+    <div class="takeaway">
+      <div class="takeaway-num">07</div>
+      <div class="takeaway-title">LLM cost-controlled</div>
+      <div class="takeaway-desc">Hard filters cut candidates 35 → 17 before GPT-4o is called. ~$0.001 per match request; cache hits cost zero.</div>
+    </div>
+    <div class="takeaway">
+      <div class="takeaway-num">08</div>
+      <div class="takeaway-title">Graceful degradation</div>
+      <div class="takeaway-desc">Deterministic fallback scorer kicks in if the LLM is unavailable. Service uptime is decoupled from LLM-provider uptime.</div>
+    </div>
+  </div>
+
+  <!-- FOOTER -->
+  <div class="footer">
+    Film Companion · Algorithm Whitepaper · v1.0 · June 2026 · Confidential — for investor &amp; internal review only.
+  </div>
+
+</div>
+</body>
+</html>

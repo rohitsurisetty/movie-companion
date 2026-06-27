@@ -84,8 +84,9 @@ export default function PublicProfilePreviewStep({ data, onEdit, onContinue }: P
     // No match data while previewing your own profile during signup.
   };
 
-  // Default mode = 'date' during signup (mode is chosen on the very next step).
-  const previewMode: 'date' | 'buddy' = data.movieBuddyMode && !data.movieDateMode ? 'buddy' : 'date';
+  // Mode selection has been removed from the product — always use the
+  // unified ("date") theme for the preview.
+  const previewMode: 'date' | 'buddy' = 'date';
 
   // Custom bottom CTA: Edit (left) + Done & Continue (right)
   const bottomCTA = (

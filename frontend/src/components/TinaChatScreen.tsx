@@ -26,7 +26,7 @@ const TINA_CONVERSATION_KEY = 'tina_conversation_state';
 const FALLBACK_GREETINGS = {
   default: [
     "Hey there! 💫 I'm Tina, your personal matchmaker.",
-    "Let's get to know you better so I can find your perfect movie buddy!",
+    "Let's get to know you better so I can find someone who shares your movie taste!",
   ],
   returning: [
     "Welcome back! 😊",

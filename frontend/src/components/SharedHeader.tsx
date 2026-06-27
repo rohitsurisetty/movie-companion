@@ -1,6 +1,6 @@
 import React from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, Modal, Pressable,
+  View, Text, StyleSheet, TouchableOpacity,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppStore, AppMode, getAuth } from '../store';
@@ -20,14 +20,16 @@ export interface ThemeColors {
   textMuted: string;
   border: string;
   gold: string;
+  // Kept for backwards compatibility – callers that still reference these
+  // will receive sensible defaults but they are no longer rendered in the UI.
   modeIcon: any;
   modeName: string;
 }
 
-export const getThemeColors = (mode: AppMode): ThemeColors => {
-  const isDate = mode === 'date';
+// Single unified theme (the previous "Movie Date" red theme is the new default).
+export const getThemeColors = (_mode?: AppMode): ThemeColors => {
   return {
-    primary: isDate ? '#E50914' : '#2196F3',
+    primary: '#E50914',
     bg: '#121212',
     bgCard: '#1E1E1E',
     text: '#FFFFFF',
@@ -35,103 +37,42 @@ export const getThemeColors = (mode: AppMode): ThemeColors => {
     textMuted: '#888888',
     border: '#333333',
     gold: '#FFD700',
-    modeIcon: isDate ? 'heart' : 'people',
-    modeName: isDate ? 'Movie Date' : 'Movie Buddy',
+    modeIcon: 'film-outline',
+    modeName: 'Film Companion',
   };
 };
 
-// Mode Switcher Modal
-export function ModeSwitcher({
-  visible, onClose, currentMode, onModeChange, colors,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  currentMode: AppMode;
-  onModeChange: (mode: AppMode) => void;
-  colors: ThemeColors;
-}) {
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={modalStyles.overlay} onPress={onClose}>
-        <Pressable style={[modalStyles.container, { backgroundColor: colors.bgCard }]} onPress={(e) => e.stopPropagation()}>
-          <View style={modalStyles.handle} />
-          <Text style={[modalStyles.title, { color: colors.text }]}>Switch Mode</Text>
-          
-          <TouchableOpacity
-            style={[
-              modalStyles.modeOption,
-              currentMode === 'date' && { borderColor: '#E50914', backgroundColor: 'rgba(229,9,20,0.1)' }
-            ]}
-            onPress={() => { onModeChange('date'); onClose(); }}
-          >
-            <View style={[modalStyles.modeIcon, { backgroundColor: 'rgba(229,9,20,0.2)' }]}>
-              <Ionicons name="heart" size={28} color="#E50914" />
-            </View>
-            <View style={modalStyles.modeInfo}>
-              <Text style={[modalStyles.modeName, { color: colors.text }]}>Movie Date</Text>
-              <Text style={[modalStyles.modeDesc, { color: colors.textSecondary }]}>Find romantic movie partners</Text>
-            </View>
-            {currentMode === 'date' && (
-              <Ionicons name="checkmark-circle" size={24} color="#E50914" />
-            )}
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              modalStyles.modeOption,
-              currentMode === 'buddy' && { borderColor: '#2196F3', backgroundColor: 'rgba(33,150,243,0.1)' }
-            ]}
-            onPress={() => { onModeChange('buddy'); onClose(); }}
-          >
-            <View style={[modalStyles.modeIcon, { backgroundColor: 'rgba(33,150,243,0.2)' }]}>
-              <Ionicons name="people" size={28} color="#2196F3" />
-            </View>
-            <View style={modalStyles.modeInfo}>
-              <Text style={[modalStyles.modeName, { color: colors.text }]}>Movie Buddy</Text>
-              <Text style={[modalStyles.modeDesc, { color: colors.textSecondary }]}>Find friends to watch with</Text>
-            </View>
-            {currentMode === 'buddy' && (
-              <Ionicons name="checkmark-circle" size={24} color="#2196F3" />
-            )}
-          </TouchableOpacity>
-        </Pressable>
-      </Pressable>
-    </Modal>
-  );
-}
-
-// Shared Header Component
+// Shared Header Component – mode switcher removed.
+// Menu button is hidden by default (kept as a no-op placeholder so existing
+// callers compile). showModeIcon is intentionally ignored.
 export function SharedHeader({
   title,
-  showModeIcon = true,
-  onMenuPress,
+  onMenuPress, // legacy prop, ignored
   colors,
   showFiltersIcon = true,
 }: {
   title?: string;
   showModeIcon?: boolean;
-  onMenuPress: () => void;
+  onMenuPress?: () => void;
   colors: ThemeColors;
   showFiltersIcon?: boolean;
 }) {
   const router = useRouter();
-  
+
   const handleFiltersPress = () => {
     router.push('/filters');
   };
-  
+
   return (
     <View style={[headerStyles.header, { borderBottomColor: colors.border }]}>
-      <TouchableOpacity
-        style={headerStyles.menuBtn}
-        onPress={onMenuPress}
-        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-      >
-        <Ionicons name="menu" size={26} color={colors.text} />
-      </TouchableOpacity>
+      {/* Brand mark on the left – no longer a mode selector */}
+      <View style={headerStyles.brandMark}>
+        <Ionicons name="film-outline" size={22} color={colors.primary} />
+      </View>
       <View style={headerStyles.headerCenter}>
-        {showModeIcon && <Ionicons name={colors.modeIcon} size={22} color={colors.primary} />}
-        <Text style={[headerStyles.headerTitle, { color: colors.text }]}>{title || colors.modeName}</Text>
+        <Text style={[headerStyles.headerTitle, { color: colors.text }]}>
+          {title || colors.modeName}
+        </Text>
       </View>
       {showFiltersIcon ? (
         <TouchableOpacity
@@ -148,12 +89,24 @@ export function SharedHeader({
   );
 }
 
-// Hook to manage mode state - Uses Zustand global store
+// ModeSwitcher kept as a no-op component so legacy imports keep compiling.
+// It renders nothing.
+export function ModeSwitcher(_props: {
+  visible: boolean;
+  onClose: () => void;
+  currentMode: AppMode;
+  onModeChange: (mode: AppMode) => void;
+  colors: ThemeColors;
+}) {
+  return null;
+}
+
+// Hook kept for backwards compatibility. Mode is always 'date' now.
 export function useAppMode() {
   const mode = useAppStore((state) => state.mode);
   const setModeGlobal = useAppStore((state) => state.setMode);
   const [showModeDrawer, setShowModeDrawer] = React.useState(false);
-  
+
   const colors = getThemeColors(mode);
 
   const setMode = (newMode: AppMode) => {
@@ -169,21 +122,6 @@ export function useAppMode() {
   };
 }
 
-const modalStyles = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
-  container: { borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: 40 },
-  handle: { width: 40, height: 4, backgroundColor: '#555', borderRadius: 2, alignSelf: 'center', marginBottom: 20 },
-  title: { fontSize: 22, fontWeight: 'bold', marginBottom: 20, textAlign: 'center' },
-  modeOption: {
-    flexDirection: 'row', alignItems: 'center', padding: 16,
-    borderRadius: 16, borderWidth: 2, borderColor: '#333', marginBottom: 12,
-  },
-  modeIcon: { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', marginRight: 16 },
-  modeInfo: { flex: 1 },
-  modeName: { fontSize: 18, fontWeight: '600', marginBottom: 2 },
-  modeDesc: { fontSize: 13 },
-});
-
 const headerStyles = StyleSheet.create({
   header: {
     flexDirection: 'row',
@@ -193,7 +131,7 @@ const headerStyles = StyleSheet.create({
     paddingVertical: 12,
     borderBottomWidth: 1,
   },
-  menuBtn: {
+  brandMark: {
     width: 40,
     height: 40,
     alignItems: 'center',

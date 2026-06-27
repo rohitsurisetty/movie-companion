@@ -566,48 +566,14 @@ export default function FeedScreen() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaView style={styles.container} edges={['top']}>
-        {/* Header with Mode Toggle */}
+        {/* Header */}
         <View style={styles.header}>
-          {/* Top row with Mode Toggle and Filters Icon */}
+          {/* Top row with brand mark and Filters Icon */}
           <View style={styles.headerTopRow}>
-            {/* Mode Toggle - Top Left */}
-            <View style={styles.headerModeToggle}>
-              <TouchableOpacity
-                style={[
-                  styles.headerModeButton,
-                  mode === 'buddy' && styles.headerModeButtonActiveBuddy,
-                ]}
-                onPress={() => setMode('buddy')}
-              >
-                <Ionicons 
-                  name="people" 
-                  size={14} 
-                  color={mode === 'buddy' ? '#FFF' : COLORS.textSecondary} 
-                />
-                <Text style={[
-                  styles.headerModeText,
-                  mode === 'buddy' && styles.headerModeTextActive,
-                ]}>Buddy</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.headerModeButton,
-                  mode === 'date' && styles.headerModeButtonActiveDate,
-                ]}
-                onPress={() => setMode('date')}
-              >
-                <Ionicons 
-                  name="heart" 
-                  size={14} 
-                  color={mode === 'date' ? '#FFF' : COLORS.textSecondary} 
-                />
-                <Text style={[
-                  styles.headerModeText,
-                  mode === 'date' && styles.headerModeTextActive,
-                ]}>Date</Text>
-              </TouchableOpacity>
+            <View style={styles.brandMark}>
+              <Ionicons name="film-outline" size={22} color={COLORS.primary} />
             </View>
-            
+
             {/* Filters Icon - Top Right */}
             <TouchableOpacity
               style={styles.filtersBtn}
@@ -623,7 +589,7 @@ export default function FeedScreen() {
             <Text style={styles.headerTitle}>Matches</Text>
             <Text style={styles.headerSubtitle}>
               {matches.length > 0 
-                ? `${matches.length} compatible ${mode === 'date' ? 'dates' : 'buddies'}`
+                ? `${matches.length} compatible profiles`
                 : 'Discover your matches'
               }
             </Text>
@@ -752,6 +718,12 @@ const styles = StyleSheet.create({
     padding: 4,
     alignSelf: 'flex-start',
     marginBottom: 12,
+  },
+  brandMark: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerModeButton: {
     flexDirection: 'row',

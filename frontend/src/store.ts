@@ -46,60 +46,27 @@ interface AppState {
   initializeMode: () => Promise<void>;
 }
 
+// NOTE: "Buddy" / "Date" modes have been removed from the product.
+// We keep this store shape for backwards-compatibility with screens that
+// still reference `mode`, but the mode is always forced to 'date' and
+// `setMode` is a no-op. No persistence and no backend sync.
 export const useAppStore = create<AppState>((set) => ({
   mode: 'date',
-  setMode: async (mode: AppMode) => {
-    set({ mode });
-    // Save to AsyncStorage
-    await AsyncStorage.setItem(MODE_KEY, mode);
-    // Sync to backend
-    try {
-      const auth = await getAuth();
-      if (auth?.user_id) {
-        const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
-        fetch(`${BACKEND_URL}/api/user/mode`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ user_id: auth.user_id, mode }),
-        }).catch(e => console.log('Failed to sync mode:', e));
-      }
-    } catch (e) {
-      console.log('Failed to sync mode to backend:', e);
-    }
+  setMode: async (_mode: AppMode) => {
+    // No-op: mode selection is no longer exposed in the UI.
+    set({ mode: 'date' });
   },
   initializeMode: async () => {
-    const savedMode = await AsyncStorage.getItem(MODE_KEY);
-    if (savedMode) {
-      set({ mode: savedMode as AppMode });
-    }
+    set({ mode: 'date' });
   },
 }));
 
-export const saveMode = async (mode: AppMode) => {
-  await AsyncStorage.setItem(MODE_KEY, mode);
-  
-  // Also sync to backend for Supabase tracking
-  try {
-    const auth = await getAuth();
-    if (auth?.user_id) {
-      const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
-      await fetch(`${BACKEND_URL}/api/user/mode`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: auth.user_id,
-          mode: mode,
-        }),
-      });
-    }
-  } catch (error) {
-    console.log('Failed to sync mode to backend:', error);
-  }
+export const saveMode = async (_mode: AppMode) => {
+  // No-op (mode selection removed)
 };
 
 export const getMode = async (): Promise<AppMode> => {
-  const mode = await AsyncStorage.getItem(MODE_KEY);
-  return (mode as AppMode) || 'date';
+  return 'date';
 };
 
 export const saveAuth = async (data: any) => {

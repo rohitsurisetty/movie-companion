@@ -1384,17 +1384,11 @@ export default function SwipeScreen() {
     <SafeAreaView style={dynamicStyles.container} testID="swipe-screen">
       {/* Header */}
       <View style={[styles.header, dynamicStyles.headerBorder]}>
-        <TouchableOpacity
-          style={styles.menuBtn}
-          onPress={() => setShowModeDrawer(true)}
-          testID="menu-btn"
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <Ionicons name="menu" size={26} color={colors.text} />
-        </TouchableOpacity>
+        <View style={styles.brandMark}>
+          <Ionicons name="film-outline" size={22} color={colors.primary} />
+        </View>
         <View style={styles.headerCenter}>
-          <Ionicons name={colors.modeIcon} size={22} color={colors.primary} />
-          <Text style={[styles.headerTitle, { color: colors.text }]}>{colors.modeName}</Text>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>Discover</Text>
         </View>
         <TouchableOpacity
           style={styles.profileBtn}
@@ -1518,13 +1512,6 @@ export default function SwipeScreen() {
         movieTitle={pendingMovie?.title || ''}
         colors={colors}
       />
-      <ModeSwitcher
-        visible={showModeDrawer}
-        onClose={() => setShowModeDrawer(false)}
-        currentMode={mode}
-        onModeChange={setMode}
-        colors={colors}
-      />
       <ProfileDrawer
         visible={showProfileDrawer}
         onClose={() => setShowProfileDrawer(false)}
@@ -1571,6 +1558,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.m, paddingVertical: SPACING.s, borderBottomWidth: 1,
   },
   menuBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  brandMark: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   profileBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   headerCenter: { flexDirection: 'row', alignItems: 'center', gap: SPACING.s },
   headerTitle: { fontSize: 18, fontWeight: 'bold' },

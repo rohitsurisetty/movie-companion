@@ -333,7 +333,7 @@ export default function AuthScreen() {
             <Text style={styles.title}>Film Companion</Text>
             <View style={styles.divider} />
             <Text style={styles.subtitle}>
-              Find people who have the same movie taste as you
+              We help you match with someone who shares your movie taste.
             </Text>
           </View>
 

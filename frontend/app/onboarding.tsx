@@ -12,7 +12,6 @@ import TopMoviesStep from '../src/components/TopMoviesStep';
 import OptionalProfileStep from '../src/components/OptionalProfileStep';
 import ProfilePreviewStep from '../src/components/ProfilePreviewStep';
 import PublicProfilePreviewStep from '../src/components/PublicProfilePreviewStep';
-import ModeSelectionStep from '../src/components/ModeSelectionStep';
 import PhotoUploadStep from '../src/components/PhotoUploadStep';
 import TinaChoiceStep from '../src/components/TinaChoiceStep';
 import TinaChatScreen from '../src/components/TinaChatScreen';
@@ -36,14 +35,13 @@ const STEP_TOP_MOVIES = 10;
 const STEP_OPTIONAL = 11;
 const STEP_PREVIEW = 12;
 const STEP_PUBLIC_PREVIEW = 13;
-const STEP_MODE = 14;
 
-const TOTAL_STEPS = 15; // Now includes Tina choice step
+const TOTAL_STEPS = 14; // Mode step removed
 
 const STEP_LABELS = [
   'Basic Info', 'Add Photos', 'Create Profile', 'Looking For', 'Want to Meet', 
   'Languages', 'Movie Frequency', 'OTT / Theatre', 'Film Languages', 'Genres',
-  'Top Movies', 'Optional Info', 'Preview', 'Public Preview', 'Mode',
+  'Top Movies', 'Optional Info', 'Preview', 'Public Preview',
 ];
 
 type SelectionConfig = {
@@ -196,11 +194,6 @@ export default function OnboardingScreen() {
       next++;
     }
     
-    // Skip Mode selection if already collected
-    if (next === STEP_MODE && isFieldCollectedByTina('movieBuddyMode') && isFieldCollectedByTina('movieDateMode')) {
-      next++;
-    }
-    
     return next;
   };
 
@@ -336,7 +329,7 @@ export default function OnboardingScreen() {
   };
 
   // Steps with their own buttons
-  const STEPS_WITH_OWN_BUTTON = [0, 1, 2, 10, 11, 12, 13, 14];
+  const STEPS_WITH_OWN_BUTTON = [0, 1, 2, 10, 11, 12, 13];
   const showSharedButton = !STEPS_WITH_OWN_BUTTON.includes(step);
 
   // Go back to edit step from public preview
@@ -438,10 +431,6 @@ export default function OnboardingScreen() {
     // Step 13: Public Profile Preview
     if (step === STEP_PUBLIC_PREVIEW) {
       return <PublicProfilePreviewStep data={data} onEdit={handleEditFromPreview} onContinue={handleNext} />;
-    }
-    // Step 14: Mode Selection
-    if (step === STEP_MODE) {
-      return <ModeSelectionStep data={data} onUpdate={updateField} onNext={handleNext} />;
     }
     return null;
   };

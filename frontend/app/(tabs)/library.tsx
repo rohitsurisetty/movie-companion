@@ -494,15 +494,6 @@ export default function LibraryScreen() {
           }}
           onSubmit={handleRatingSubmit}
         />
-
-        {/* Mode Switcher Modal */}
-        <ModeSwitcher
-          visible={showModeDrawer}
-          onClose={() => setShowModeDrawer(false)}
-          currentMode={mode}
-          onModeChange={setMode}
-          colors={colors}
-        />
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
