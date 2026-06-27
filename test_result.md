@@ -9952,11 +9952,11 @@ agent_communication:
 
   - task: "Tina Voice Chat (ElevenLabs TTS + Scribe STT)"
     implemented: true
-    working: "NA"
+    working: true
     file: "/app/backend/tina_voice_service.py, /app/backend/server.py, /app/frontend/src/components/GlobalTinaChatScreen.tsx"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: "NA"
         agent: "main"
@@ -10004,3 +10004,17 @@ agent_communication:
         - /app/backend/tina_voice_service.py
         - /app/backend/server.py (lines 3270-3315)
         - .env has ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID=EXAVITQu4vr4xnSDxMaL
+      - working: true
+        agent: "testing"
+        comment: |
+          ✅ VERIFIED (June 27, 2026 — iteration_9): 9/9 pytest cases passed
+          for the three voice endpoints + smoke checks.
+          - GET /api/tina/voice/status → { enabled: true }
+          - POST /api/tina/voice/speak → returns valid data:audio/mpeg;base64,
+            URI (≈30 KB MP3, valid ID3 header). Empty/whitespace text → 400.
+          - POST /api/tina/voice/transcribe → round-trip (synthesize → re-upload)
+            returns success=true with non-empty text. No-file → 422, empty body → 400.
+          - Existing Tina endpoints (/welcome-back, /chat) still return 200.
+          - Voice = Sarah (EXAVITQu4vr4xnSDxMaL), Free-tier compatible (no upgrade).
+          - Backend logs confirmed via /var/log/supervisor/backend.out.log
+          NO blockers. Test report: /app/test_reports/iteration_9.json

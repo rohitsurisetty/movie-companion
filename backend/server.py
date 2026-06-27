@@ -3282,8 +3282,8 @@ async def tina_voice_status_endpoint():
 
 @api_router.post("/tina/voice/speak")
 async def tina_voice_speak_endpoint(req: TinaSpeakRequest):
-    """Generate Tina's voice reply (Indian English female) and return a
-    base64-encoded MP3 audio data URI suitable for `expo-audio`."""
+    """Generate Tina's voice reply (Sarah – premade female, Free-tier compatible)
+    and return a base64-encoded MP3 audio data URI suitable for `expo-audio`."""
     try:
         if not req.text or not req.text.strip():
             raise HTTPException(status_code=400, detail="text is required")

@@ -6,8 +6,10 @@ deliberately keep the payload small (base64-encoded MP3) so the React Native
 client can play the audio with `expo-audio` without needing any extra
 plumbing.
 
-Voice default: Monika Sogam (Indian English female) – `UYoWPkHjaRgjWccloxC5`.
-Override at runtime via the `ELEVENLABS_VOICE_ID` env var.
+Voice default: Sarah (premade female, ID `EXAVITQu4vr4xnSDxMaL`) – this is the
+ElevenLabs Free-tier-compatible voice. To switch to an Indian English voice
+such as `UYoWPkHjaRgjWccloxC5` (Monika Sogam) the user must upgrade to a paid
+plan; that voice ID can then be set via the `ELEVENLABS_VOICE_ID` env var.
 """
 
 import os
@@ -25,7 +27,7 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
-DEFAULT_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "UYoWPkHjaRgjWccloxC5")  # Monika Sogam – Indian English Female
+DEFAULT_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "EXAVITQu4vr4xnSDxMaL")  # Sarah – premade female (Free-tier compatible)
 
 # Models: eleven_multilingual_v2 handles English with non-native accents well.
 # eleven_flash_v2_5 is much faster (~75ms) but a bit less expressive – we use it
