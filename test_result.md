@@ -9949,3 +9949,58 @@ agent_communication:
             no-op on web.
           - POST /api/chat/delete returns 400 on re-delete (non-idempotent);
             frontend tolerates this.
+
+  - task: "Tina Voice Chat (ElevenLabs TTS + Scribe STT)"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/tina_voice_service.py, /app/backend/server.py, /app/frontend/src/components/GlobalTinaChatScreen.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          Wired the mic + speaker UI in GlobalTinaChatScreen.tsx using expo-audio
+          (useAudioRecorder, useAudioPlayer). Composer now shows a mic button
+          when input is empty; tapping it asks for mic permission, records,
+          then uploads to POST /api/tina/voice/transcribe. The transcript is
+          sent to /api/tina/chat. Tina's reply is auto-played via
+          /api/tina/voice/speak when the user used voice mode, plus every
+          Tina bubble has a "Play" speaker chip.
+
+          BACKEND endpoints to retest:
+            - GET  /api/tina/voice/status  -> { enabled: true }
+            - POST /api/tina/voice/speak   { text: "..." } -> { success, audio: "data:audio/mpeg;base64,..." }
+            - POST /api/tina/voice/transcribe (multipart `audio` field) -> { success, text }
+
+          Voice = Sarah (premade, American female, ID EXAVITQu4vr4xnSDxMaL)
+          because the user's ElevenLabs API key is on the Free plan and
+          library voices (Monika Sogam, Raghav) return 402.
+
+          Frontend mic recording will work on real devices / dev builds;
+          web preview may or may not record depending on browser MediaRecorder
+          support. The Play button on Tina messages works in all environments.
+
+agent_communication:
+    -agent: "main"
+    -message: |
+      Please run BACKEND-ONLY tests for the new Tina voice endpoints:
+        1) GET /api/tina/voice/status returns { enabled: true }.
+        2) POST /api/tina/voice/speak with body {"text":"Hi, I am Tina"} returns
+           success=true and an audio string starting with "data:audio/mpeg;base64,"
+           that is at least a few thousand chars long.
+        3) POST /api/tina/voice/speak with an empty text -> 400.
+        4) POST /api/tina/voice/transcribe with a tiny .mp3/.wav generated from
+           the /speak endpoint (multipart field name "audio") returns success=true
+           and a `text` field (string, may be empty if no speech).
+        5) POST /api/tina/voice/transcribe with no file / empty body -> 4xx.
+
+      Do NOT test the frontend mic recording – that requires a real device and
+      is out of scope for this iteration. Just confirm the three backend
+      endpoints are correctly wired.
+
+      File references:
+        - /app/backend/tina_voice_service.py
+        - /app/backend/server.py (lines 3270-3315)
+        - .env has ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID=EXAVITQu4vr4xnSDxMaL

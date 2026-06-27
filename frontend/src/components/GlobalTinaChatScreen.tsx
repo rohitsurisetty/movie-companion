@@ -13,8 +13,9 @@ import {
   useAudioPlayer,
   RecordingPresets,
   setAudioModeAsync,
-  AudioModule,
+  requestRecordingPermissionsAsync,
 } from 'expo-audio';
+import * as Linking from 'expo-linking';
 import { useTina, UserProfileData, Message } from '../context/TinaContext';
 
 const { width, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -78,6 +79,22 @@ export default function GlobalTinaChatScreen({
   const [currentDeepLink, setCurrentDeepLink] = useState<DeepLinkAction | null>(null);
   const [hasGreetedThisSession, setHasGreetedThisSession] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  // ===== VOICE STATE =====
+  const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [voiceModeActive, setVoiceModeActive] = useState(false); // last input was via voice -> autoplay reply
+  const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [currentAudioSource, setCurrentAudioSource] = useState<string | null>(null);
+  const durationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const audioBlobUrlsRef = useRef<string[]>([]);
+
+  // expo-audio hooks – created at top level (required by hooks rules)
+  const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const recorderState = useAudioRecorderState(audioRecorder, 250);
+  const audioPlayer = useAudioPlayer(null);
   
   const flatListRef = useRef<FlatList>(null);
   const typingAnimation = useRef(new Animated.Value(0)).current;
@@ -323,6 +340,271 @@ export default function GlobalTinaChatScreen({
     }
   }, [userId, userName, isOnboardingComplete, tinaState.onboardingStage, hasGreetedThisSession, getMissingFields, addMessage]);
 
+  // ========== VOICE: RECORDING + PLAYBACK ==========
+
+  // Format seconds to mm:ss
+  const formatDuration = (seconds: number) => {
+    const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+    const s = Math.floor(seconds % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  };
+
+  // Convert recorded file URI to FormData for upload
+  const buildAudioFormData = useCallback(async (uri: string): Promise<FormData> => {
+    const form = new FormData();
+    if (Platform.OS === 'web') {
+      // On web, recorder returns a blob: URL - fetch & wrap as File
+      const res = await fetch(uri);
+      const blob = await res.blob();
+      const ext = blob.type?.includes('webm') ? 'webm' : blob.type?.includes('mp4') ? 'm4a' : 'webm';
+      form.append('audio', new File([blob], `tina_voice.${ext}`, { type: blob.type || 'audio/webm' }));
+    } else {
+      // Native: file:// uri – pass directly with name + type
+      const filename = uri.split('/').pop() || 'tina_voice.m4a';
+      const match = /\.(\w+)$/.exec(filename);
+      const type = match ? `audio/${match[1] === 'm4a' ? 'mp4' : match[1]}` : 'audio/m4a';
+      // @ts-ignore – React Native specific FormData file shape
+      form.append('audio', { uri, name: filename, type });
+    }
+    return form;
+  }, []);
+
+  const handleStartRecording = useCallback(async () => {
+    if (isRecording || isTranscribing) return;
+    setVoiceError(null);
+
+    try {
+      // Ask for mic permission contextually
+      const perm = await requestRecordingPermissionsAsync();
+      if (!perm.granted) {
+        if (perm.canAskAgain === false) {
+          setVoiceError("Microphone access is blocked. Tap to open Settings.");
+        } else {
+          setVoiceError("Microphone permission is required to chat by voice.");
+        }
+        return;
+      }
+
+      // Configure audio mode for recording (route audio properly on iOS)
+      try {
+        await setAudioModeAsync({
+          allowsRecording: true,
+          playsInSilentMode: true,
+        });
+      } catch (e) {
+        console.warn('[GlobalTina] setAudioModeAsync failed:', e);
+      }
+
+      // Prepare and start
+      await audioRecorder.prepareToRecordAsync();
+      audioRecorder.record();
+      setIsRecording(true);
+      setRecordingDuration(0);
+
+      // Tick a duration timer (fallback to recorderState too)
+      if (durationTimerRef.current) clearInterval(durationTimerRef.current);
+      durationTimerRef.current = setInterval(() => {
+        setRecordingDuration((d) => d + 1);
+      }, 1000);
+    } catch (err: any) {
+      console.error('[GlobalTina] startRecording error:', err);
+      setVoiceError(err?.message || "Couldn't start recording.");
+      setIsRecording(false);
+    }
+  }, [audioRecorder, isRecording, isTranscribing]);
+
+  const handleCancelRecording = useCallback(async () => {
+    try {
+      if (durationTimerRef.current) {
+        clearInterval(durationTimerRef.current);
+        durationTimerRef.current = null;
+      }
+      if (audioRecorder.isRecording) {
+        await audioRecorder.stop();
+      }
+    } catch (e) {
+      console.warn('[GlobalTina] cancelRecording error:', e);
+    } finally {
+      setIsRecording(false);
+      setRecordingDuration(0);
+    }
+  }, [audioRecorder]);
+
+  const handleStopAndSendRecording = useCallback(async () => {
+    if (!isRecording) return;
+
+    if (durationTimerRef.current) {
+      clearInterval(durationTimerRef.current);
+      durationTimerRef.current = null;
+    }
+
+    try {
+      await audioRecorder.stop();
+    } catch (e) {
+      console.warn('[GlobalTina] recorder.stop error:', e);
+    }
+    setIsRecording(false);
+
+    const uri = audioRecorder.uri;
+    if (!uri) {
+      setVoiceError("Recording is too short. Hold for at least 1 second.");
+      return;
+    }
+
+    // Sanity: enforce a minimum duration
+    if (recordingDuration < 1) {
+      setVoiceError("Hold the mic and speak a little longer.");
+      setRecordingDuration(0);
+      return;
+    }
+
+    setIsTranscribing(true);
+    setVoiceModeActive(true);
+
+    try {
+      const form = await buildAudioFormData(uri);
+      const res = await fetch(`${API_BASE}/api/tina/voice/transcribe`, {
+        method: 'POST',
+        body: form,
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success || !data.text) {
+        throw new Error(data.detail || data.error || 'Transcription failed');
+      }
+
+      const transcript = (data.text as string).trim();
+      if (!transcript) {
+        setVoiceError("I didn't catch that — try again.");
+        return;
+      }
+
+      addMessage(transcript, true);
+      sendToTina(transcript);
+    } catch (err: any) {
+      console.error('[GlobalTina] transcribe error:', err);
+      setVoiceError(err?.message || "Couldn't transcribe your voice.");
+    } finally {
+      setIsTranscribing(false);
+      setRecordingDuration(0);
+    }
+  }, [audioRecorder, isRecording, recordingDuration, addMessage, sendToTina, buildAudioFormData]);
+
+  // Play Tina's TTS audio for a given message
+  const handlePlayTinaMessage = useCallback(async (messageId: string, text: string) => {
+    if (!text) return;
+
+    // Tapping the currently playing message -> stop
+    if (playingMessageId === messageId) {
+      try {
+        audioPlayer.pause();
+      } catch (e) { /* noop */ }
+      setPlayingMessageId(null);
+      return;
+    }
+
+    try {
+      setPlayingMessageId(messageId);
+      const res = await fetch(`${API_BASE}/api/tina/voice/speak`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success || !data.audio) {
+        throw new Error(data.detail || 'TTS failed');
+      }
+
+      let playable: string = data.audio;
+      // On web, blob URLs play more reliably than data URIs for some browsers
+      if (Platform.OS === 'web' && playable.startsWith('data:')) {
+        try {
+          const resp = await fetch(playable);
+          const blob = await resp.blob();
+          const blobUrl = URL.createObjectURL(blob);
+          audioBlobUrlsRef.current.push(blobUrl);
+          playable = blobUrl;
+        } catch (e) {
+          console.warn('[GlobalTina] blob conversion failed, falling back to data uri', e);
+        }
+      }
+      setCurrentAudioSource(playable);
+    } catch (err: any) {
+      console.error('[GlobalTina] TTS playback error:', err);
+      setPlayingMessageId(null);
+      setVoiceError(err?.message || "Couldn't play voice reply.");
+    }
+  }, [audioPlayer, playingMessageId]);
+
+  // When currentAudioSource changes, swap source and start playback
+  useEffect(() => {
+    if (!currentAudioSource) return;
+    try {
+      // @ts-ignore – replace exists at runtime on AudioPlayer
+      audioPlayer.replace({ uri: currentAudioSource });
+      audioPlayer.seekTo(0);
+      audioPlayer.play();
+    } catch (e) {
+      console.warn('[GlobalTina] audioPlayer.play error:', e);
+      setPlayingMessageId(null);
+    }
+  }, [currentAudioSource]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto clear playingMessageId when playback finishes
+  useEffect(() => {
+    // expo-audio AudioPlayer exposes addListener('playbackStatusUpdate')
+    // but we'll poll via a lightweight effect
+    if (!playingMessageId) return;
+    const interval = setInterval(() => {
+      try {
+        // @ts-ignore – currentTime / duration / playing fields
+        const playing = audioPlayer.playing;
+        // @ts-ignore
+        const didFinish = audioPlayer.currentTime > 0 && audioPlayer.duration > 0
+          // @ts-ignore
+          && audioPlayer.currentTime >= audioPlayer.duration - 0.1;
+        if (!playing || didFinish) {
+          setPlayingMessageId(null);
+          clearInterval(interval);
+        }
+      } catch (e) {
+        clearInterval(interval);
+        setPlayingMessageId(null);
+      }
+    }, 350);
+    return () => clearInterval(interval);
+  }, [playingMessageId, audioPlayer]);
+
+  // Auto-clear voice error after a short window
+  useEffect(() => {
+    if (!voiceError) return;
+    const t = setTimeout(() => setVoiceError(null), 3500);
+    return () => clearTimeout(t);
+  }, [voiceError]);
+
+  // Cleanup blob URLs on unmount
+  useEffect(() => {
+    return () => {
+      if (durationTimerRef.current) clearInterval(durationTimerRef.current);
+      audioBlobUrlsRef.current.forEach((u) => {
+        try { URL.revokeObjectURL(u); } catch { /* noop */ }
+      });
+      audioBlobUrlsRef.current = [];
+    };
+  }, []);
+
+  // Auto-play Tina's latest reply when the user used voice mode
+  const lastAutoplayedIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!voiceModeActive || messages.length === 0 || isTyping) return;
+    const last = messages[messages.length - 1];
+    if (last.isUser) return;
+    if (lastAutoplayedIdRef.current === last.id) return;
+    lastAutoplayedIdRef.current = last.id;
+    // Disable voice mode auto-play after one auto-play to require explicit voice each time
+    setVoiceModeActive(false);
+    handlePlayTinaMessage(last.id, last.text);
+  }, [messages, voiceModeActive, isTyping, handlePlayTinaMessage]);
+
   // ========== EFFECTS ==========
 
   // Track component mount state
@@ -433,6 +715,7 @@ export default function GlobalTinaChatScreen({
     const opacity = anim.interpolate({ inputRange: [0, 1], outputRange: [0, 1] });
     const scale = anim.interpolate({ inputRange: [0, 1], outputRange: [0.8, 1] });
     const translateY = anim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] });
+    const isPlayingThis = playingMessageId === item.id;
 
     return (
       <Animated.View
@@ -454,6 +737,23 @@ export default function GlobalTinaChatScreen({
           <Text style={[styles.messageText, item.isUser && styles.userMessageText]}>
             {item.text}
           </Text>
+          {!item.isUser && !!item.text && (
+            <TouchableOpacity
+              style={styles.speakerBtn}
+              onPress={() => handlePlayTinaMessage(item.id, item.text)}
+              activeOpacity={0.7}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons
+                name={isPlayingThis ? 'pause-circle' : 'volume-high-outline'}
+                size={16}
+                color="#FF6B6B"
+              />
+              <Text style={styles.speakerLabel}>
+                {isPlayingThis ? 'Playing…' : 'Play'}
+              </Text>
+            </TouchableOpacity>
+          )}
         </View>
       </Animated.View>
     );
@@ -549,42 +849,95 @@ export default function GlobalTinaChatScreen({
         </View>
       )}
 
+      {/* Voice error toast */}
+      {voiceError && (
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={() => {
+            if (voiceError && voiceError.toLowerCase().includes('settings')) {
+              try { Linking.openSettings(); } catch { /* noop */ }
+            }
+            setVoiceError(null);
+          }}
+          style={styles.voiceErrorContainer}
+        >
+          <Ionicons name="warning-outline" size={16} color="#FFB4B4" />
+          <Text style={styles.voiceErrorText} numberOfLines={2}>{voiceError}</Text>
+        </TouchableOpacity>
+      )}
+
       {/* Composer - positioned above keyboard */}
       <View style={[
-        styles.composerContainer, 
-        { 
+        styles.composerContainer,
+        {
           paddingBottom: Math.max(insets.bottom, 8),
           marginBottom: keyboardHeight > 0 ? keyboardHeight - insets.bottom : 0,
         }
       ]}>
-        <View style={styles.composer}>
-          <TextInput
-            style={styles.input}
-            value={inputText}
-            onChangeText={text => {
-              setInputText(text);
-              setShowSendButton(text.trim().length > 0);
-            }}
-            placeholder="Type your message..."
-            placeholderTextColor="rgba(255,255,255,0.4)"
-            multiline
-            maxLength={500}
-            returnKeyType="send"
-            onSubmitEditing={handleSend}
-          />
-          <TouchableOpacity
-            style={[styles.sendBtn, showSendButton && styles.sendBtnActive]}
-            onPress={handleSend}
-            disabled={!showSendButton}
-            activeOpacity={0.7}
-          >
-            <Ionicons
-              name="send"
-              size={20}
-              color={showSendButton ? '#FFFFFF' : 'rgba(255,255,255,0.3)'}
+        {isRecording ? (
+          // Recording UI — replaces the composer while user holds the mic
+          <View style={styles.recordingBar}>
+            <TouchableOpacity
+              style={styles.recordingCancel}
+              onPress={handleCancelRecording}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="close" size={20} color="#FFFFFF" />
+            </TouchableOpacity>
+            <View style={styles.recordingMiddle}>
+              <View style={styles.recordingDot} />
+              <Text style={styles.recordingTime}>{formatDuration(recordingDuration)}</Text>
+              <Text style={styles.recordingHint}>Listening…</Text>
+            </View>
+            <TouchableOpacity
+              style={styles.recordingStop}
+              onPress={handleStopAndSendRecording}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="send" size={20} color="#FFFFFF" />
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={styles.composer}>
+            <TextInput
+              style={styles.input}
+              value={inputText}
+              onChangeText={text => {
+                setInputText(text);
+                setShowSendButton(text.trim().length > 0);
+              }}
+              placeholder={isTranscribing ? 'Transcribing your voice…' : 'Type your message…'}
+              placeholderTextColor="rgba(255,255,255,0.4)"
+              multiline
+              maxLength={500}
+              returnKeyType="send"
+              onSubmitEditing={handleSend}
+              editable={!isTranscribing}
             />
-          </TouchableOpacity>
-        </View>
+            {showSendButton ? (
+              <TouchableOpacity
+                style={[styles.sendBtn, styles.sendBtnActive]}
+                onPress={handleSend}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="send" size={20} color="#FFFFFF" />
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={[styles.sendBtn, styles.micBtn]}
+                onPress={handleStartRecording}
+                disabled={isTranscribing}
+                activeOpacity={0.7}
+              >
+                {isTranscribing ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Ionicons name="mic" size={20} color="#FFFFFF" />
+                )}
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
       </View>
     </View>
   );
@@ -784,5 +1137,89 @@ const styles = StyleSheet.create({
   },
   sendBtnActive: {
     backgroundColor: '#FF6B6B',
+  },
+  micBtn: {
+    backgroundColor: '#FF6B6B',
+  },
+  speakerBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 8,
+    paddingTop: 6,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.08)',
+  },
+  speakerLabel: {
+    color: '#FF6B6B',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  voiceErrorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: 16,
+    marginBottom: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,107,107,0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,107,107,0.35)',
+  },
+  voiceErrorText: {
+    flex: 1,
+    color: '#FFE5E5',
+    fontSize: 13,
+  },
+  recordingBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1A1A1A',
+    borderRadius: 28,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    minHeight: 56,
+    gap: 10,
+  },
+  recordingCancel: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  recordingMiddle: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 4,
+  },
+  recordingDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#FF3B30',
+  },
+  recordingTime: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '600',
+    minWidth: 48,
+  },
+  recordingHint: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 13,
+  },
+  recordingStop: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#FF6B6B',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });
