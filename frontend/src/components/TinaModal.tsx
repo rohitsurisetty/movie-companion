@@ -12,6 +12,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons';
 import { useTina } from '../context/TinaContext';
 import GlobalTinaChatScreen from './GlobalTinaChatScreen';
+import TinaCallScreen from './TinaCallScreen';
 
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -136,6 +137,14 @@ export default function TinaModal({ onNavigationRequest }: TinaModalProps) {
             
             <View style={styles.headerRight}>
               <TouchableOpacity
+                onPress={handleStartCall}
+                style={[styles.headerButton, styles.callButton]}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                accessibilityLabel="Start voice call with Tina"
+              >
+                <Ionicons name="call" size={20} color="#FFFFFF" />
+              </TouchableOpacity>
+              <TouchableOpacity
                 onPress={handleClose}
                 style={styles.headerButton}
                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
@@ -159,6 +168,19 @@ export default function TinaModal({ onNavigationRequest }: TinaModalProps) {
             />
           </View>
         </SafeAreaView>
+
+        {/* Voice call overlay – sits on top of the chat content */}
+        {callActive && (
+          <View style={StyleSheet.absoluteFillObject}>
+            <TinaCallScreen
+              visible={callActive}
+              onEnd={handleEndCall}
+              userId={userProfile?.userId || ''}
+              userName={userProfile?.name || ''}
+              isOnboardingComplete={state.isOnboardingComplete}
+            />
+          </View>
+        )}
       </Animated.View>
     </Modal>
   );
@@ -203,11 +225,21 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   headerRight: {
-    width: 44,
-    alignItems: 'flex-end',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 8,
   },
   headerButton: {
     padding: 4,
+  },
+  callButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#4CAF50',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerTitle: {
     fontSize: 18,

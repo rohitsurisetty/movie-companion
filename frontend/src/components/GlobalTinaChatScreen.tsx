@@ -17,12 +17,10 @@ import {
 } from 'expo-audio';
 import * as Linking from 'expo-linking';
 import { useTina, UserProfileData, Message } from '../context/TinaContext';
+import TinaAvatar from './TinaAvatar';
 
 const { width, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || process.env.EXPO_PUBLIC_API_URL || '';
-
-// Tina avatar
-const TINA_AVATAR = 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&h=200&fit=crop&crop=face';
 
 // All profile fields that can be collected (must match TinaContext)
 const ALL_PROFILE_FIELDS = [
@@ -726,7 +724,7 @@ export default function GlobalTinaChatScreen({
         ]}
       >
         {!item.isUser && (
-          <Image source={{ uri: TINA_AVATAR }} style={styles.avatar} />
+          <TinaAvatar size={32} style={styles.avatar} />
         )}
         <View
           style={[
@@ -764,7 +762,7 @@ export default function GlobalTinaChatScreen({
       {/* Loading State */}
       {isLoading && messages.length === 0 && (
         <View style={styles.loadingContainer}>
-          <Image source={{ uri: TINA_AVATAR }} style={styles.loadingAvatar} />
+          <TinaAvatar size={64} style={styles.loadingAvatar} />
           <ActivityIndicator size="small" color="#FF6B6B" style={{ marginTop: 12 }} />
           <Text style={styles.loadingText}>Tina is getting ready...</Text>
         </View>
@@ -791,7 +789,7 @@ export default function GlobalTinaChatScreen({
         onScrollToIndexFailed={onScrollToIndexFailed}
         ListFooterComponent={isTyping ? (
           <View style={[styles.messageRow, styles.tinaMessageRow]}>
-            <Image source={{ uri: TINA_AVATAR }} style={styles.avatar} />
+            <TinaAvatar size={32} style={styles.avatar} />
             <Animated.View style={[styles.typingBubble, { opacity: typingAnimation }]}>
               <View style={styles.typingDot} />
               <View style={[styles.typingDot, styles.typingDotMiddle]} />

@@ -16,6 +16,7 @@ import PhotoUploadStep from '../src/components/PhotoUploadStep';
 import TinaChoiceStep from '../src/components/TinaChoiceStep';
 import TinaChatScreen from '../src/components/TinaChatScreen';
 import { useTina } from '../src/context/TinaContext';
+import ErrorBoundary from '../src/components/ErrorBoundary';
 
 const API_BASE = process.env.EXPO_PUBLIC_API_URL || '';
 
@@ -157,14 +158,20 @@ export default function OnboardingScreen() {
   // Merge Tina-collected data into profile
   const mergeTinaData = (tinaData: Partial<ProfileData>) => {
     const collected: string[] = [];
-    
+
     Object.entries(tinaData).forEach(([key, value]) => {
-      if (value !== undefined && value !== null && value !== '') {
-        updateField(key, value);
-        collected.push(key);
-      }
+      // Skip undefined, null, empty string, or EMPTY array/object values.
+      // (Critical: a Tina exit-midway must NOT mark `topMovies: []` as collected,
+      // otherwise the onboarding flow will skip the Top Movies step and the
+      // Preview/Public-Preview steps later crash trying to render zero movies.)
+      if (value === undefined || value === null || value === '') return;
+      if (Array.isArray(value) && value.length === 0) return;
+      if (typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 0) return;
+
+      updateField(key, value);
+      collected.push(key);
     });
-    
+
     setTinaCollectedFields(collected);
   };
 
@@ -488,7 +495,21 @@ export default function OnboardingScreen() {
 
       {/* Step Content */}
       <View style={styles.content}>
-        {renderStep()}
+        <ErrorBoundary
+          fallbackTitle="A step hit a snag"
+          fallbackMessage="Don't worry — your progress is saved. Tap below to retry this step."
+          onReset={() => {
+            // Try to land on a safe step (Top Movies if not yet collected, else current)
+            try {
+              const safeStep = findNextStep(-1);
+              setStep(Math.max(0, safeStep));
+            } catch (e) {
+              setStep(0);
+            }
+          }}
+        >
+          {renderStep()}
+        </ErrorBoundary>
       </View>
 
       {/* Shared Continue Button (for selection steps) */}
