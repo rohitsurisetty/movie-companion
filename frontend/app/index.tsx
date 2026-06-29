@@ -333,11 +333,21 @@ export default function AuthScreen() {
             <Text style={styles.title}>Film Companion</Text>
             <View style={styles.divider} />
             <Text style={styles.subtitle}>
-              We help you match with someone who shares your movie taste.
+              World&apos;s first AI-based matchmaking platform for Movie Lovers
             </Text>
           </View>
 
           <View style={styles.buttons}>
+            <TouchableOpacity
+              style={styles.primaryBtn}
+              onPress={() => { resetForm(); setAuthMode('phone'); }}
+              testID="phone-auth-btn"
+              activeOpacity={0.8}
+            >
+              <Ionicons name="call-outline" size={20} color={COLORS.white} />
+              <Text style={styles.btnText}>Continue with Phone Number</Text>
+            </TouchableOpacity>
+
             <TouchableOpacity
               style={styles.googleBtn}
               onPress={handleGoogleAuth}
@@ -349,33 +359,13 @@ export default function AuthScreen() {
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={styles.appleBtn}
-              onPress={() => Alert.alert('Coming Soon', 'Apple Sign In will be available soon!')}
-              testID="apple-auth-btn"
-              activeOpacity={0.8}
-            >
-              <Ionicons name="logo-apple" size={20} color={COLORS.white} />
-              <Text style={styles.btnText}>Continue with Apple</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
               style={styles.outlineBtn}
               onPress={() => { resetForm(); setAuthMode('email'); }}
               testID="email-auth-btn"
               activeOpacity={0.8}
             >
               <Ionicons name="mail-outline" size={20} color={COLORS.text} />
-              <Text style={styles.outlineBtnText}>Login with Email</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.outlineBtn}
-              onPress={() => { resetForm(); setAuthMode('phone'); }}
-              testID="phone-auth-btn"
-              activeOpacity={0.8}
-            >
-              <Ionicons name="call-outline" size={20} color={COLORS.text} />
-              <Text style={styles.outlineBtnText}>Login with Phone Number</Text>
+              <Text style={styles.outlineBtnText}>Continue with Email</Text>
             </TouchableOpacity>
           </View>
 
@@ -719,16 +709,8 @@ const styles = StyleSheet.create({
     minHeight: 52,
   },
   appleBtn: {
-    backgroundColor: COLORS.bgCard,
-    paddingVertical: 16,
-    borderRadius: BORDER_RADIUS.full,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: SPACING.s,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    minHeight: 52,
+    // deprecated - kept removed
+    display: 'none',
   },
   outlineBtn: {
     backgroundColor: 'transparent',
@@ -746,8 +728,10 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.primary,
     paddingVertical: 16,
     borderRadius: BORDER_RADIUS.full,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: SPACING.s,
     minHeight: 52,
   },
   btnText: {
