@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -13,18 +13,16 @@ import OptionalProfileStep from '../src/components/OptionalProfileStep';
 import ProfilePreviewStep from '../src/components/ProfilePreviewStep';
 import PublicProfilePreviewStep from '../src/components/PublicProfilePreviewStep';
 import PhotoUploadStep from '../src/components/PhotoUploadStep';
-import TinaChoiceStep from '../src/components/TinaChoiceStep';
 import TinaChatScreen from '../src/components/TinaChatScreen';
 import { useTina } from '../src/context/TinaContext';
 import ErrorBoundary from '../src/components/ErrorBoundary';
 
 const API_BASE = process.env.EXPO_PUBLIC_API_URL || '';
 
-// Step indices (Tina choice is now step 2)
+// Step indices — Tina is now auto-launched at step 2 (no manual choice)
 const STEP_BASIC_INFO = 0;
 const STEP_PHOTO_UPLOAD = 1;
-const STEP_TINA_CHOICE = 2;
-const STEP_TINA_CHAT = -1; // Special step for Tina chat screen
+const STEP_TINA_AUTO = 2; // Auto-launches Tina chat
 const STEP_LOOKING_FOR = 3;
 const STEP_PARTNER_PREF = 4;
 const STEP_LANGUAGES = 5;
@@ -37,10 +35,10 @@ const STEP_OPTIONAL = 11;
 const STEP_PREVIEW = 12;
 const STEP_PUBLIC_PREVIEW = 13;
 
-const TOTAL_STEPS = 14; // Mode step removed
+const TOTAL_STEPS = 14;
 
 const STEP_LABELS = [
-  'Basic Info', 'Add Photos', 'Create Profile', 'Looking For', 'Want to Meet', 
+  'Basic Info', 'Add Photos', 'Chat with Tina', 'Looking For', 'Want to Meet', 
   'Languages', 'Movie Frequency', 'OTT / Theatre', 'Film Languages', 'Genres',
   'Top Movies', 'Optional Info', 'Preview', 'Public Preview',
 ];
@@ -109,6 +107,8 @@ export default function OnboardingScreen() {
   const [tinaMovieSelectionMode, setTinaMovieSelectionMode] = useState(false);
   const [moviesForTina, setMoviesForTina] = useState<any[]>([]);
   const [returningFromMovieSelection, setReturningFromMovieSelection] = useState(false);
+  // Ref to ensure Tina auto-launches once when reaching STEP_TINA_AUTO
+  const tinaAutoLaunched = useRef(false);
 
   // USE TINA CONTEXT FOR UNIFIED STATE
   const { 
@@ -144,6 +144,16 @@ export default function OnboardingScreen() {
       setOnboardingTinaActive(false);
     };
   }, [showTinaChat, setOnboardingTinaActive]);
+
+  // Auto-launch Tina chat as the only signup flow when user reaches STEP_TINA_AUTO
+  useEffect(() => {
+    if (step === STEP_TINA_AUTO && !showTinaChat && !tinaAutoLaunched.current) {
+      tinaAutoLaunched.current = true;
+      console.log('[Onboarding] Auto-launching Tina (manual form flow removed)');
+      setOnboardingStage('tina_onboarding');
+      setShowTinaChat(true);
+    }
+  }, [step, showTinaChat, setOnboardingStage]);
 
   const updateField = useCallback((field: string, value: any) => {
     setData(prev => ({ ...prev, [field]: value }));
@@ -236,8 +246,8 @@ export default function OnboardingScreen() {
       while (prev >= STEP_LOOKING_FOR && prev <= STEP_GENRES && shouldSkipSelectionStep(prev)) {
         prev--;
       }
-      if (prev === STEP_TINA_CHOICE && tinaCollectedFields.length > 0) {
-        // Skip Tina choice if already used
+      if (prev === STEP_TINA_AUTO) {
+        // Tina auto-launch step: always skip back to photo upload (no manual form)
         prev = STEP_PHOTO_UPLOAD;
       }
       setStep(Math.max(0, prev));
@@ -259,12 +269,6 @@ export default function OnboardingScreen() {
     setShowTinaChat(true);
   };
 
-  const handleContinueManually = () => {
-    // Set onboarding stage to manual mode
-    setOnboardingStage('manual_onboarding');
-    handleNext(); // Go to next step (Looking For)
-  };
-
   const handleTinaComplete = (tinaData: Partial<ProfileData>) => {
     mergeTinaData(tinaData);
     setShowTinaChat(false);
@@ -272,7 +276,7 @@ export default function OnboardingScreen() {
     setOnboardingStage('manual_onboarding');
     
     // Jump to first uncollected step or finish
-    const nextStep = findNextStep(STEP_TINA_CHOICE);
+    const nextStep = findNextStep(STEP_TINA_AUTO);
     if (nextStep >= TOTAL_STEPS) {
       handleFinish();
     } else {
@@ -287,7 +291,7 @@ export default function OnboardingScreen() {
     setOnboardingStage('manual_onboarding');
     
     // Check if there are remaining fields
-    const nextStep = findNextStep(STEP_TINA_CHOICE);
+    const nextStep = findNextStep(STEP_TINA_AUTO);
     if (nextStep < TOTAL_STEPS) {
       // Show "Few more info required" - go to next uncollected step
       setStep(nextStep);
@@ -393,14 +397,16 @@ export default function OnboardingScreen() {
     if (step === STEP_PHOTO_UPLOAD) {
       return <PhotoUploadStep onNext={handlePhotoUploadComplete} />;
     }
-    // Step 2: Tina Choice (NEW)
-    if (step === STEP_TINA_CHOICE) {
+    // Step 2: Tina is auto-launched via useEffect (manual form removed)
+    // Show a loading placeholder while transitioning into Tina chat
+    if (step === STEP_TINA_AUTO) {
       return (
-        <TinaChoiceStep 
-          userName={data.name || ''}
-          onChatWithTina={handleChatWithTina}
-          onContinueManually={handleContinueManually}
-        />
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <Ionicons name="chatbubbles" size={48} color={COLORS.primary} />
+          <Text style={{ color: COLORS.textSecondary, marginTop: SPACING.m, textAlign: 'center' }}>
+            Starting your chat with Tina...
+          </Text>
+        </View>
       );
     }
     // Steps 3-9: Selection Steps
@@ -459,7 +465,7 @@ export default function OnboardingScreen() {
 
   // Calculate display step for progress (excluding Tina chat)
   const getDisplayStep = () => {
-    if (step <= STEP_TINA_CHOICE) return step;
+    if (step <= STEP_TINA_AUTO) return step;
     // Account for skipped steps
     let displayed = step;
     for (let i = STEP_LOOKING_FOR; i < step; i++) {
@@ -469,7 +475,7 @@ export default function OnboardingScreen() {
   };
 
   // Show "Few more info" header when coming back from Tina with partial data
-  const showPartialHeader = tinaCollectedFields.length > 0 && step > STEP_TINA_CHOICE;
+  const showPartialHeader = tinaCollectedFields.length > 0 && step > STEP_TINA_AUTO;
 
   // For the Public Profile Preview step, render full-screen (no onboarding chrome)
   // so it visually matches the Profile/Match-section preview exactly.

@@ -84,6 +84,18 @@ from tina_voice_service import (
     is_voice_enabled as tina_voice_enabled,
 )
 
+# Tina personality engine – 360° Dating Profile Framework (hidden scoring engine)
+from tina_personality import (
+    set_personality_db,
+    QUESTIONS as PERSONALITY_QUESTIONS,
+    QUESTION_BY_ID as PERSONALITY_QUESTION_BY_ID,
+    finalize_profile as personality_finalize_profile,
+    save_tina_personality,
+    get_tina_personality,
+    get_dynamic_movie_genres,
+    get_love_tropes,
+)
+
 # Import picture service for profile photos
 from picture_service import (
     upload_picture_to_storage,
@@ -3312,6 +3324,138 @@ async def tina_voice_transcribe_endpoint(audio: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ---------------------------------------------------------------------------
+# 360° Dating Profile Framework — hidden scoring engine endpoints
+# ---------------------------------------------------------------------------
+
+class Tina360Answer(BaseModel):
+    question_id: str
+    option_key: str
+
+
+class Tina360SubmitRequest(BaseModel):
+    user_id: str
+    answers: List[Tina360Answer]
+    # Optional explicit extras like favourite genres/tropes captured during chat
+    favourite_genres: Optional[List[str]] = None
+    favourite_trope: Optional[str] = None
+
+
+@api_router.get("/tina/360/questions")
+async def tina_360_questions_endpoint():
+    """
+    Return the 8 high-signal onboarding questions Tina asks (with options as
+    tappable chips) PLUS dynamic TMDB-backed extras (current movie genres and
+    curated love-story tropes) so Tina can adapt conversationally.
+    The hidden scoring vectors stay server-side.
+    """
+    try:
+        genres = await get_dynamic_movie_genres(limit=12)
+        tropes = await get_love_tropes()
+        public_questions = [
+            {
+                "id": q["id"],
+                "intent": q["intent"],
+                "options": [
+                    {"key": o["key"], "emoji": o.get("emoji", ""), "label": o["label"]}
+                    for o in q["options"]
+                ],
+            }
+            for q in PERSONALITY_QUESTIONS
+        ]
+        return {
+            "success": True,
+            "questions": public_questions,
+            "dynamic": {
+                "movie_genres": genres,
+                "love_tropes": tropes,
+            },
+            "total_questions": len(public_questions),
+        }
+    except Exception as e:
+        logger.error(f"360 questions error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.post("/tina/360/submit")
+async def tina_360_submit_endpoint(req: Tina360SubmitRequest):
+    """
+    Take the user's 8 answers, compute the hidden 360° personality profile,
+    persist it to `tina_profiles` and return ONLY the public-safe parts
+    (archetype, intent split, primary love language) plus a fun reveal copy.
+    The raw scores/vector are NEVER returned to the client.
+    """
+    try:
+        answers_dict = [
+            {"question_id": a.question_id, "option_key": a.option_key}
+            for a in req.answers
+        ]
+        if len(answers_dict) < 4:
+            raise HTTPException(
+                status_code=400,
+                detail="At least 4 answers are required to build a profile."
+            )
+        extra: Dict[str, Any] = {}
+        if req.favourite_genres:
+            extra["favourite_genres"] = req.favourite_genres
+        if req.favourite_trope:
+            extra["favourite_trope"] = req.favourite_trope
+
+        profile = personality_finalize_profile(answers_dict, extra=extra)
+        await save_tina_personality(req.user_id, profile)
+
+        archetype = profile["archetype"]
+        intent = profile["intent"]
+        ll = profile["primary_love_language"]
+
+        reveal = (
+            f"Okay {req.user_id and 'you'} — I've got you figured out 💫\n"
+            f"You're {archetype['emoji']} **{archetype['title']}** — {archetype['description']}\n"
+            f"Your love language reads as **{ll}**, and your vibe leans "
+            f"{intent['serious']}% serious / {intent['casual']}% casual.\n"
+            f"Ready to meet your people?"
+        )
+
+        # ONLY return public-safe data (NEVER the raw personality_vector)
+        return {
+            "success": True,
+            "archetype": archetype,
+            "intent": intent,
+            "primary_love_language": ll,
+            "reveal_message": reveal,
+            "questions_answered": profile["questions_answered"],
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"360 submit error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.get("/tina/360/profile/{user_id}")
+async def tina_360_profile_endpoint(user_id: str):
+    """
+    Returns the *public-safe* personality summary for a user. Hidden vector
+    and intermediate scores are intentionally stripped.
+    """
+    try:
+        doc = await get_tina_personality(user_id)
+        if not doc:
+            return {"success": True, "exists": False}
+        return {
+            "success": True,
+            "exists": True,
+            "archetype": doc.get("archetype"),
+            "intent": doc.get("intent"),
+            "primary_love_language": doc.get("primary_love_language"),
+            "questions_answered": doc.get("questions_answered", []),
+            "computed_at": doc.get("computed_at"),
+        }
+    except Exception as e:
+        logger.error(f"360 profile fetch error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # Include router after all routes are defined
 app.include_router(api_router)
 
@@ -3350,6 +3494,10 @@ async def startup_event():
     # Pass MongoDB db to Tina AI service
     set_tina_db(db)
     logger.info("Tina AI service connected to MongoDB")
+
+    # Pass MongoDB db to Tina personality engine (360° framework)
+    set_personality_db(db)
+    logger.info("Tina personality engine connected to MongoDB")
 
 
 @app.on_event("shutdown")
