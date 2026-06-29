@@ -10035,6 +10035,61 @@ agent_communication:
             - /app/backend/supabase_bootstrap.py (startup verification)
             - Supabase env vars in /app/backend/.env
 
+  - task: "Refactor chat.tsx — Split into modular sub-components"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/app/(tabs)/chat.tsx, /app/frontend/src/components/chat/*"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          REFACTOR (June 29, 2026): Reduced chat.tsx from 2,545 lines →
+          249 lines (a thin orchestrator). All sub-components, modals,
+          types, theme, and helpers extracted to /app/frontend/src/components/chat/.
+
+          New module structure (all under src/components/chat/):
+          - theme.ts          (COLORS, SCREEN_WIDTH/HEIGHT, API_BASE)
+          - types.ts          (Conversation, MessageRequest, FullUserProfile, BackendMessage)
+          - utils.ts          (formatTime, formatHourMinute, formatDateOrToday)
+          - constants.ts      (UNMATCH_REASONS, REPORT_REASONS — pre-existing)
+          - ProfileBottomSheet.tsx
+          - MessageRequestDetailView.tsx
+          - DidYouMeetModal.tsx
+          - ComingSoonModal.tsx
+          - UnmatchModal.tsx
+          - ReportModal.tsx
+          - MessageRequestCard.tsx
+          - ConversationItem.tsx
+          - GiftedChatScreen.tsx  (largest sub-component, 604 lines)
+          - index.ts          (barrel exports)
+
+          NO BEHAVIOR CHANGES — pure refactor. All testIDs preserved
+          (e.g. `conversation-row-${other_user_id}`).
+
+          BACKEND TESTING REQUIRED: NONE (backend untouched).
+          FRONTEND TESTING REQUIRED:
+          1. Chat tab loads — both `Chats` and `Requests` tabs render.
+          2. Tap a conversation → GiftedChatScreen opens with header,
+             messages, two-row composer (camera + input + GIF/mic/video).
+          3. Send a message → POST /api/chat/send fires; AI auto-reply
+             arrives within ~4s; new message visible in bubble list.
+          4. Header menu (•••) → View Profile / Did you meet? / Unmatch / Report.
+          5. Unmatched conversation row shows "Unmatched" badge + lock icon,
+             opens GiftedChatScreen in read-only mode (no composer, only
+             a warning notice).
+          6. Profile bottom sheet opens with photos, bio, genres, top movies.
+          7. Message Request → MessageRequestDetailView opens with
+             Messages / Profile tabs + Accept/Decline buttons.
+          8. Unmatch flow: select reason → confirm or transition to report.
+          9. Report flow: intro → reasons → details → confirmation.
+
+          Lint: 3 pre-existing exhaustive-deps warnings on intentional
+          patterns (initializeChat, fetchProfileData, fetchRequestData).
+          Zero errors. App boot screenshot verified clean.
+
 agent_communication:
     -agent: "main"
     -message: |

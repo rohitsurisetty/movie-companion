@@ -1,0 +1,44 @@
+{
+  "summary": "REFACTOR VERIFICATION (frontend-only) of chat.tsx split (2,545 -> 249-line orchestrator + 13 modular files under /app/frontend/src/components/chat/). All 11 chat flows from the review request executed against the Expo web preview at 390x844 mobile viewport. Auth bootstrapped via direct backend calls (POST /api/auth/send-email-otp + /api/auth/verify-otp returned mock OTP 880595 -> user_id user_657fdfed13c6) and injected into localStorage keys '@film_companion_auth' + '@film_companion_onboarding_complete' (Expo AsyncStorage backs to localStorage on web). RESULT: every flow works identically to pre-refactor behaviour. Chat list renders with Messages header, Chats(4)/Requests(1) tabs and 5 conversations (3 active + 2 unmatched) via testID `conversation-row-${other_user_id}` which is preserved. GiftedChatScreen header shows avatar + name + 'Online', call/video/ellipsis buttons; two-row composer with camera + TextInput + GIF/mic/video icons swaps to a single send (paper-plane) button when input is non-empty. Send fires POST /api/chat/send (200) and an AI auto-reply arrives ~4s later as a dark left bubble. AI suggestion chips render above the composer with the 'AI' sparkle label and tapping a chip immediately fires POST /api/chat/send. Header ⋮ menu shows View Profile / Did you meet? / Unmatch / Report; ProfileBottomSheet renders the full profile (photos, name+age, city, role, bio, Movie Taste chips, Favourite Movies list). UnmatchModal lists all 6 reasons (Conversation not interesting, Not my type, Different expectations, Found someone else, Not active enough, Other) -> step 2 'One more thing...' with No-just-unmatch / Yes-report -> POST /api/chat/unmatch (200) -> back to list (Ananya correctly removed). ReportModal: 'Report Priya Sharma' intro + Start report -> 10-reason list -> Fake profile -> 'Tell us more' details textarea (0/500 counter) -> Submit Report -> POST /api/chat/report + POST /api/chat/unmatch -> 'Thank you' confirmation + Done. Requests tab: MessageRequestCard renders Arjun Mehta with inline Accept/Decline; tapping the card body opens MessageRequestDetailView modal with header 'Message Request', Messages/Profile sub-tabs, mini profile card, message list and Decline/Accept buttons at the bottom; bottom Decline fires POST /api/chat/decline (200), modal closes, list now shows 'No requests'. Unmatched read-only conversation (Priya Bhatia) opens with header subtitle 'Conversation ended', lock icon + warning notice ('<name> has unmatched with you. This conversation is now read-only.'), composer hidden, and ⋮ menu correctly shows 'Delete Chat' / 'Did you meet?' / 'Report' (no Unmatch). Backend.err.log shows ZERO 500s / Tracebacks across the full run; every chat API used (send, unmatch, report, decline, accept, init-mock, conversations, requests, messages, read, reply-suggestions) returned 200. Pure refactor confirmed — zero behaviour regressions detected.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/tmp/chat_list.png",
+    "/tmp/chat_open.png",
+    "/tmp/chat_after_send.png",
+    "/tmp/menu_open.png",
+    "/tmp/profile_sheet.png",
+    "/tmp/unmatch_modal.png",
+    "/tmp/unmatch_step2.png",
+    "/tmp/after_unmatch.png",
+    "/tmp/report_intro.png",
+    "/tmp/report_reasons.png",
+    "/tmp/report_details.png",
+    "/tmp/report_done.png",
+    "/tmp/requests_tab.png",
+    "/tmp/req_detail.png",
+    "/tmp/after_decline_modal.png",
+    "/tmp/unmatched_chat.png"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Pre-existing (not introduced by this refactor) — three React-Native-web console warnings every screen load: (1) 'shadow* style props are deprecated. Use boxShadow.' (2) 'props.pointerEvents is deprecated. Use style.pointerEvents.' (3) 'Animated: useNativeDriver is not supported because the native animated module is missing' (expected on web). Worth addressing in a future pass but no functional impact.",
+    "Minor: chat.tsx orchestrator imports `useAppMode` and calls `useAppMode();` only for its side-effect of subscribing to the shared mode context (commented in the file). Consider exporting an explicit `useSharedModeSubscription()` helper so the intent is obvious; current form lints clean but reads as an unused call.",
+    "All preserved testIDs verified: only ConversationItem still carries testID=`conversation-row-${other_user_id}`. GiftedChatScreen header buttons, composer send button, modal buttons (Unmatch/Report/Decline/Accept/Submit/Done) currently have NO testIDs and required coordinate-based clicking from Playwright — recommend adding testIDs (e.g. `chat-header-menu-btn`, `chat-send-btn`, `unmatch-reason-${id}`, `report-submit-btn`, `request-decline-btn`) to harden future regression testing. Not a behaviour bug — purely tooling."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (frontend-only per request)", "frontend": "100% (11/11 flows green)"},
+  "seed_data_creation": "No new seed data — relied on POST /api/chat/init-mock/${userId} which the orchestrator itself calls on mount; that seeds 3 active mock convos (Ananya Reddy, Arjun Mehta, Priya Sharma), 2 unmatched read-only convos (Priya Bhatia, Anjali Iyer) and 1 pending request (Arjun Mehta).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Chat module refactor (iter 15) is fully verified — all 13 modular files under /app/frontend/src/components/chat/ + /app/frontend/app/(tabs)/chat.tsx behave identically to the previous 2,545-line monolith. To re-test quickly: (1) POST /api/auth/send-email-otp {email:'testuser@example.com'} to get otp, (2) POST /api/auth/verify-otp to get user_id, (3) inject `@film_companion_auth` (JSON of verify response) and `@film_companion_onboarding_complete='true'` into localStorage, (4) navigate to /(tabs)/chat. testID for opening any convo is `conversation-row-${other_user_id}` (e.g. `conversation-row-mock_user_003`). The send-button is a 42x42 TouchableOpacity at the right edge of the composer (no testID — use evaluate-based coordinate locator or add testIDs as suggested in critical_code_review_comments). MessageRequestDetailView bottom Decline / Accept are at y>700 inside the modal — pick the one with smaller x for Decline.",
+  "rca_of_issue": "N/A — pure refactor verification, no bugs to root-cause. Two minor Playwright-only quirks encountered during testing (not product bugs): (a) page.click('text=\"Decline\"') matched 2 nodes because the underlying MessageRequestCard in the list shows the same label as the modal Decline button — resolved by coordinate-based click within modal y-band. (b) The mouse.click on the send button initially missed because the AI-suggestion chip row overflows the 390px viewport horizontally and an off-screen chip was picked as 'rightmost'; resolved by filtering candidates to elements with x < 390."
+}
