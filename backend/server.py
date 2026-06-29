@@ -2362,6 +2362,19 @@ async def get_matches(req: MatchRequest):
                 "liked_directors": ["Christopher Nolan", "Denis Villeneuve"]
             }
         }
+
+        # ---- 360° Persona signals — flow into AI matchmaking prompt ----
+        try:
+            tina_profile = await get_tina_personality(req.user_id)
+            if tina_profile:
+                profile_for_matching["personality_360"] = {
+                    "archetype": tina_profile.get("archetype", {}),
+                    "primary_love_language": tina_profile.get("primary_love_language"),
+                    "intent": tina_profile.get("intent", {}),
+                    "extra": tina_profile.get("extra", {}),
+                }
+        except Exception as e:
+            logger.warning(f"360 persona fetch failed for matchmaking: {e}")
         
         # Get matches using AI (with caching)
         matches = await get_matches_for_user(
@@ -3151,6 +3164,7 @@ class TinaChatRequest(BaseModel):
     is_onboarding_complete: bool = False
     collected_fields: Optional[List[str]] = None
     conversation_context: Optional[List[Dict[str, str]]] = None
+    selected_360_option: Optional[Dict[str, str]] = None  # {question_id, option_key}
 
 
 @api_router.post("/tina/chat")
@@ -3174,6 +3188,7 @@ async def tina_chat_endpoint(req: TinaChatRequest):
             selected_movies=req.selected_movies,
             is_onboarding_complete=req.is_onboarding_complete,
             conversation_context=req.conversation_context,
+            selected_360_option=req.selected_360_option,
         )
         return result
     except Exception as e:

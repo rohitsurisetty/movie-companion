@@ -10018,3 +10018,77 @@ agent_communication:
           - Voice = Sarah (EXAVITQu4vr4xnSDxMaL), Free-tier compatible (no upgrade).
           - Backend logs confirmed via /var/log/supervisor/backend.out.log
           NO blockers. Test report: /app/test_reports/iteration_9.json
+
+  - task: "360° Persona-Building (post-onboarding LLM-orchestrated quiz)"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/tina_service.py, /app/backend/server.py, /app/backend/matchmaking_service.py, /app/frontend/src/components/TinaChatScreen.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          NEW FEATURE (June 29, 2026): Wired the 360° Dating Profile Framework
+          into the live Tina chat flow as a post-onboarding extension (Option B).
+          
+          BEHAVIOR:
+          1. User completes Tina's normal onboarding (relationshipIntent, languages,
+             genres, top movies, etc.) — flow is unchanged.
+          2. Once all mandatory fields are collected (actually_complete == True),
+             Tina automatically transitions with: "Okay your profile's looking 🔥
+             Now help me understand you better — a quick fun round so I can find
+             you the perfect match 💫" and asks Q1 of the 360° quiz.
+          3. Each of 8 flirty questions is shown as emoji-labeled chips
+             (e.g. ❤️ Talk until 2 AM, 😂 Roast each other immediately, …).
+             Single-tap instantly sends the deterministic option_key to backend.
+          4. Between questions Tina sprinkles in micro-reactions
+             ("Mmm noted 👀", "Big mood 😂"). If user types free text mid-quiz,
+             Tina gently acknowledges and re-prompts without breaking flow.
+          5. After Q8, backend calls personality_finalize_profile, persists to
+             `tina_profiles` collection, and returns ONLY public-safe data:
+             archetype (title/emoji/description), intent split (serious/casual),
+             primary love language. Raw hidden scores NEVER leak to the client.
+          6. Frontend renders a full-screen archetype reveal card with emoji,
+             title, description, and pill chips for love language + vibe split.
+          
+          BACKEND VALIDATED (manual end-to-end script, June 29):
+          - 8 turns → archetype "🍿 The Cozy Companion", LL "Quality Time",
+            Intent 61% serious / 39% casual.
+          - GET /api/tina/360/profile/{user_id} returns archetype + intent + LL
+            (no personality_vector exposed).
+          - `tina_profiles` collection upserts cleanly.
+          
+          MATCHMAKING INTEGRATION:
+          - /api/matches now fetches user's personality_360 from `tina_profiles`
+            and injects archetype/love language/intent/trope into the AI
+            matchmaking prompt. The system message tells the AI to weight
+            archetype compatibility STRONGLY (e.g. Slow Burn Romantic pairs
+            with Heart-First Dreamer, Adventure Catalyst with Playful Charmer).
+          
+          NEEDS TESTING (testing agent):
+          BACKEND:
+          1. POST /api/tina/chat with is_onboarding_complete=True triggers the
+             360° quiz transition message + Q1 with emoji chips.
+          2. Submitting all 8 chip answers via selected_360_option produces an
+             archetype_reveal payload (with emoji, title, description, intent,
+             primary_love_language) and persists to tina_profiles.
+          3. GET /api/tina/360/profile/{user_id} returns the public-safe profile
+             WITHOUT personality_vector or raw scores.
+          4. Free-text mid-quiz triggers Tina's "pick one to keep us moving" path
+             rather than breaking the quiz.
+          5. /api/matches still works for users with no tina_profile (fallback)
+             AND uses persona signals when present (verify by checking logs).
+          
+          FRONTEND:
+          (Out of scope for E2E in browser due to onboarding gating — code review
+          is acceptable.) Confirm:
+          - currentOptions.mode === 'personality_360' renders emoji + label chips
+            with instant-select behavior (no "Send" button).
+          - archetypeReveal state triggers full-screen card with emoji, title,
+            description, love-language pill, vibe pill.
+          - sendToTina forwards selected_360_option with question_id + option_key.
+          
+          CRITICAL: Hidden scores must NEVER appear in the chat response or
+          /api/tina/360/profile output.

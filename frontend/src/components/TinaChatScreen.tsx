@@ -120,14 +120,24 @@ export default function TinaChatScreen({
   const [profileData, setProfileData] = useState<Partial<ProfileData>>({});
   const [currentOptions, setCurrentOptions] = useState<{
     field: string;
-    options: string[];
+    options: any[]; // either string[] (legacy) or {key, emoji, label}[] (360)
     multiSelect: boolean;
+    mode?: string; // 'personality_360' when in quiz mode
+    question_id?: string;
   } | null>(null);
   const [selectedOptions, setSelectedOptions] = useState<string[]>([]);
   const [showSendButton, setShowSendButton] = useState(false);
   const [currentDeepLink, setCurrentDeepLink] = useState<DeepLinkAction | null>(null);
   const [isExiting, setIsExiting] = useState(false);
   const [pendingMoviesProcessed, setPendingMoviesProcessed] = useState(false);
+  // 360° persona archetype reveal (shown at the end of the quiz)
+  const [archetypeReveal, setArchetypeReveal] = useState<{
+    emoji: string;
+    title: string;
+    description: string;
+    primary_love_language: string;
+    intent: { serious: number; casual: number };
+  } | null>(null);
   const [welcomeBackShown, setWelcomeBackShown] = useState(false);
   
   const flatListRef = useRef<FlatList>(null);
@@ -559,6 +569,7 @@ export default function TinaChatScreen({
     userMessage: string, 
     selectedOption?: string, 
     selectedOpts?: string[],
+    selected360Option?: { question_id: string; option_key: string },
   ) => {
     if (userMessage) {
       addMessage(userMessage, true);
@@ -581,6 +592,8 @@ export default function TinaChatScreen({
           message: userMessage,
           selected_option: selectedOption,
           selected_options: selectedOpts,
+          selected_360_option: selected360Option,
+          is_onboarding_complete: false, // backend infers from completed_fields
         }),
       });
 
@@ -607,12 +620,23 @@ export default function TinaChatScreen({
       // Add Tina's response
       addMessage(data.response, false);
 
-      // Show options if needed (simple chip selection)
+      // Archetype reveal at the end of 360° quiz
+      if (data.archetype_reveal) {
+        setArchetypeReveal(data.archetype_reveal);
+        // After a brief moment, navigate forward
+        setTimeout(() => onComplete(data.profile_data || {}), 3500);
+        return;
+      }
+
+      // Show options if needed (legacy or 360)
       if (data.show_options) {
         setTimeout(() => {
           setCurrentOptions({
-            ...data.show_options,
+            field: data.show_options.field,
+            options: data.show_options.options,
             multiSelect: data.show_options.multi_select || data.show_options.multiSelect,
+            mode: data.show_options.mode,
+            question_id: data.show_options.question_id,
           });
           setSelectedOptions([]);
           setShowSendButton(false);
@@ -630,8 +654,8 @@ export default function TinaChatScreen({
         }, 300);
       }
 
-      // Check completion
-      if (data.completion_percentage >= 100) {
+      // Check completion (only after archetype reveal, which we already handle)
+      if (data.completion_percentage >= 100 && !data.show_options && !data.archetype_reveal) {
         setTimeout(() => onComplete(data.profile_data || {}), 2000);
       }
 
@@ -648,18 +672,34 @@ export default function TinaChatScreen({
     }
   };
 
-  const handleOptionSelect = (option: string) => {
+  const handleOptionSelect = (option: string | { key: string; emoji?: string; label: string }) => {
     if (!currentOptions) return;
 
+    // 360° quiz: instant single-select, send immediately
+    if (currentOptions.mode === 'personality_360' && typeof option === 'object' && currentOptions.question_id) {
+      const displayText = `${option.emoji ? option.emoji + ' ' : ''}${option.label}`;
+      // Clear UI before sending
+      setCurrentOptions(null);
+      setSelectedOptions([]);
+      setShowSendButton(false);
+      sendToTina(displayText, undefined, undefined, {
+        question_id: currentOptions.question_id,
+        option_key: option.key,
+      });
+      return;
+    }
+
+    // Legacy string-based options
+    const optStr = typeof option === 'string' ? option : option.label;
     if (currentOptions.multiSelect) {
-      const newSelected = selectedOptions.includes(option)
-        ? selectedOptions.filter(o => o !== option)
-        : [...selectedOptions, option];
+      const newSelected = selectedOptions.includes(optStr)
+        ? selectedOptions.filter(o => o !== optStr)
+        : [...selectedOptions, optStr];
       setSelectedOptions(newSelected);
       setShowSendButton(newSelected.length > 0);
     } else {
       // Single select - highlight and show send
-      setSelectedOptions([option]);
+      setSelectedOptions([optStr]);
       setShowSendButton(true);
     }
   };
@@ -844,7 +884,9 @@ export default function TinaChatScreen({
           <View style={styles.optionsContainer}>
             <View style={styles.optionsHeader}>
               <Text style={styles.optionsHint}>
-                {currentOptions.multiSelect ? 'Select all that apply' : 'Tap to select'}
+                {currentOptions.mode === 'personality_360'
+                  ? 'Tap to answer'
+                  : currentOptions.multiSelect ? 'Select all that apply' : 'Tap to select'}
               </Text>
             </View>
             <ScrollView 
@@ -854,13 +896,31 @@ export default function TinaChatScreen({
               contentContainerStyle={styles.optionsContent}
             >
               <View style={styles.chipsWrapper}>
-                {currentOptions.options.map((opt, i) => {
-                  const isSelected = selectedOptions.includes(opt);
+                {currentOptions.options.map((opt: any, i: number) => {
+                  // 360 mode: emoji + label, instant-select feel
+                  if (currentOptions.mode === 'personality_360') {
+                    return (
+                      <TouchableOpacity
+                        key={`p360-${i}`}
+                        style={styles.p360Chip}
+                        onPress={() => handleOptionSelect(opt)}
+                        activeOpacity={0.7}
+                      >
+                        {!!opt.emoji && (
+                          <Text style={styles.p360ChipEmoji}>{opt.emoji}</Text>
+                        )}
+                        <Text style={styles.p360ChipText}>{opt.label}</Text>
+                      </TouchableOpacity>
+                    );
+                  }
+                  // Legacy string chip
+                  const label = typeof opt === 'string' ? opt : (opt?.label ?? String(opt));
+                  const isSelected = selectedOptions.includes(label);
                   return (
                     <TouchableOpacity
                       key={i}
                       style={[styles.chip, isSelected && styles.chipSelected]}
-                      onPress={() => handleOptionSelect(opt)}
+                      onPress={() => handleOptionSelect(label)}
                       activeOpacity={0.7}
                     >
                       {currentOptions.multiSelect && (
@@ -869,7 +929,7 @@ export default function TinaChatScreen({
                         </View>
                       )}
                       <Text style={[styles.chipText, isSelected && styles.chipTextSelected]}>
-                        {opt}
+                        {label}
                       </Text>
                     </TouchableOpacity>
                   );
@@ -877,8 +937,8 @@ export default function TinaChatScreen({
               </View>
             </ScrollView>
             
-            {/* Send Selection Button */}
-            {showSendButton && (
+            {/* Send Selection Button — hidden in 360 mode (instant-send) */}
+            {showSendButton && currentOptions.mode !== 'personality_360' && (
               <TouchableOpacity 
                 style={styles.sendSelectionBtn}
                 onPress={handleOptionsSend}
@@ -922,6 +982,30 @@ export default function TinaChatScreen({
           </View>
         </View>
       </KeyboardAvoidingView>
+
+      {/* 360° Archetype Reveal Overlay */}
+      {archetypeReveal && (
+        <View style={styles.archetypeOverlay} pointerEvents="none">
+          <View style={styles.archetypeCard}>
+            <Text style={styles.archetypeEmoji}>{archetypeReveal.emoji}</Text>
+            <Text style={styles.archetypeLabel}>You are</Text>
+            <Text style={styles.archetypeTitle}>{archetypeReveal.title}</Text>
+            <Text style={styles.archetypeDesc}>{archetypeReveal.description}</Text>
+            <View style={styles.archetypeRow}>
+              <View style={styles.archetypePill}>
+                <Text style={styles.archetypePillLabel}>Love language</Text>
+                <Text style={styles.archetypePillValue}>{archetypeReveal.primary_love_language}</Text>
+              </View>
+              <View style={styles.archetypePill}>
+                <Text style={styles.archetypePillLabel}>Vibe</Text>
+                <Text style={styles.archetypePillValue}>
+                  {archetypeReveal.intent?.serious || 0}% serious
+                </Text>
+              </View>
+            </View>
+          </View>
+        </View>
+      )}
     </View>
   );
 }
@@ -1167,6 +1251,103 @@ const styles = StyleSheet.create({
   chipSelected: { 
     backgroundColor: 'rgba(255,107,107,0.2)',
     borderColor: '#FF6B6B',
+  },
+  // 360° persona chip (emoji + label, instant-select)
+  p360Chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,107,107,0.08)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,107,107,0.35)',
+    minWidth: '46%',
+    gap: 8,
+  },
+  p360ChipEmoji: {
+    fontSize: 20,
+  },
+  p360ChipText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    flexShrink: 1,
+  },
+  // 360° archetype reveal overlay
+  archetypeOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  archetypeCard: {
+    backgroundColor: '#1A1A1A',
+    borderRadius: 28,
+    padding: 28,
+    alignItems: 'center',
+    width: '100%',
+    maxWidth: 360,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,107,107,0.45)',
+  },
+  archetypeEmoji: {
+    fontSize: 56,
+    marginBottom: 12,
+  },
+  archetypeLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.55)',
+    textTransform: 'uppercase',
+    letterSpacing: 1.5,
+    marginBottom: 6,
+  },
+  archetypeTitle: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  archetypeDesc: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.8)',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 18,
+  },
+  archetypeRow: {
+    flexDirection: 'row',
+    gap: 8,
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+  },
+  archetypePill: {
+    backgroundColor: 'rgba(255,107,107,0.12)',
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,107,107,0.3)',
+    alignItems: 'center',
+  },
+  archetypePillLabel: {
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.6)',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 2,
+  },
+  archetypePillValue: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
   checkbox: {
     width: 18,

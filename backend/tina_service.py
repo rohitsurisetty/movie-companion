@@ -6,10 +6,17 @@ Handles AI-powered profile creation through natural conversation.
 import os
 import json
 import logging
+import random
 import re
 from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime
 from dotenv import load_dotenv
+
+from tina_personality import (
+    QUESTIONS as PERSONALITY_QUESTIONS,
+    finalize_profile as personality_finalize_profile,
+    save_tina_personality,
+)
 
 load_dotenv()
 
@@ -551,6 +558,154 @@ def get_field_mappings(field: str) -> Dict[str, Any]:
 
 
 # ============================================
+# 360° PERSONA-BUILDING ORCHESTRATION (post-onboarding)
+# ============================================
+# After Tina finishes collecting the mandatory profile fields, she
+# transitions into a flirty 8-question persona quiz. Each answer is a
+# deterministic option_key fed into the personality engine; the hidden
+# scores are NEVER exposed to the user — only the final archetype reveal.
+
+_P360_REACTIONS = [
+    "Mmm noted 👀", "Oooh classic 🎬", "Big mood 😂",
+    "I see you 😏", "Adorable 💛", "Heard 💫",
+    "Spicy 🔥", "Cute pick ✨", "Okay okay 😎",
+]
+
+
+def _get_360_state(session: Dict[str, Any]) -> Dict[str, Any]:
+    state = session.get("personality_360") or {}
+    return {
+        "phase": state.get("phase", "inactive"),  # inactive | active | complete
+        "current_index": int(state.get("current_index", 0)),
+        "answers": list(state.get("answers", [])),
+    }
+
+
+def _set_360_state(session: Dict[str, Any], state: Dict[str, Any]):
+    session["personality_360"] = state
+
+
+def _format_360_options(question: Dict[str, Any]) -> List[Dict[str, str]]:
+    return [
+        {"key": o["key"], "emoji": o.get("emoji", ""), "label": o["label"]}
+        for o in question["options"]
+    ]
+
+
+def _build_360_options_payload(question: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "field": "_p360",
+        "question_id": question["id"],
+        "mode": "personality_360",
+        "options": _format_360_options(question),
+        "multi_select": False,
+    }
+
+
+async def _begin_360_quiz(session: Dict[str, Any], result: Dict[str, Any], user_name: str):
+    """Send the transition message + first question."""
+    q = PERSONALITY_QUESTIONS[0]
+    name = user_name.strip() if user_name else ""
+    intro = (
+        f"Okay {name + ' ' if name else ''}your profile's looking 🔥\n\n"
+        "Now help me understand you better — a quick fun round so I can find you the perfect match 💫\n\n"
+        f"{q['intent']}"
+    )
+    result["response"] = intro
+    result["show_options"] = _build_360_options_payload(q)
+    result["persona_360_phase"] = "active"
+    _set_360_state(session, {"phase": "active", "current_index": 0, "answers": []})
+
+
+async def _handle_360_turn(
+    session: Dict[str, Any],
+    result: Dict[str, Any],
+    selected_360_option: Optional[Dict[str, str]],
+    user_message: str,
+    user_id: str,
+):
+    """Process a 360 turn: record answer, ask next question, or finalize."""
+    state = _get_360_state(session)
+    idx = state["current_index"]
+
+    # Free-text reply (no chip tapped) — Tina gently reacts and re-prompts.
+    if not selected_360_option:
+        cur_q = PERSONALITY_QUESTIONS[idx] if idx < len(PERSONALITY_QUESTIONS) else PERSONALITY_QUESTIONS[-1]
+        # If the user typed something, weave it in lightly without derailing.
+        if user_message:
+            ack = "Haha noted 😊"
+            if any(w in user_message.lower() for w in ["why", "what does", "explain", "?"]):
+                ack = "It's a fun read on your vibe — promise no wrong answers 💫"
+            result["response"] = f"{ack}\n\nPick one to keep us moving:\n\n{cur_q['intent']}"
+        else:
+            result["response"] = cur_q["intent"]
+        result["show_options"] = _build_360_options_payload(cur_q)
+        result["persona_360_phase"] = "active"
+        _set_360_state(session, state)
+        return
+
+    qid = selected_360_option.get("question_id")
+    okey = selected_360_option.get("option_key")
+    if not qid or not okey:
+        return
+
+    # De-dupe by question_id, append the new answer
+    state["answers"] = [a for a in state["answers"] if a.get("question_id") != qid]
+    state["answers"].append({"question_id": qid, "option_key": okey})
+    state["current_index"] = len(state["answers"])
+
+    if state["current_index"] >= len(PERSONALITY_QUESTIONS):
+        # ARCHETYPE REVEAL — finalize and persist
+        extra: Dict[str, Any] = {}
+        collected = session.get("collected_fields", {})
+        if isinstance(collected.get("genres"), list):
+            extra["favourite_genres"] = collected["genres"]
+        # Save the love-story trope answer separately for matchmaking nuance
+        for a in state["answers"]:
+            if a["question_id"] == "love_story_trope":
+                extra["favourite_trope"] = a["option_key"]
+                break
+
+        profile = personality_finalize_profile(state["answers"], extra=extra)
+        try:
+            await save_tina_personality(user_id, profile)
+        except Exception as e:
+            logger.error(f"save_tina_personality failed: {e}")
+
+        archetype = profile["archetype"]
+        intent_split = profile["intent"]
+        ll = profile["primary_love_language"]
+
+        reveal = (
+            f"Okay — I've got you figured out 💫\n\n"
+            f"You're {archetype['emoji']} **{archetype['title']}**\n"
+            f"{archetype['description']}\n\n"
+            f"Love language: {ll}\n"
+            f"Vibe: {intent_split['serious']}% serious / {intent_split['casual']}% casual\n\n"
+            f"Ready to meet your people? ✨"
+        )
+        result["response"] = reveal
+        result["archetype_reveal"] = {
+            "emoji": archetype["emoji"],
+            "title": archetype["title"],
+            "description": archetype["description"],
+            "primary_love_language": ll,
+            "intent": intent_split,
+        }
+        result["persona_360_phase"] = "complete"
+        state["phase"] = "complete"
+    else:
+        # Ask next question with a light reaction
+        cur_q = PERSONALITY_QUESTIONS[state["current_index"]]
+        reaction = random.choice(_P360_REACTIONS)
+        result["response"] = f"{reaction}\n\n{cur_q['intent']}"
+        result["show_options"] = _build_360_options_payload(cur_q)
+        result["persona_360_phase"] = "active"
+
+    _set_360_state(session, state)
+
+
+# ============================================
 # CONVERSATION STATE MANAGEMENT
 # ============================================
 
@@ -644,6 +799,7 @@ async def process_tina_message(
     selected_movies: Optional[List[Dict]] = None,
     is_onboarding_complete: bool = False,
     conversation_context: List[Dict] = None,
+    selected_360_option: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """
     Process a message in the Tina conversation.
@@ -740,6 +896,46 @@ async def process_tina_message(
     if user_message:
         history.append({"role": "user", "content": user_message})
     
+    # POST-ONBOARDING: Run 360° persona quiz FIRST, then free-form chat.
+    if actually_complete:
+        p360 = _get_360_state(session)
+
+        # If a 360 option chip was tapped, route directly into the quiz handler.
+        if selected_360_option:
+            if p360["phase"] == "inactive":
+                # Edge case: client sent an answer before we triggered the quiz.
+                # Auto-activate so we can record it cleanly.
+                _set_360_state(session, {"phase": "active", "current_index": 0, "answers": []})
+                p360 = _get_360_state(session)
+            await _handle_360_turn(session, result, selected_360_option, user_message, user_id)
+            history.append({"role": "assistant", "content": result["response"]})
+            session["conversation_history"] = history[-20:]
+            result["completion_percentage"] = 100
+            result["profile_data"] = session.get("collected_fields", {})
+            await save_tina_session(session)
+            return result
+
+        # No 360 chip tapped — either start the quiz or handle free text mid-quiz.
+        if p360["phase"] == "inactive":
+            await _begin_360_quiz(session, result, user_name)
+            history.append({"role": "assistant", "content": result["response"]})
+            session["conversation_history"] = history[-20:]
+            result["completion_percentage"] = 100
+            result["profile_data"] = session.get("collected_fields", {})
+            await save_tina_session(session)
+            return result
+
+        if p360["phase"] == "active":
+            await _handle_360_turn(session, result, None, user_message, user_id)
+            history.append({"role": "assistant", "content": result["response"]})
+            session["conversation_history"] = history[-20:]
+            result["completion_percentage"] = 100
+            result["profile_data"] = session.get("collected_fields", {})
+            await save_tina_session(session)
+            return result
+
+        # phase == "complete" — fall through to free-form post-onboarding chat below.
+
     # POST-ONBOARDING: Engage in free-form conversation
     if actually_complete and user_message:
         logger.info(f"Post-onboarding chat for user {user_id}: {user_message[:50]}...")

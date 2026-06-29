@@ -1887,8 +1887,9 @@ You should consider multiple factors and decide their importance dynamically bas
 - Lifestyle compatibility
 - Relationship intent alignment
 - Overall personality match based on movie taste
+- **360° Persona signals** (when provided): Personality Archetype, Love Language, Intent (serious vs casual), Favorite Love Trope. Use these as STRONG weight — pair archetypes that complement (e.g. Slow Burn Romantic + Heart-First Dreamer, Adventure Catalyst + Playful Charmer), align intent splits (serious-serious or casual-casual), and respect the trope.
 
-Provide thoughtful, specific explanations that reference actual movies or preferences shared between users."""
+Provide thoughtful, specific explanations that reference actual movies or preferences shared between users. If both users share a personality archetype or love language, mention it naturally in the explanation (without exposing internal scores)."""
         ).with_model("openai", "gpt-4o")
         
         # Prepare user profile summary
@@ -1982,7 +1983,25 @@ def _format_profile_for_ai(profile: Dict) -> str:
     liked_genres = ", ".join(swipe_data.get("liked_genres", []))
     liked_actors = ", ".join(swipe_data.get("liked_actors", []))
     liked_directors = ", ".join(swipe_data.get("liked_directors", []))
-    
+
+    # 360° persona signals (silent — feeds matchmaking, never shown to user)
+    p360 = profile.get("personality_360") or {}
+    arche = (p360.get("archetype") or {}) if isinstance(p360, dict) else {}
+    persona_line = ""
+    if arche:
+        intent = p360.get("intent") or {}
+        ll = p360.get("primary_love_language") or ""
+        extra = p360.get("extra") or {}
+        trope = extra.get("favourite_trope", "")
+        persona_line = (
+            f"\nPersonality Archetype: {arche.get('title','')} — {arche.get('description','')[:120]}"
+            f"\nLove Language: {ll}"
+        )
+        if intent:
+            persona_line += f"\nIntent: {intent.get('serious',0)}% serious / {intent.get('casual',0)}% casual"
+        if trope:
+            persona_line += f"\nFavorite Love Trope: {trope.replace('_',' ').title()}"
+
     return f"""Name: {profile.get('name', 'Unknown')}
 Age: {profile.get('age', 'N/A')}
 Location: {profile.get('location', 'N/A')}
@@ -1996,7 +2015,7 @@ Liked Genres (from swipes): {liked_genres}
 Favorite Actors: {liked_actors}
 Favorite Directors: {liked_directors}
 Relationship Looking For: {', '.join(profile.get('relationshipIntent', []))}
-Lifestyle: Smoking - {profile.get('smoking', 'N/A')}, Drinking - {profile.get('drinking', 'N/A')}, Exercise - {profile.get('exercise', 'N/A')}"""
+Lifestyle: Smoking - {profile.get('smoking', 'N/A')}, Drinking - {profile.get('drinking', 'N/A')}, Exercise - {profile.get('exercise', 'N/A')}{persona_line}"""
 
 
 def fallback_scoring(
