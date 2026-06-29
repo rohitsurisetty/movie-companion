@@ -21,6 +21,7 @@ import {
   ZODIAC_SIGNS, PETS_OPTS, FAMILY_OPTS, SIBLINGS_OPTS, EDUCATION_OPTS,
   TRAVEL_OPTS, WORK_OPTS, type EditModalType,
 } from '../../src/components/profile/constants';
+import ErrorBoundary from '../../src/components/ErrorBoundary';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -1346,6 +1347,17 @@ const editModalStyles = StyleSheet.create({
 });
 
 export default function ProfileScreen() {
+  return (
+    <ErrorBoundary
+      fallbackTitle="Profile failed to load"
+      fallbackMessage="Tap below to retry. Your data is safe."
+    >
+      <ProfileScreenInner />
+    </ErrorBoundary>
+  );
+}
+
+function ProfileScreenInner() {
   const router = useRouter();
   const [profile, setProfile] = useState<ProfileData>(initialProfileData);
   const [loading, setLoading] = useState(true);
@@ -1535,16 +1547,18 @@ export default function ProfileScreen() {
         genres: profileData.genres || [],
         filmLanguages: profileData.filmLanguages || [],
         languagesSpoken: profileData.languagesSpoken || [],
-        topMovies: (profileData.topMovies || []).map(m => ({
-          id: m.id,
-          title: m.title,
-          poster_path: m.poster_path || '',
-          release_date: m.release_date || '',
-          vote_average: m.vote_average || 0,
-          rating: m.rating || 0,
-          genres: m.genres || [],
-          reasons: m.reasons || [],
-        })),
+        topMovies: (Array.isArray(profileData.topMovies) ? profileData.topMovies : [])
+          .filter((m): m is MovieSelection => m && typeof m === 'object')
+          .map(m => ({
+            id: m.id,
+            title: m.title,
+            poster_path: m.poster_path || '',
+            release_date: m.release_date || '',
+            vote_average: m.vote_average || 0,
+            rating: m.rating || 0,
+            genres: m.genres || [],
+            reasons: m.reasons || [],
+          })),
         movieFrequency: profileData.movieFrequency || '',
         ottTheatre: profileData.ottTheatre || '',
         height: profileData.height || '',
