@@ -242,7 +242,7 @@ async def save_top_movies(user_id: str, movies: List[Dict[str, Any]], session_id
                 "user_id": user_id,
                 "rank_of_movie_added": idx,
                 "movie_name": movie.get("title") or movie.get("movie_name"),
-                "rating_given": movie.get("rating"),
+                "rating_given": int(movie.get("rating")) if movie.get("rating") is not None else None,
                 "why_do_you_love_it": ",".join(movie.get("reasons", [])) if isinstance(movie.get("reasons"), list) else movie.get("reasons"),
                 "last_modified_ts": ts["timestamp"],
                 "last_modified_date": ts["date"],
@@ -826,4 +826,272 @@ async def check_movie_exists(movie_id: int) -> bool:
         return bool(result.data)
     except Exception as e:
         logger.error(f"Error checking movie existence: {e}")
+        return False
+
+
+# =====================================================================
+# AUDIT LOGGING — APPEND-ONLY (one row per event)
+# These functions are best-effort: failures NEVER block the main flow.
+# Requires `supabase_migration_full_audit.sql` to be applied first.
+# =====================================================================
+
+
+def _safe_audit_insert(table: str, row: Dict[str, Any]) -> Dict[str, Any]:
+    """Insert into an audit table. Never raises - just logs warning if it
+    fails (e.g. migration SQL not yet applied)."""
+    try:
+        client = get_supabase_client()
+        # Drop None-only sparse fields? Keep nullable so we have explicit history.
+        result = client.table(table).insert(row).execute()
+        return {"success": True, "data": result.data}
+    except Exception as e:
+        logger.warning(f"[audit] insert into {table} failed (non-blocking): {e}")
+        return {"success": False, "error": str(e)}
+
+
+# ----- PICTURES AUDIT ----------------------------------------------------
+
+async def log_picture_event(
+    user_id: str,
+    picture_number: Optional[int],
+    action: str,                    # 'upload' | 'replace' | 'delete'
+    storage_path: Optional[str] = None,
+    picture_url: Optional[str] = None,
+    content_type: Optional[str] = None,
+    size_bytes: Optional[int] = None,
+    source: str = "supabase_storage",  # or 'mongodb_base64'
+    session_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    ts = get_current_timestamp()
+    row = {
+        "user_id": user_id,
+        "session_id": session_id,
+        "picture_number": picture_number,
+        "action": action,
+        "storage_path": storage_path,
+        "picture_url": picture_url,
+        "content_type": content_type,
+        "size_bytes": size_bytes,
+        "source": source,
+        "last_modified_ts": ts["timestamp"],
+        "last_modified_date": ts["date"],
+    }
+    return _safe_audit_insert("user_pictures", row)
+
+
+# ----- TINA CHAT AUDIT ---------------------------------------------------
+
+async def log_tina_chat_message(
+    user_id: str,
+    role: str,                                      # 'user' | 'tina'
+    content: Optional[str] = None,
+    selected_option: Optional[str] = None,
+    selected_option_key: Optional[str] = None,
+    question_id: Optional[str] = None,
+    collected_field: Optional[str] = None,
+    collected_value: Any = None,
+    persona_360_phase: Optional[str] = None,
+    show_options: Any = None,
+    show_movie_picker: bool = False,
+    archetype_reveal: Any = None,
+    completion_percentage: Optional[int] = None,
+    exit_intent: bool = False,
+) -> Dict[str, Any]:
+    ts = get_current_timestamp()
+    row = {
+        "user_id": user_id,
+        "role": role,
+        "content": content,
+        "selected_option": selected_option,
+        "selected_option_key": selected_option_key,
+        "question_id": question_id,
+        "collected_field": collected_field,
+        "collected_value": collected_value if collected_value is None or isinstance(collected_value, (dict, list)) else {"value": collected_value},
+        "persona_360_phase": persona_360_phase,
+        "show_options": show_options if (show_options is None or isinstance(show_options, (dict, list))) else None,
+        "show_movie_picker": bool(show_movie_picker),
+        "archetype_reveal": archetype_reveal,
+        "completion_percentage": completion_percentage,
+        "exit_intent": bool(exit_intent),
+        "last_modified_ts": ts["timestamp"],
+        "last_modified_date": ts["date"],
+    }
+    return _safe_audit_insert("tina_chat_messages", row)
+
+
+async def log_tina_persona_360(
+    user_id: str,
+    profile: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Log a 360° persona reveal event. Stores ONLY public-safe data
+    (never the raw personality vector or hidden scores)."""
+    ts = get_current_timestamp()
+    archetype = profile.get("archetype", {}) or {}
+    intent = profile.get("intent", {}) or {}
+    extra = profile.get("extra", {}) or {}
+    row = {
+        "user_id": user_id,
+        "archetype_key": archetype.get("key"),
+        "archetype_title": archetype.get("title"),
+        "archetype_emoji": archetype.get("emoji"),
+        "archetype_description": archetype.get("description"),
+        "primary_love_language": profile.get("primary_love_language"),
+        "intent_serious": intent.get("serious"),
+        "intent_casual": intent.get("casual"),
+        "questions_answered": profile.get("questions_answered", []),
+        "favourite_trope": extra.get("favourite_trope") or profile.get("favourite_trope"),
+        "favourite_genres": ",".join(extra.get("favourite_genres", []) or profile.get("favourite_genres", []) or []) or None,
+        "last_modified_ts": ts["timestamp"],
+        "last_modified_date": ts["date"],
+    }
+    return _safe_audit_insert("tina_persona_360", row)
+
+
+# ----- USER-TO-USER CHAT AUDIT ------------------------------------------
+
+async def log_user_chat_message(
+    conversation_id: str,
+    sender_id: str,
+    receiver_id: str,
+    content: str,
+    message_type: str = "text",
+    is_read: bool = False,
+    is_first_message: bool = False,
+) -> Dict[str, Any]:
+    ts = get_current_timestamp()
+    row = {
+        "conversation_id": conversation_id,
+        "sender_id": sender_id,
+        "receiver_id": receiver_id,
+        "message_type": message_type,
+        "content": content,
+        "is_read": bool(is_read),
+        "is_first_message": bool(is_first_message),
+        "last_modified_ts": ts["timestamp"],
+        "last_modified_date": ts["date"],
+    }
+    return _safe_audit_insert("user_chat_messages", row)
+
+
+# ----- MATCH / UNMATCH / REPORT AUDIT -----------------------------------
+
+async def log_match_event(
+    user_id: str,
+    event_type: str,                       # see column comment in SQL
+    target_user_id: Optional[str] = None,
+    match_level: Optional[str] = None,
+    compatibility_score: Optional[int] = None,
+    mode: Optional[str] = None,
+    source: Optional[str] = None,
+    payload: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    ts = get_current_timestamp()
+    row = {
+        "user_id": user_id,
+        "target_user_id": target_user_id,
+        "event_type": event_type,
+        "match_level": match_level,
+        "compatibility_score": compatibility_score,
+        "mode": mode,
+        "source": source,
+        "payload": payload,
+        "last_modified_ts": ts["timestamp"],
+        "last_modified_date": ts["date"],
+    }
+    return _safe_audit_insert("match_events", row)
+
+
+async def log_unmatch_event(
+    user_id: str,
+    other_user_id: str,
+    conversation_id: Optional[str] = None,
+    reason: Optional[str] = None,
+) -> Dict[str, Any]:
+    ts = get_current_timestamp()
+    row = {
+        "user_id": user_id,
+        "other_user_id": other_user_id,
+        "conversation_id": conversation_id,
+        "reason": reason,
+        "last_modified_ts": ts["timestamp"],
+        "last_modified_date": ts["date"],
+    }
+    return _safe_audit_insert("unmatch_events", row)
+
+
+async def log_report_event(
+    reporter_id: str,
+    reported_user_id: str,
+    reason: Optional[str] = None,
+    details: Optional[str] = None,
+    conversation_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    ts = get_current_timestamp()
+    row = {
+        "reporter_id": reporter_id,
+        "reported_user_id": reported_user_id,
+        "conversation_id": conversation_id,
+        "reason": reason,
+        "details": details,
+        "last_modified_ts": ts["timestamp"],
+        "last_modified_date": ts["date"],
+    }
+    return _safe_audit_insert("report_events", row)
+
+
+# ----- STORAGE BUCKET HELPER (profile pictures) -------------------------
+
+def upload_image_to_supabase_storage(
+    user_id: str,
+    picture_number: int,
+    image_bytes: bytes,
+    content_type: str = "image/jpeg",
+    bucket: str = "profile-pictures",
+) -> Optional[Dict[str, str]]:
+    """Upload an image to Supabase Storage. Returns {storage_path, public_url}
+    or None on failure."""
+    try:
+        client = get_supabase_client()
+        # Deterministic-ish path: <user_id>/picture_<n>_<short-uuid>.<ext>
+        import uuid as _uuid
+        ext_map = {
+            "image/jpeg": "jpg",
+            "image/jpg": "jpg",
+            "image/png": "png",
+            "image/webp": "webp",
+            "image/heic": "heic",
+            "image/heif": "heif",
+        }
+        ext = ext_map.get((content_type or "").lower(), "jpg")
+        path = f"{user_id}/picture_{picture_number}_{_uuid.uuid4().hex[:8]}.{ext}"
+
+        # Supabase storage upload
+        # NB: the storage3 SDK expects file_options as a dict of strings
+        res = client.storage.from_(bucket).upload(
+            path=path,
+            file=image_bytes,
+            file_options={"content-type": content_type or "image/jpeg", "upsert": "true"},
+        )
+        # Get public URL
+        public_url = client.storage.from_(bucket).get_public_url(path)
+        # Some SDK versions return the URL with a trailing "?" – clean it.
+        if public_url and public_url.endswith("?"):
+            public_url = public_url[:-1]
+        logger.info(f"[storage] uploaded {path} → {public_url}")
+        return {"storage_path": path, "public_url": public_url}
+    except Exception as e:
+        logger.warning(f"[storage] upload failed (non-blocking): {e}")
+        return None
+
+
+def delete_image_from_supabase_storage(
+    storage_path: str,
+    bucket: str = "profile-pictures",
+) -> bool:
+    try:
+        client = get_supabase_client()
+        client.storage.from_(bucket).remove([storage_path])
+        return True
+    except Exception as e:
+        logger.warning(f"[storage] delete failed (non-blocking): {e}")
         return False
