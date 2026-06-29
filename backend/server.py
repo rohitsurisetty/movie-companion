@@ -2387,7 +2387,19 @@ async def get_matches(req: MatchRequest):
         )
         
         logger.info(f"Found {len(matches)} matches for user {req.user_id} (mode={req.mode}, force_refresh={req.force_refresh})")
-        
+
+        # Audit: log matches_generated event (non-blocking)
+        try:
+            await supabase.log_match_event(
+                user_id=req.user_id,
+                event_type="matches_generated",
+                mode=req.mode,
+                source="ai_matchmaking" if req.force_refresh else "cache",
+                payload={"count": len(matches), "limit": req.limit, "force_refresh": req.force_refresh},
+            )
+        except Exception as _e:
+            logger.debug(f"audit (matches_generated) skipped: {_e}")
+
         return {
             "success": True,
             "matches": matches[:req.limit],
@@ -2401,8 +2413,20 @@ async def get_matches(req: MatchRequest):
 
 
 @api_router.get("/matches/profile/{user_id}")
-async def get_match_profile(user_id: str):
+async def get_match_profile(user_id: str, viewer_id: Optional[str] = None):
     """Get detailed profile of a matched user"""
+    # Audit: log profile_viewed event (non-blocking) when viewer_id provided
+    if viewer_id:
+        try:
+            await supabase.log_match_event(
+                user_id=viewer_id,
+                event_type="profile_viewed",
+                target_user_id=user_id,
+                source="feed",
+            )
+        except Exception as _e:
+            logger.debug(f"audit (profile_viewed) skipped: {_e}")
+
     # First check mock users
     mock_user = get_mock_user_by_id(user_id)
     if mock_user:
@@ -3190,6 +3214,41 @@ async def tina_chat_endpoint(req: TinaChatRequest):
             conversation_context=req.conversation_context,
             selected_360_option=req.selected_360_option,
         )
+
+        # Audit log: store user message + Tina's response (best-effort)
+        try:
+            # User-side message
+            if req.message or req.selected_option or req.selected_360_option:
+                sel_opt = req.selected_option
+                sel_opt_key = None
+                q_id = None
+                if isinstance(req.selected_360_option, dict):
+                    sel_opt = req.selected_360_option.get("label") or sel_opt
+                    sel_opt_key = req.selected_360_option.get("option_key")
+                    q_id = req.selected_360_option.get("question_id")
+                await supabase.log_tina_chat_message(
+                    user_id=req.user_id,
+                    role="user",
+                    content=req.message,
+                    selected_option=sel_opt,
+                    selected_option_key=sel_opt_key,
+                    question_id=q_id,
+                )
+            # Tina's response
+            await supabase.log_tina_chat_message(
+                user_id=req.user_id,
+                role="tina",
+                content=result.get("response"),
+                collected_field=result.get("collected_field"),
+                collected_value=result.get("collected_value"),
+                show_options=result.get("show_options"),
+                show_movie_picker=bool(result.get("show_movie_picker")),
+                completion_percentage=result.get("completion_percentage"),
+                exit_intent=bool(result.get("exit_intent")),
+            )
+        except Exception as _e:
+            logger.debug(f"audit (tina chat) skipped: {_e}")
+
         return result
     except Exception as e:
         logger.error(f"Tina chat error: {e}")

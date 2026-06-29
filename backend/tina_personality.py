@@ -549,6 +549,12 @@ async def save_tina_personality(user_id: str, profile: Dict[str, Any]) -> None:
             {"$set": doc},
             upsert=True,
         )
+        # Audit log to Supabase (best-effort, public-safe fields only)
+        try:
+            import supabase_service as supa
+            await supa.log_tina_persona_360(user_id, profile)
+        except Exception as _e:
+            logger.debug(f"audit (tina_persona_360) skipped: {_e}")
     except Exception as e:
         logger.error(f"save_tina_personality error: {e}")
 

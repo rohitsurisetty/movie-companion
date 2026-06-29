@@ -30,6 +30,13 @@ except ImportError:
 
 EMERGENT_LLM_KEY = os.getenv("EMERGENT_LLM_KEY")
 
+# Supabase audit logger (best-effort, never blocks)
+try:
+    import supabase_service as supa_audit  # type: ignore
+except Exception as _e:  # pragma: no cover
+    supa_audit = None
+    logger.warning(f"supabase_service unavailable in chat_service: {_e}")
+
 # MongoDB database reference (will be set by server.py)
 _db = None
 
@@ -132,7 +139,30 @@ async def send_message(
         }
         await _db.chat_requests.insert_one(request)
         logger.info(f"Created message request from {sender_id} to {receiver_id}")
-    
+
+    # Audit log — every user-to-user message (best-effort, non-blocking)
+    if supa_audit is not None:
+        try:
+            await supa_audit.log_user_chat_message(
+                conversation_id=conv_id,
+                sender_id=sender_id,
+                receiver_id=receiver_id,
+                content=content,
+                message_type=message_type or "text",
+                is_read=False,
+                is_first_message=is_new_request,
+            )
+            if is_new_request:
+                await supa_audit.log_match_event(
+                    user_id=sender_id,
+                    event_type="request_sent",
+                    target_user_id=receiver_id,
+                    source="chat",
+                    payload={"conversation_id": conv_id, "preview": content[:100]},
+                )
+        except Exception as _e:
+            logger.debug(f"audit (send_message) skipped: {_e}")
+
     return message
 
 
@@ -407,6 +437,18 @@ async def accept_message_request(user_id: str, conversation_id: str) -> bool:
             "conversation_id": conversation_id,
             "to_user_id": user_id
         })
+        # Audit log
+        if supa_audit is not None:
+            try:
+                await supa_audit.log_match_event(
+                    user_id=user_id,
+                    event_type="request_accepted",
+                    target_user_id=None,
+                    source="chat",
+                    payload={"conversation_id": conversation_id},
+                )
+            except Exception as _e:
+                logger.debug(f"audit (accept) skipped: {_e}")
         return True
     return False
 
@@ -424,6 +466,18 @@ async def decline_message_request(user_id: str, conversation_id: str) -> bool:
             "conversation_id": conversation_id,
             "to_user_id": user_id
         })
+        # Audit log
+        if supa_audit is not None:
+            try:
+                await supa_audit.log_match_event(
+                    user_id=user_id,
+                    event_type="request_declined",
+                    target_user_id=None,
+                    source="chat",
+                    payload={"conversation_id": conversation_id},
+                )
+            except Exception as _e:
+                logger.debug(f"audit (decline) skipped: {_e}")
         return True
     return False
 
@@ -441,7 +495,19 @@ async def unmatch_user(user_id: str, other_user_id: str, reason: Optional[str] =
             "unmatched_at": datetime.utcnow().isoformat()
         }}
     )
-    
+
+    # Audit log
+    if supa_audit is not None:
+        try:
+            await supa_audit.log_unmatch_event(
+                user_id=user_id,
+                other_user_id=other_user_id,
+                conversation_id=conv_id,
+                reason=reason,
+            )
+        except Exception as _e:
+            logger.debug(f"audit (unmatch) skipped: {_e}")
+
     return result.modified_count > 0
 
 
@@ -464,7 +530,19 @@ async def report_user(
     
     await _db.chat_reports.insert_one(report.copy())
     logger.info(f"Report created: {report['report_id']}")
-    
+
+    # Audit log
+    if supa_audit is not None:
+        try:
+            await supa_audit.log_report_event(
+                reporter_id=reporter_id,
+                reported_user_id=reported_id,
+                reason=reason,
+                details=details,
+            )
+        except Exception as _e:
+            logger.debug(f"audit (report) skipped: {_e}")
+
     return report
 
 

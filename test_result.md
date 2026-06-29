@@ -9982,6 +9982,59 @@ agent_communication:
           web preview may or may not record depending on browser MediaRecorder
           support. The Play button on Tina messages works in all environments.
 
+  - task: "Supabase Audit Hooks Integration (full audit trail)"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py, /app/backend/chat_service.py, /app/backend/tina_service.py, /app/backend/tina_personality.py, /app/backend/picture_service.py, /app/backend/supabase_service.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          NEW (June 29, 2026): User completed manual Supabase SQL migration.
+          All 7 audit tables + profile-pictures storage bucket exist (confirmed
+          by supabase_bootstrap logs on startup).
+
+          Audit hooks were INJECTED into:
+          - chat_service.py: log_user_chat_message (line 146), log_match_event
+            (lines 156, 443, 472), log_unmatch_event (502), log_report_event (537)
+          - server.py: log_user_login (718), log_match_event (2393, 2421),
+            log_tina_chat_message (3229, 3238)
+          - tina_service.py / tina_personality.py: log_tina_chat_message +
+            log_tina_persona_360 hooks
+          - picture_service.py: log_picture_event (140, 188) — Supabase Storage
+            upload path
+
+          Backend restarted cleanly; supabase_bootstrap confirms:
+            "✅ All audit tables present. Audit logging is fully active."
+
+          BACKEND TESTING REQUIRED:
+          1. Auth: POST /api/auth/send-email-otp then /api/auth/verify-otp with
+             testuser@example.com. Expect 200, session token returned. Verify
+             a row appears in Supabase `user_chat_messages`/login audit tables.
+             (login audit goes to a separate sheet — just confirm no 500.)
+          2. Tina chat: POST /api/tina/chat with a simple welcome flow. Expect
+             200, no 500s, and rows in `tina_chat_messages` (user+assistant).
+          3. Picture upload: POST /api/user/pictures/upload with a tiny base64
+             test image. Expect 200, public URL returned (Supabase Storage),
+             and a row in `user_pictures`.
+          4. User-to-user chat send: POST /api/chat/send between two seeded
+             users. Expect 200, row in `user_chat_messages`.
+          5. Match event: trigger a swipe or /api/matches; verify rows in
+             `match_events`. Unmatch via /api/chat/unmatch → row in
+             `unmatch_events`. Report via /api/chat/report → row in
+             `report_events`.
+          6. Confirm NO endpoint regresses to 500 due to the new await calls.
+             Audit failures should degrade silently (look at _safe_audit_insert
+             in supabase_service.py — it logs but never raises).
+
+          File references:
+            - /app/backend/supabase_service.py (all log_* helpers)
+            - /app/backend/supabase_bootstrap.py (startup verification)
+            - Supabase env vars in /app/backend/.env
+
 agent_communication:
     -agent: "main"
     -message: |
