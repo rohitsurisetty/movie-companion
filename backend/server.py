@@ -3514,6 +3514,15 @@ async def startup_event():
     set_personality_db(db)
     logger.info("Tina personality engine connected to MongoDB")
 
+    # Run Supabase bootstrap: ensures storage bucket exists & probes audit
+    # tables. Non-blocking, best-effort. Logs a clear warning if the
+    # migration SQL has not been applied yet.
+    try:
+        from supabase_bootstrap import run_bootstrap as _run_supa_bootstrap
+        _run_supa_bootstrap()
+    except Exception as _e:
+        logger.warning(f"Supabase bootstrap raised (non-fatal): {_e}")
+
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
