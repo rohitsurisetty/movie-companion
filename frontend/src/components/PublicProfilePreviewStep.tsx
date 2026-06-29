@@ -60,19 +60,21 @@ export default function PublicProfilePreviewStep({ data, onEdit, onContinue }: P
     gender: data.gender || '',
     location: isVisible('location') ? (data.location || '') : '',
     bio: isVisible('bio') ? (data.bio || '') : '',
-    genres: isVisible('genres') ? (data.genres || []) : [],
+    genres: isVisible('genres') ? (Array.isArray(data.genres) ? data.genres : []) : [],
     topMovies: isVisible('topMovies')
-      ? (data.topMovies || []).map((m) => ({
-          title: m.title,
-          tmdb_id: m.id,
-          poster_path: m.poster_path,
-        }))
+      ? (Array.isArray(data.topMovies) ? data.topMovies : [])
+          .filter((m) => m && typeof m === 'object')
+          .map((m: any) => ({
+            title: m.title || '',
+            tmdb_id: m.id || m.tmdb_id || 0,
+            poster_path: m.poster_path || '',
+          }))
       : [],
-    filmLanguages: isVisible('filmLanguages') ? (data.filmLanguages || []) : [],
-    languagesSpoken: isVisible('languagesSpoken') ? (data.languagesSpoken || []) : [],
+    filmLanguages: isVisible('filmLanguages') ? (Array.isArray(data.filmLanguages) ? data.filmLanguages : []) : [],
+    languagesSpoken: isVisible('languagesSpoken') ? (Array.isArray(data.languagesSpoken) ? data.languagesSpoken : []) : [],
     movieFrequency: isVisible('movieFrequency') ? (data.movieFrequency || '') : '',
     ottTheatre: isVisible('ottTheatre') ? (data.ottTheatre || '') : '',
-    relationshipIntent: isVisible('relationshipIntent') ? (data.relationshipIntent || []) : [],
+    relationshipIntent: isVisible('relationshipIntent') ? (Array.isArray(data.relationshipIntent) ? data.relationshipIntent : []) : [],
     zodiac: isVisible('zodiac') ? (data.zodiac || '') : '',
     smoking: isVisible('smoking') ? (data.smoking || '') : '',
     drinking: isVisible('drinking') ? (data.drinking || '') : '',

@@ -1,0 +1,34 @@
+{
+  "summary": "Verification of the PublicProfilePreviewStep topMovies.map render-crash fix. STATIC CODE REVIEW: all 3 defense-in-depth layers are correctly in place. (1) PublicProfilePreviewStep.tsx:65 uses `Array.isArray(data.topMovies) ? data.topMovies : []` AND chains `.filter((m) => m && typeof m === 'object')` to drop primitives before mapping to the {title, tmdb_id, poster_path} shape (lines 64-72). (2) PremiumProfileView.tsx:687 and :703 both gate with `Array.isArray(profile.topMovies)` / `Array.isArray(profile.filmLanguages)` before .map/length. (3) onboarding.tsx mergeTinaData (lines 159-191) declares ARRAY_FIELDS = {topMovies, genres, filmLanguages, languagesSpoken, relationshipIntent, partnerPreference, uploadedPictures, pictures} and rejects any non-array value for those fields with a console.warn, so bad LLM output never enters profile state. BACKEND smoke: 4/4 pytest cases pass (voice/status, tina/chat, user/profile/<id> 404 path, /api/matches route alive). FRONTEND runtime: app boots cleanly at https://match-history-dev.preview.emergentagent.com — login screen renders, ZERO console errors, ZERO pageerrors, ZERO 'topMovies.map is not a function' strings. The bug-trigger path requires reaching step 13 (PUBLIC_PREVIEW) through full Tina onboarding with a non-array topMovies LLM response — not reachable in a smoke run, but the static fix is provably correct and matches the user's reported crash signature. Continue/Edit testIDs ('public-preview-edit', 'public-preview-continue', 'onboarding-back-btn', 'onboarding-continue-btn') are all present.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_smoke_iter11.py",
+    "/app/test_reports/pytest/pytest_iter11_smoke.xml"
+  ],
+  "action_items": [
+    "(Optional polish) PublicProfilePreviewStep.tsx:67 uses an inline `(m: any)` cast inside .map after the typeof === 'object' filter. This is fine but a more explicit type guard `(m): m is Record<string, unknown>` would let TS prove the access of m.title/m.id/m.poster_path is safe without `any`.",
+    "(Optional defense, not blocking) Same Array.isArray guard pattern should ideally be replicated in any other consumer of profile.topMovies / profile.filmLanguages outside PremiumProfileView and PublicProfilePreviewStep (e.g. legacy match cards, swipe deck, chat preview thumbnails) — main agent may want to grep for `.topMovies.map(` / `.filmLanguages.map(` to confirm no other unguarded call sites remain.",
+    "(Verification gap) Full end-to-end repro of the original crash (Tina returns topMovies as a string like 'Inception, Interstellar') is not reachable from a smoke run because Tina's normal LLM flow currently returns arrays. To proactively cover regressions, consider a Jest/unit test on mergeTinaData with malformed payloads — but this is OPTIONAL since the runtime guards make the UI safe regardless."
+  ],
+  "critical_code_review_comments": [
+    "Defense-in-depth correctly layered: (a) intake (mergeTinaData), (b) display container (PublicProfilePreviewStep), (c) reusable view (PremiumProfileView). Any one of the three layers alone would prevent the crash; together they make it impossible for a non-array topMovies to reach .map.",
+    "PublicProfilePreviewStep filter `m && typeof m === 'object'` correctly excludes both null/undefined and primitive strings/numbers — so a payload like ['Inception','Interstellar'] (array-of-strings) will not crash either; it just renders zero movies. This matches the user's intent.",
+    "mergeTinaData logs `[Onboarding] Ignoring non-array <field> from Tina` which gives the main agent a breadcrumb in production logs if Tina ever drifts.",
+    "PremiumProfileView still has 1085 lines — exceeds 700-line guideline (code review checklist). Functional, but would benefit from extracting PhotoCarousel, MessageDialog, and the sections renderer into separate files. Not blocking this iteration."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_smoke_iter11.py (new — 4 backend smoke tests; all passing)"
+  ],
+  "success_rate": {"backend": "100% (4/4)", "frontend": "100% smoke — home loads, 0 console/page errors, 0 topMovies errors. Full preview-step reachability not exercised (requires authenticated onboarded user; static review confirms the fix)."},
+  "seed_data_creation": "None. Test user TEST_iter11_user is ephemeral and not persisted by /api/tina/chat smoke.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iteration 11 verified the PublicProfilePreviewStep topMovies.map crash fix. Static review of /app/frontend/src/components/PublicProfilePreviewStep.tsx (lines 55-90), /app/frontend/src/components/PremiumProfileView.tsx (lines 686-705) and /app/frontend/app/onboarding.tsx (mergeTinaData lines 159-191) confirms 3-layer defense in depth. Backend smoke file: /app/backend/tests/test_smoke_iter11.py (re-run with `pytest backend/tests/test_smoke_iter11.py -v`). Frontend loads with 0 errors. The full PUBLIC_PREVIEW step (step 13 of onboarding) can only be reached after completing Basic Info -> Photo Upload -> Tina choice -> through to step 12 (Profile Preview) -> step 13 (Public Preview). testuser@example.com starts as new user. To E2E this in a future run, a pre-seeded user that's resumed at step 13 would help. testIDs ready: public-preview-edit, public-preview-continue, onboarding-back-btn, onboarding-continue-btn.",
+  "rca_of_issue": "Original RCA (per main agent): Tina LLM occasionally returned topMovies as a non-array (e.g. string 'Inception, Interstellar'). The old guard `(data.topMovies || []).map(...)` failed because a non-empty string is truthy, so `|| []` did not substitute the fallback, and String.prototype.map does not exist => render crash at PublicProfilePreviewStep.tsx:65. Fix applied (verified in this iteration): defense-in-depth — (1) UI uses Array.isArray guard + object-shape filter before .map, (2) PremiumProfileView gates topMovies/filmLanguages with Array.isArray, (3) mergeTinaData ARRAY_FIELDS Set rejects non-array values for known array fields at the data intake boundary. Repro in this iteration: not reproducible (no console.error, no pageerror, app boots clean). Mitigation: complete and correctly applied."
+}

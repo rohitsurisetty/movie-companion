@@ -159,12 +159,27 @@ export default function OnboardingScreen() {
   const mergeTinaData = (tinaData: Partial<ProfileData>) => {
     const collected: string[] = [];
 
+    // Fields that MUST be arrays in profile state. If Tina ever returns a
+    // string/object for any of these, we drop the value rather than poison
+    // downstream renderers (preview screens .map over these).
+    const ARRAY_FIELDS = new Set([
+      'topMovies', 'genres', 'filmLanguages', 'languagesSpoken',
+      'relationshipIntent', 'partnerPreference', 'uploadedPictures', 'pictures',
+    ]);
+
     Object.entries(tinaData).forEach(([key, value]) => {
-      // Skip undefined, null, empty string, or EMPTY array/object values.
-      // (Critical: a Tina exit-midway must NOT mark `topMovies: []` as collected,
-      // otherwise the onboarding flow will skip the Top Movies step and the
-      // Preview/Public-Preview steps later crash trying to render zero movies.)
+      // Skip undefined, null, empty string
       if (value === undefined || value === null || value === '') return;
+
+      // For array-typed fields, only accept actual non-empty arrays
+      if (ARRAY_FIELDS.has(key)) {
+        if (!Array.isArray(value) || value.length === 0) {
+          console.warn(`[Onboarding] Ignoring non-array ${key} from Tina:`, value);
+          return;
+        }
+      }
+
+      // Skip empty objects/arrays generally (must be after ARRAY_FIELDS check)
       if (Array.isArray(value) && value.length === 0) return;
       if (typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 0) return;
 

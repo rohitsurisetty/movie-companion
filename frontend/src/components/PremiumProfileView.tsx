@@ -684,7 +684,7 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
           )}
 
           {/* Top Movies - Horizontal Posters */}
-          {profile.topMovies && profile.topMovies.length > 0 && (
+          {Array.isArray(profile.topMovies) && profile.topMovies.length > 0 && (
             <View style={styles.section}>
               <SectionHeader title="Top Movies" />
               <ScrollView 
@@ -700,7 +700,7 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
           )}
 
           {/* Languages Watched */}
-          {profile.filmLanguages && profile.filmLanguages.length > 0 && (
+          {Array.isArray(profile.filmLanguages) && profile.filmLanguages.length > 0 && (
             <View style={styles.section}>
               <SectionHeader title="Languages Watched" />
               <View style={styles.tagsGrid}>
