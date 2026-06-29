@@ -84,6 +84,17 @@ export default function TinaModal({ onNavigationRequest }: TinaModalProps) {
     setMessages(messages);
   }, [setMessages]);
 
+  // ----- Voice-call sub-screen state + handlers -----
+  const [callActive, setCallActive] = useState(false);
+
+  const handleStartCall = useCallback(() => {
+    setCallActive(true);
+  }, []);
+
+  const handleEndCall = useCallback(() => {
+    setCallActive(false);
+  }, []);
+
   if (!state.isOpen) return null;
 
   return (
@@ -122,6 +133,7 @@ export default function TinaModal({ onNavigationRequest }: TinaModalProps) {
           <View style={styles.header}>
             <View style={styles.headerLeft}>
               <TouchableOpacity
+                testID="tina-minimize-button"
                 onPress={handleMinimize}
                 style={styles.headerButton}
                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
@@ -137,6 +149,7 @@ export default function TinaModal({ onNavigationRequest }: TinaModalProps) {
             
             <View style={styles.headerRight}>
               <TouchableOpacity
+                testID="tina-call-button"
                 onPress={handleStartCall}
                 style={[styles.headerButton, styles.callButton]}
                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
@@ -145,6 +158,7 @@ export default function TinaModal({ onNavigationRequest }: TinaModalProps) {
                 <Ionicons name="call" size={20} color="#FFFFFF" />
               </TouchableOpacity>
               <TouchableOpacity
+                testID="tina-close-button"
                 onPress={handleClose}
                 style={styles.headerButton}
                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}

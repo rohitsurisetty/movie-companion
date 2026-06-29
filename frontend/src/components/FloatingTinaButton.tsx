@@ -95,6 +95,7 @@ export default function FloatingTinaButton({
       ]}
     >
       <TouchableOpacity
+        testID="tina-floating-button"
         style={styles.button}
         onPress={toggleTina}
         onPressIn={handlePressIn}

@@ -582,6 +582,7 @@ export default function TinaCallScreen({
         </TouchableOpacity>
 
         <TouchableOpacity
+          testID="tina-end-call-button"
           style={styles.endBtn}
           onPress={handleEndCall}
           activeOpacity={0.85}

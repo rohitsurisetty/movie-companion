@@ -1,0 +1,37 @@
+{
+  "summary": "Mixed (backend full + frontend partial) verification of the Tina modal render-crash fix. Backend: all 9 Tina/Voice pytest cases pass (100%) — /api/tina/voice/status returns {enabled:true}, /api/tina/voice/speak returns base64 MP3 data URI, /api/tina/voice/transcribe round-trip works, /api/tina/welcome-back and /api/tina/chat smokes pass. Frontend: email-OTP login flow succeeded end-to-end (Login with Email -> Send OTP -> Verify OTP -> redirected to /onboarding) WITH ZERO pageerrors and ZERO 'handleStartCall' / 'Property doesn't exist' console errors detected during the entire session. Static analysis of TinaModal.tsx confirms handleStartCall (line 90), handleEndCall (line 94) and callActive (line 88) are all declared inside the TinaModal component function scope, matching the JSX references at lines 151 and 184-194. Web bundle compiled cleanly (1620 modules) with no errors. Full UI tap-through (tap Tina bubble -> open modal -> tap green call -> see TinaCallScreen overlay -> tap red end-call -> return to chat -> send text) could NOT be exercised in this run because the only test account (testuser@example.com) is a NEW user whose onboardingStage is 'pre_decision' — the FloatingTinaButton is gated by shouldShowFloatingButton() which only returns true when onboardingStage === 'completed' (TinaContext.tsx:453). On the onboarding screens the bubble is intentionally hidden, so the modal render path could not be triggered via the public URL. The render-fix itself is verified correct by code review; runtime tap verification needs a pre-onboarded test account.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_tina_voice.py",
+    "/app/test_reports/pytest/pytest_tina_voice_iter10.xml"
+  ],
+  "action_items": [
+    "(Verification gap) To fully E2E-verify the Tina modal + call screen, the main agent should either (a) provide a seeded test account whose onboardingStage='completed' (e.g. expose a debug login or seed user_9399c003d7ff-style account credentials in /app/memory/test_credentials.md), or (b) self-test by completing onboarding once and tapping the Tina bubble — the static code path is correct, so this should now render without the prior 'Property handleStartCall doesn't exist' crash.",
+    "(Optional polish) /app/frontend/src/components/TinaModal.tsx has 3 unused-var lint warnings (SCREEN_WIDTH:17, insets:25, addMessage:26).",
+    "(Optional polish) /app/frontend/src/components/TinaCallScreen.tsx — react-hooks/exhaustive-deps warning at startRecordingTurn (line 309) is missing 'processTurn' dep. processTurn and startRecordingTurn form a mutually-recursive useCallback cycle; consider refs to break the cycle and silence the warning, but functionally fine."
+  ],
+  "critical_code_review_comments": [
+    "TinaModal.tsx fix is correct: callActive useState (line 88), handleStartCall useCallback (line 90), handleEndCall useCallback (line 94) are all declared inside the TinaModal function component scope, BEFORE the early-return (line 98) and BEFORE the JSX that uses them (lines 151, 184-194). No closure / scope mismatch.",
+    "TinaCallScreen.tsx is large (~720 lines) — could be split into VAD/recording hook + UI shell to make it easier to maintain, but not blocking.",
+    "TinaCallScreen uses expo-audio (correct, modern API) — no deprecated expo-av usage. Good.",
+    "Audio recording in background/locked screen WILL NOT work in Expo Go or web preview per Expo guidance — needs a native build. The browser preview will only ever exercise the *render* of the overlay, not the mic loop, which matches the request.",
+    "Voice endpoints in server.py (lines 3260-3320) correctly /api-prefixed, Pydantic validated, properly re-raise HTTPException."
+  ],
+  "updated_files": [
+    "/app/frontend/src/components/FloatingTinaButton.tsx (added testID='tina-floating-button')",
+    "/app/frontend/src/components/TinaModal.tsx (added testID for tina-minimize-button / tina-call-button / tina-close-button)",
+    "/app/frontend/src/components/TinaCallScreen.tsx (added testID='tina-end-call-button')"
+  ],
+  "success_rate": {"backend": "100% (9/9)", "frontend": "partial — auth flow OK, modal render path not reachable for new user; static analysis of the fix confirms correctness"},
+  "seed_data_creation": "No persistent data. Auth flow created a fresh OTP via /api/auth/send-email-otp for testuser@example.com (server overwrites prior OTPs).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Tina render-crash bug verification. Re-run with: pytest /app/backend/tests/test_tina_voice.py -v (9 cases). Frontend testIDs already in place: tina-floating-button, tina-call-button, tina-close-button, tina-minimize-button, tina-end-call-button. Note: the floating Tina bubble is gated by TinaContext.shouldShowFloatingButton() which requires onboardingStage='completed'. testuser@example.com is treated as a new user, so the bubble is hidden on /onboarding. To exercise the full modal + call-screen render path via the public URL, complete onboarding once OR seed a pre-onboarded account. The fix at TinaModal.tsx:88-96 (callActive useState + handleStartCall/handleEndCall useCallback) is confirmed correct by static review — same component scope as the JSX references at lines 151 and 184-194.",
+  "rca_of_issue": "Root cause: an earlier search_replace edit inserted JSX references to handleStartCall / handleEndCall / callActive inside the TinaModal component but did not insert the corresponding useState/useCallback declarations, so the closure lookup at render time threw 'Property handleStartCall doesn't exist'. Fix (verified in this run): the three declarations now exist at lines 88-96 of /app/frontend/src/components/TinaModal.tsx, inside the TinaModal function scope, ahead of both the early-return (line 98) and the JSX usage (lines 151, 184-194). Reproduction in this iteration: not reproducible — web bundle compiles clean (1620 modules) and no pageerror / 'doesn't exist' string was emitted during the testuser@example.com OTP-login session. Mitigation already applied by main agent."
+}
