@@ -16,7 +16,11 @@ logger = logging.getLogger(__name__)
 
 # Initialize Supabase client
 SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+# Prefer the SERVICE key so server-side audit inserts bypass RLS (the anon key
+# is blocked by the row-level security policies on the audit tables). The
+# bootstrap client (supabase_bootstrap.py) already uses the service key — this
+# brings the runtime client in line so audit hooks actually persist.
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY")
 
 supabase: Optional[Client] = None
 

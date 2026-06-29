@@ -28,6 +28,11 @@ import uuid
 
 import httpx
 import pytest
+from dotenv import load_dotenv
+
+# Load backend .env so SUPABASE_URL / SUPABASE_SERVICE_KEY are visible to the
+# persistence sanity tests (otherwise they would be skipped).
+load_dotenv("/app/backend/.env")
 
 BASE_URL = (os.environ.get("EXPO_PUBLIC_BACKEND_URL")
             or os.environ.get("EXPO_BACKEND_URL")

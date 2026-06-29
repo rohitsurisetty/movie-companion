@@ -1,0 +1,30 @@
+{
+  "summary": "RETEST of Supabase audit-hook persistence after the 2-line key-precedence fix in /app/backend/supabase_service.py:18-23 (SUPABASE_KEY now prefers SUPABASE_SERVICE_KEY). Re-ran the existing /app/backend/tests/test_supabase_audit.py — 13/13 PASS (9 endpoint + 4 persistence). Backend error log has ZERO '[audit] insert into <table> failed (non-blocking)' lines and ZERO Postgres 42501 RLS errors after the test run. The fix is verified end-to-end: audit rows for user_pictures, tina_chat_messages, user_chat_messages and report_events all land in Supabase. Note: one minor TEST-SCRIPT-ONLY fix was applied to the test file (load_dotenv('/app/backend/.env') at the top) because pytest didn't otherwise see SUPABASE_URL / SUPABASE_SERVICE_KEY and was silently SKIPPING the 4 persistence tests via @pytest.mark.skipif. With that load_dotenv call the persistence tests actually execute and all 4 pass.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_supabase_audit.py",
+    "/app/test_reports/pytest/iter14_supabase_audit.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Optional hardening: add a conftest.py under /app/backend/tests/ that calls load_dotenv('/app/backend/.env') once, so future test files don't have to load env explicitly and persistence/integration tests are never silently skipped."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_supabase_audit.py (added load_dotenv('/app/backend/.env') so the @pytest.mark.skipif on TestSupabasePersistence no longer evaluates true and the 4 persistence tests actually run)"
+  ],
+  "success_rate": {"backend": "100% (13/13)", "frontend": "N/A (skipped per request)"},
+  "seed_data_creation": "Tests create their own ephemeral test_user via /api/auth/send-email-otp + /api/auth/verify-otp (mock OTP returned in response). No persistent seed data added.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Supabase audit persistence is fully working as of iteration 14. SUPABASE_KEY in supabase_service.py now prefers SUPABASE_SERVICE_KEY, matching the bootstrap client, so RLS no longer blocks server-side audit inserts. test_supabase_audit.py now loads /app/backend/.env at import time so persistence tests run instead of skip. All 13 tests are green and there are no '[audit] ... failed (non-blocking)' warnings in backend.err.log.",
+  "rca_of_issue": "Previous iter_13 issue: runtime Supabase client created in supabase_service.py was initialised with SUPABASE_KEY (anon key) — RLS policies on the audit tables (user_pictures, tina_chat_messages, user_chat_messages, report_events, etc.) reject inserts from the anon role with Postgres error 42501. The supabase_bootstrap.py client used SUPABASE_SERVICE_KEY (service_role) and therefore bypassed RLS, which is why table creation worked but runtime audit inserts didn't. Fix: changed SUPABASE_KEY = os.getenv('SUPABASE_SERVICE_KEY') or os.getenv('SUPABASE_KEY') in supabase_service.py lines 18-23 so the runtime client also uses the service_role key. Verification: 13/13 tests pass, 4 PostgREST queries against Supabase REST API confirm rows landed for the new test user, backend.err.log contains zero 42501 / 'audit insert failed' lines after a fresh test run."
+}
