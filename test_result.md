@@ -10381,6 +10381,59 @@ agent_communication:
              invalidate_all_match_caches() after saving so the cache is
              always fresh.
 
+  - task: "Launch round: Tina mandatory + voice cadence + speaker + remove mock seeding + auto-reply gating"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py, /app/frontend/src/components/TinaChatScreen.tsx, /app/frontend/src/components/TinaCallScreen.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: |
+          iteration_22 → P0 caught (3rd seed site at /chat/conversations
+          was missed). Main agent applied fix + header opt-in for tests.
+          iteration_24 → 47/48 tests PASS:
+          • 7/7 header opt-in tests (NEW)
+          • 20/20 audit iter20 tests (cascading failures resolved)
+          • 13/13 supabase_audit regression
+          • 7/8 launch_prep — sole failure is PRE-EXISTING pool-rank drift
+            (real pool now 150+ users, all 35 bots fall outside top-15 cut
+            after preference filtering — not a regression).
+
+          Live verification of all 5 user asks:
+          1. Skip button GONE from TinaChatScreen JSX (only dead styles
+             remain — harmless).
+          2. Voice cadence tunables confirmed: SILENCE_DURATION_MS=1000,
+             MIN_SPEECH_DURATION_MS=700, METERING_INTERVAL_MS=100,
+             PRE_REPLY_PAUSE_MS=350. Total perceived gap ~1.0-1.5s
+             (was 2.4s).
+          3. shouldRouteThroughEarpiece:false confirmed in setAudioModeAsync.
+          4. /chat/init-mock + /chat/conversations + /user/match-history
+             all gated. New users see 0 auto-seeded bot conversations.
+             Verified by direct backend test.
+          5. Phase 3 auto-reply gating intact: real→real = no auto-reply,
+             real→mock_user_* = auto-reply fires (verified in backend logs).
+      - working: true
+        agent: "main"
+        comment: |
+          LAUNCH ROUND SHIPPED (June 30, 2026):
+          1. Removed Skip button from TinaChatScreen (signup Tina now
+             MANDATORY). Comment left in JSX for paper trail.
+          2. Voice call cadence reduced — feels snappier, still doesn't
+             cut off mid-utterance.
+          3. shouldRouteThroughEarpiece:false → voice call now plays on
+             speaker by default (both iOS and Android).
+          4. /chat/init-mock, /chat/conversations, /user/match-history
+             all gated behind DEV_SEED_MOCK_CHATS/UNMATCHED env vars OR
+             X-Dev-Seed-Mock: 1 request header (latter is for the audit
+             test suite — preserves test isolation without touching
+             process-wide env state).
+          5. Phase 3 auto-reply gating verified: receiver_id.startswith
+             ('mock_') check in /api/chat/send means real-user-to-real-user
+             messages never auto-reply.
+
 agent_communication:
     -agent: "main"
     -message: |
