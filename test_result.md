@@ -10092,11 +10092,11 @@ agent_communication:
 
   - task: "Bug fix: Tina chat closing abruptly + skip showing pre-collected pages"
     implemented: true
-    working: "NA"
+    working: true
     file: "/app/frontend/src/components/TinaChatScreen.tsx, /app/frontend/app/onboarding.tsx"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: "NA"
         agent: "main"
