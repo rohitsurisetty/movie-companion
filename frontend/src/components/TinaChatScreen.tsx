@@ -161,21 +161,25 @@ export default function TinaChatScreen({
   const generateMessageId = (isUser: boolean) => 
     `${isUser ? 'user' : 'tina'}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   
-  // Get contextual fallback greeting based on onboarding stage
+  // Get contextual fallback greeting based on onboarding stage.
+  // NOTE: these fallbacks fire only when messages.length===0 (true cold-start
+  // path) — they are NOT used on movie-picker return. We removed the
+  // literal "Great picks!" tease here to avoid ever competing with the
+  // backend's dynamic response (see June 30 2026 bug fix).
   const getContextualFallbackGreeting = useCallback((): string[] => {
     const name = userName || 'there';
-    
+
     if (isReturningFromMovieSelection) {
-      return [`Great picks, ${name}! 🎬`, "Your movie taste tells me a lot about you!"];
+      return [`Welcome back, ${name}!`, "Let's keep going — I'll react to your picks in a sec."];
     }
-    
+
     switch (onboardingContext) {
       case 'email_verified':
         return [`Perfect! Email verified ✅`, `Now let's build your profile, ${name}!`];
       case 'returning':
         return [`Welcome back, ${name}! 😊`, "Ready to continue where we left off?"];
       case 'movie_selection':
-        return [`Great picks, ${name}! 🎬`, "I can already tell we're going to find you some amazing matches!"];
+        return [`Welcome back, ${name}!`, "Let's keep going — I'll react to your picks in a sec."];
       case 'post_onboarding':
         return [`Hey ${name}! 💫`, "Your profile is looking great! How can I help you today?"];
       case 'profile_building':

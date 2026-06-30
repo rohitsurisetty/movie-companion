@@ -10221,6 +10221,62 @@ agent_communication:
           - Signup Tina becomes more LLM-flexible (free-text answers, less
             scripted) — the 360° quiz can stay chip-driven.
 
+  - task: "Bug fix: Movie picker return — duplicate messages + wrong order"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/components/TinaChatScreen.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: |
+          iteration_18: bug-fix VERIFIED by code inspection (Playwright E2E
+          blocked at BasicInfo DOB picker — known RN-web limitation).
+
+          All 3 correctness criteria satisfied:
+          1. moviesHandledRef.current = true flips synchronously BEFORE the
+             setTimeout in BOTH call sites (initializeConversation line 314,
+             late-arriving useEffect line 483).
+          2. Hardcoded "Great picks! 🎬" addMessage call REMOVED from both
+             movie-return code paths. Backend's contextual data.response now
+             lands naturally after the user's "My top movies: …" bubble.
+          3. Order in handleMoviesReceived: user bubble FIRST → /api/tina/chat
+             → Tina's data.response AFTER. Correct.
+          4. Only ONE /api/tina/chat call with selected_movies fires now.
+
+          Hygiene follow-up applied by main agent: removed remaining "Great
+          picks! 🎬" literals from getContextualFallbackGreeting fallback
+          paths (dead-code but better to clean up).
+      - working: "NA"
+        agent: "main"
+        comment: |
+          BUG FIX (June 30, 2026): User screenshot showed
+          - "Great picks! 🎬" duplicated AND appearing BEFORE the user's
+            "My top movies: The Conjuring, Bāhubali: The Beginning" message.
+          - User's "My top movies: …" message duplicated.
+
+          ROOT CAUSE: Two code paths in TinaChatScreen.tsx race-handled the
+          movie-picker return:
+            (a) initializeConversation() at line ~305
+            (b) Late-arriving useEffect at line ~470
+          Both guarded on `pendingMoviesProcessed` React state, which is async
+          — so both saw stale `false` on the same tick and both fired.
+          BOTH also hardcoded `addMessage('Great picks! 🎬', false)` BEFORE
+          calling handleMoviesReceived (which is the one that adds the user's
+          actual selection message).
+
+          FIXES:
+          1. Added synchronous useRef `moviesHandledRef` that flips IMMEDIATELY
+             so the second path bails out cleanly.
+          2. Removed both hardcoded `addMessage('Great picks! 🎬', false)` calls.
+             handleMoviesReceived posts the user's bubble first; the backend's
+             contextual response (from data.response) arrives naturally after.
+          3. Cleaned up two dead-code literals in `getContextualFallbackGreeting`
+             that still mentioned "Great picks!" — unreachable from the picker
+             path but flagged by testing agent for hygiene.
+
 agent_communication:
     -agent: "main"
     -message: |
