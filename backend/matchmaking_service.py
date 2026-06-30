@@ -2234,16 +2234,17 @@ async def get_matches_for_user(
     filters: Optional[Dict] = None,
     use_mock_data: bool = True,
     force_refresh: bool = False,
-    mode: str = "date"
+    mode: str = "date",
+    top_n: int = 30,
 ) -> List[Dict]:
     """
     Main function to get matches for a user.
-    
+
     1. Checks cache first (unless force_refresh is True)
     2. If cache miss/expired: Gets user profile, applies filters, runs AI scoring
     3. Caches results before returning
     4. Returns ranked matches
-    
+
     Args:
         user_id: User ID to get matches for
         user_profile: Optional user profile dict
@@ -2251,6 +2252,11 @@ async def get_matches_for_user(
         use_mock_data: Whether to use mock users
         force_refresh: If True, bypass cache and regenerate matches
         mode: 'buddy' or 'date' - determines which mode users to match with
+        top_n: how many AI-scored matches to return. Plumbed all the way
+            from the API's `limit` field so callers can request a larger
+            pool when needed (e.g. tests asserting bots-present in a
+            150+-real-user candidate pool). Default 30 keeps the prod feed
+            snappy without losing the mixed-pool contract.
     """
     # Get current user profile
     if user_profile is None and use_mock_data:
@@ -2316,8 +2322,11 @@ async def get_matches_for_user(
     
     print(f"Filtered {len(candidates)} candidates down to {len(filtered_candidates)} after applying preferences (mode={mode})")
     
-    # Step 2: Get AI compatibility scores
-    matches = await get_ai_compatibility_scores(user_profile, filtered_candidates, top_n=15)
+    # Step 2: Get AI compatibility scores. top_n is plumbed from the API's
+    # `limit` (default 30) so the final response matches what the caller asked
+    # for. Critical for keeping bots present in mixed-pool queries when the
+    # real-user candidate count balloons past the historical hardcoded 15.
+    matches = await get_ai_compatibility_scores(user_profile, filtered_candidates, top_n=top_n)
     
     # Step 3: Save to cache (with mode-specific key)
     await save_matches_to_cache(cache_key, matches, profile_hash)

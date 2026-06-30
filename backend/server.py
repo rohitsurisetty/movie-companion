@@ -2401,7 +2401,11 @@ async def get_matches(req: MatchRequest):
             filters=req.filters,
             use_mock_data=True,  # Using mock users for now
             force_refresh=req.force_refresh,  # Pass cache bypass option
-            mode=req.mode  # Pass the user's current mode (buddy/date)
+            mode=req.mode,  # Pass the user's current mode (buddy/date)
+            top_n=max(req.limit, 30),  # Plumb the caller's limit all the way
+            # down so the AI scorer doesn't silently truncate to 15. Floor at
+            # 30 so the cached pool is always rich enough for downstream
+            # filtering / pagination.
         )
         
         logger.info(f"Found {len(matches)} matches for user {req.user_id} (mode={req.mode}, force_refresh={req.force_refresh})")
