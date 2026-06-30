@@ -413,7 +413,9 @@ export default function OnboardingScreen() {
     }
     // Step 1: Photo Upload
     if (step === STEP_PHOTO_UPLOAD) {
-      return <PhotoUploadStep onNext={handlePhotoUploadComplete} />;
+      // Pass the authenticated userId so PhotoUploadStep doesn't have to
+      // race against AsyncStorage settle time to fetch it itself.
+      return <PhotoUploadStep onNext={handlePhotoUploadComplete} userId={userId} />;
     }
     // Step 2: Tina is auto-launched via useEffect (manual form removed)
     // Show a loading placeholder while transitioning into Tina chat

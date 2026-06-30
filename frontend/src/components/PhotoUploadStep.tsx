@@ -38,12 +38,16 @@ export default function PhotoUploadStep({ userId: propUserId, onNext, onBack }: 
   const canContinue = uploadedCount >= 1;
 
   useEffect(() => {
-    if (!propUserId) {
-      initAuth();
-    } else {
+    // Prefer the propUserId passed by the parent (onboarding) since it's
+    // sourced from getUserId() which already reads getAuth(). If the prop
+    // is empty (parent's getUserId race finished after our first render),
+    // fall back to initAuth() so we still pick up the storage value.
+    if (propUserId) {
       setUserId(propUserId);
       setSessionId(`session_${Date.now()}`);
+      return;
     }
+    initAuth();
   }, [propUserId]);
 
   const initAuth = async () => {
@@ -51,11 +55,16 @@ export default function PhotoUploadStep({ userId: propUserId, onNext, onBack }: 
     if (auth?.user_id) {
       setUserId(auth.user_id);
       setSessionId(auth.session_id || `session_${Date.now()}`);
-    } else {
-      const tempId = `user_${Date.now()}`;
-      setUserId(tempId);
-      setSessionId(`session_${Date.now()}`);
+      return;
     }
+    // No usable auth → DON'T fabricate a user_${Date.now()} id. The backend
+    // now enforces require_owner: the body user_id MUST match the
+    // session_token's resolved identity. A made-up id always 404s. Surface
+    // the missing auth to the user so they can re-login instead of silently
+    // failing every upload.
+    console.warn('[PhotoUploadStep] No auth user_id in storage — uploads will be blocked until user re-logs in.');
+    setUserId('');
+    setSessionId(`session_${Date.now()}`);
   };
 
   const showImageOptions = (slotIndex: number) => {
@@ -116,6 +125,20 @@ export default function PhotoUploadStep({ userId: propUserId, onNext, onBack }: 
   };
 
   const uploadPicture = async (slotIndex: number, base64Data: string, contentType: string) => {
+    // Guard rail: never POST without a real authenticated user_id. The
+    // backend enforces require_owner — any made-up id always 404s and
+    // surfaces as "Not found" to the user.
+    const isLegitUserId = userId && userId.startsWith('user_') && !/^user_\d{13,}$/.test(userId);
+    if (!isLegitUserId) {
+      Alert.alert(
+        'Session expired',
+        'Please sign back in before uploading photos.',
+      );
+      setPictures(prev => prev.map(p =>
+        p.index === slotIndex ? { ...p, uri: null, uploading: false, uploaded: false } : p
+      ));
+      return;
+    }
     try {
       const response = await fetch(`${API_BASE}/api/user/pictures/upload`, {
         method: 'POST',
@@ -131,18 +154,27 @@ export default function PhotoUploadStep({ userId: propUserId, onNext, onBack }: 
 
       const data = await response.json();
 
-      if (data.success) {
+      if (response.ok && data.success) {
         setPictures(prev => prev.map(p => 
           p.index === slotIndex 
             ? { ...p, uri: data.picture_url, uploading: false, uploaded: true }
             : p
         ));
       } else {
-        throw new Error(data.detail || 'Upload failed');
+        // Surface the backend's actual error detail (e.g. "Could not process
+        // this image — make sure it's a JPEG/PNG/HEIC under 15 MB") instead
+        // of the previous opaque "Upload failed" string. 401/404 still get a
+        // user-friendly translation.
+        let msg: string = data?.detail || 'Upload failed';
+        if (response.status === 401) msg = 'Session expired. Please sign back in.';
+        else if (response.status === 404) msg = 'Authentication mismatch. Please sign back in.';
+        else if (response.status === 429) msg = 'Too many uploads — please wait a moment.';
+        throw new Error(msg);
       }
     } catch (error) {
       console.error('Upload error:', error);
-      Alert.alert('Upload Failed', 'Failed to upload picture. Please try again.');
+      const friendly = (error as Error)?.message || 'Please try again.';
+      Alert.alert('Upload Failed', friendly);
       setPictures(prev => prev.map(p => 
         p.index === slotIndex 
           ? { ...p, uri: null, uploading: false, uploaded: false }

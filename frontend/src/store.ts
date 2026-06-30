@@ -122,8 +122,13 @@ export const getAuth = async () => {
 };
 
 export const getUserId = async (): Promise<string> => {
+  // Returns the authenticated user_id from storage, or an empty string when
+  // unauthenticated. The previous "guest_${Date.now()}" fallback was
+  // dangerous now that the backend enforces require_owner — any made-up id
+  // 404s. Callers should treat empty string as "not signed in" and either
+  // redirect to login or refuse to send the request.
   const auth = await getAuth();
-  return auth?.user_id || `guest_${Date.now()}`;
+  return auth?.user_id || '';
 };
 
 export const saveProfile = async (data: any) => {

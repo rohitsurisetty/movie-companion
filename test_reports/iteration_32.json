@@ -1,0 +1,37 @@
+{
+  "summary": "Iter32 - profile-picture upload bug fix (frontend auth-token-routing). The user-reported 'Not found.' on the installed APK was caused by saveAuth() being bypassed at verify-otp + /auth/session, so session_token never landed in SecureStore and the global authenticated-fetch wrapper had nothing to attach. Verified ALL three fixes from this iteration are working: (1) saveAuth() split — after fresh email-OTP login on the web preview, session_token lives ONLY in @secure:film_companion_session_token (len=40, SecureStore-backed), and the @film_companion_auth blob contains user_id/email/name/picture/is_new_user with NO session_token leakage. (2) Global installAuthenticatedFetch() wrapper works end-to-end: GET /api/auth/me with no manual Authorization header returned 200 + correct user payload, proving the wrapper auto-injects 'Authorization: Bearer <token>' for /api/* calls. (3) onboarding.tsx passes userId={userId} prop to <PhotoUploadStep> (confirmed in source). Backend regression (iter31 pytest suite, 19 tests, re-run as iter32 regression): 19/19 PASS — happy-path JPEG/WEBP, all 8 HEIF brands (hvc1/heix/heim/heis/hevc/mif1/msf1/avif), 3 error-path tests (garbage→400, plain-text→400, oversized→400), BOLA cross-user→404, no-auth→401, batch happy-path (3 pics), batch BOLA→404, batch no-auth→401, post-upload GET persistence. The original user-reported require_owner 404 path is gone: when the right session_token is in SecureStore and userId is correctly passed, upload returns 200; when body.user_id differs from session-resolved id, upload correctly returns 404 (BOLA); when no auth is sent, upload correctly returns 401.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "shadow* style props", "issue": "React Native Web warning: '\"shadow*\" style props are deprecated. Use \"boxShadow\".' Non-blocking. Already noted in iter31 review."},
+      {"component": "useNativeDriver on web", "issue": "Animated: 'useNativeDriver is not supported because the native animated module is missing' — expected on Expo web preview, not a real issue."},
+      {"component": "props.pointerEvents", "issue": "React Native Web warning: 'props.pointerEvents is deprecated. Use style.pointerEvents'. Cosmetic."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_picture_upload_iter31.py",
+    "/app/test_reports/pytest/iter32_picture_upload_regression.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "PhotoUploadStep.uploadPicture sends NO explicit Authorization header — it relies entirely on the global installAuthenticatedFetch wrapper. Verified the wrapper is correctly installed at app boot (root _layout.tsx) and works (validated via /api/auth/me 200 without manual header). This is intentional, but worth a comment in the code so future maintainers don't 'fix' it by re-adding manual headers.",
+    "The legit-user-id check in PhotoUploadStep.uploadPicture is brittle: `userId.startsWith('user_') && !/^user_\\d{13,}$/.test(userId)`. It assumes backend user_ids always start with 'user_' and are NOT 13+ digit timestamps. Real ids look like 'user_57de60b99dfd' (alphanumeric suffix), so the regex correctly rejects only the legacy `user_${Date.now()}` pattern. Works today, but a brittle contract — consider validating via getAuth() instead of regex.",
+    "server.py is 3920+ lines (unchanged since iter31). Worth splitting into routers/* for maintainability."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (19/19 iter31 regression tests pass)",
+    "frontend": "100% (auth split verified; global fetch wrapper verified via /api/auth/me 200; onboarding renders correctly; user_id prop wiring confirmed in source)"
+  },
+  "seed_data_creation": "Reused iter31 test users (TEST_iter31_userA/B) + created TEST_iter32_e2e@example.com via dev email-OTP flow on the live web preview.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "iter32 fix is verified end-to-end. (a) saveAuth() now lands session_token in @secure:film_companion_session_token (web fallback) — len=40 confirmed. (b) installAuthenticatedFetch wrapper auto-injects Bearer token on /api/* (verified via GET /api/auth/me 200, no manual auth). (c) onboarding.tsx passes userId={userId} prop to PhotoUploadStep (line 418). (d) PhotoUploadStep.uploadPicture refuses to POST when userId is empty or matches the legacy `user_${13-digit-timestamp}` pattern (lines 130-141) and surfaces 'Session expired'. (e) PhotoUploadStep DOES NOT manually set Authorization — it relies on the global wrapper, which is the correct design. Backend require_owner enforcement remains 100% intact (BOLA→404, no-auth→401, happy-path→200). HEIC brand-variant fix from iter31 still works. NOTE: The 'shadow*' and 'pointerEvents' React Native Web warnings are cosmetic and unchanged from iter31.",
+  "rca_of_issue": "Original user bug (APK photo upload showed 'Not found.'): three independent gaps stacked. (1) The auth screen wrote raw verify-otp / /auth/session JSON to AsyncStorage via `AsyncStorage.setItem('@film_companion_auth', JSON.stringify(data))`, including the session_token. The global fetch wrapper, however, reads the token via `_loadSecret(TOKEN_KEY)` which only looks in SecureStore (native) or `@secure:film_companion_session_token` (web fallback) — so the wrapper saw no token and attached no Authorization header. Cookies (session_token cookie set by /api/auth/verify-otp) still partially worked because of `credentials:'include'` on some calls, but only on web — APK cookies for cross-origin XHR aren't reliable in installed RN apps. (2) PhotoUploadStep.initAuth had a `user_${Date.now()}` fake-id fallback when getAuth() returned nothing — guaranteed 404 from require_owner. (3) onboarding.tsx didn't pass userId, forcing PhotoUploadStep into the storage-race path on every mount. FIX VERIFICATION: (a) replaced both AsyncStorage.setItem call-sites with `await saveAuth(data)` in /app/frontend/app/index.tsx lines 100-101 and 255-256 — confirmed via DevTools that session_token is now in @secure:* (40-char value) and absent from @film_companion_auth. (b) removed the fake-id fallback in PhotoUploadStep.tsx initAuth (lines 53-68) — userId stays empty when unauthenticated, and uploadPicture's guard rail (lines 130-141) surfaces 'Session expired' instead of silently 404ing. (c) onboarding.tsx line 418 now passes userId={userId} to <PhotoUploadStep>. End-to-end: fresh login → /api/auth/me returns 200 via the global wrapper → upload would succeed if the user reached that step. Backend regression 19/19 still pass."
+}

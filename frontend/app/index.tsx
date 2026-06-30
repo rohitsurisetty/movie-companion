@@ -94,7 +94,11 @@ export default function AuthScreen() {
       });
       if (!resp.ok) throw new Error('Auth failed');
       const data = await resp.json();
-      await AsyncStorage.setItem('@film_companion_auth', JSON.stringify(data));
+      // Use saveAuth() so the session_token goes to SecureStore — same
+      // reason as in verify-otp. Direct AsyncStorage.setItem here would
+      // leave token-required fetches with no Authorization header.
+      const { saveAuth } = await import('../src/store');
+      await saveAuth(data);
       
       // Check if new user or existing
       if (data.is_new_user) {
@@ -240,7 +244,16 @@ export default function AuthScreen() {
       const data = await resp.json();
       
       if (resp.ok) {
-        await AsyncStorage.setItem('@film_companion_auth', JSON.stringify(data));
+        // Persist via saveAuth() so the session_token lands in SecureStore
+        // (not plaintext AsyncStorage) and so the global authenticated-fetch
+        // wrapper can read it back. The previous direct AsyncStorage.setItem
+        // bypassed both layers, causing every subsequent request to either
+        // miss the Authorization header entirely OR resolve to a stale
+        // cookie-cached identity — which surfaced as "Not found" on photo
+        // upload because require_owner saw a body user_id that didn't match
+        // the session's resolved user_id.
+        const { saveAuth } = await import('../src/store');
+        await saveAuth(data);
         
         // Navigate based on user status
         if (data.is_new_user) {
