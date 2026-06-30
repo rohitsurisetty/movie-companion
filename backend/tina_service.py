@@ -811,11 +811,37 @@ def get_next_field_to_collect(session: Dict[str, Any]) -> Optional[str]:
 
 
 def get_completion_percentage(session: Dict[str, Any]) -> int:
-    """Calculate profile completion percentage."""
+    """Calculate Tina-signup-flow completion percentage.
+
+    Spans BOTH phases the user sees during onboarding so the progress bar
+    rendered in the TinaChatScreen header tracks them all the way through:
+
+      • 0%  →  50%  during mandatory-signup field collection
+      • 50% →  99%  during the 8-question 360° persona quiz
+      • 100%        once archetype_reveal has fired
+
+    User explicitly asked for this so they know "when this ends" — without it
+    the percentage hit 100% after the signup fields and then stayed pinned
+    while the quiz dragged on, which is misleading.
+    """
     completed = len(session.get("completed_fields", []))
-    # Count mandatory fields
-    mandatory = sum(1 for f in PROFILE_FIELDS.values() if not f.get("optional", False))
-    return min(100, int((completed / mandatory) * 100))
+    mandatory = sum(1 for f in PROFILE_FIELDS.values() if not f.get("optional", False)) or 1
+    signup_ratio = min(1.0, completed / mandatory)
+    signup_pct = signup_ratio * 50  # signup fills 0-50
+
+    p360 = session.get("personality_360", {}) or {}
+    phase = p360.get("phase", "inactive")
+    if phase == "complete":
+        return 100
+    if phase == "active":
+        # Quiz fills 50-99 (we save the final 100 for after archetype_reveal)
+        idx = int(p360.get("current_index", 0) or 0)
+        total_q = 8  # PERSONALITY_360_QUESTIONS length — see tina_personality.py
+        quiz_ratio = min(1.0, idx / total_q)
+        return min(99, int(50 + quiz_ratio * 49))
+
+    # Quiz not started yet — return signup-phase progress only
+    return min(50, int(signup_pct))
 
 
 # ============================================

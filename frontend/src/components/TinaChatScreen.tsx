@@ -117,6 +117,12 @@ export default function TinaChatScreen({
     return existingMessages && existingMessages.length > 0;
   });
   const [topicsCollected, setTopicsCollected] = useState(0);
+  // Raw 0-100 percentage from the backend's get_completion_percentage. Drives
+  // the small progress pill in the header so the user can see how close they
+  // are to the end of the signup chat (0-50% signup fields, 50-99% 360°
+  // persona quiz, 100% archetype reveal). Without this the user had no idea
+  // when Tina would actually finish.
+  const [completionPct, setCompletionPct] = useState(0);
   const [profileData, setProfileData] = useState<Partial<ProfileData>>({});
   const [currentOptions, setCurrentOptions] = useState<{
     field: string;
@@ -548,6 +554,9 @@ export default function TinaChatScreen({
       // Update state
       const completedCount = data.completion_percentage ? Math.round((data.completion_percentage / 100) * TOTAL_TOPICS) : 0;
       setTopicsCollected(completedCount);
+      if (typeof data.completion_percentage === 'number') {
+        setCompletionPct(Math.max(0, Math.min(100, data.completion_percentage)));
+      }
       if (data.profile_data) setProfileData(data.profile_data);
 
       // Add Tina's acknowledgment
@@ -638,6 +647,9 @@ export default function TinaChatScreen({
       // Update state
       const completedCount = data.completion_percentage ? Math.round((data.completion_percentage / 100) * TOTAL_TOPICS) : 0;
       setTopicsCollected(completedCount);
+      if (typeof data.completion_percentage === 'number') {
+        setCompletionPct(Math.max(0, Math.min(100, data.completion_percentage)));
+      }
       if (data.profile_data) setProfileData(data.profile_data);
 
       // Add Tina's response
@@ -649,6 +661,8 @@ export default function TinaChatScreen({
         // finalize onboarding. We intentionally DO NOT auto-close here — the
         // user should get a chance to read their archetype and tap Continue.
         setArchetypeReveal(data.archetype_reveal);
+        // Snap the progress pill to 100% at the moment of the reveal
+        setCompletionPct(100);
         setArchetypeProfileData(data.profile_data || {});
         return;
       }
@@ -823,8 +837,28 @@ export default function TinaChatScreen({
             </Text>
           </View>
 
-          {/* Skip button intentionally removed (June 30, 2026) —
-              Tina signup chat is MANDATORY. User must complete the flow. */}
+          {/* Progress pill — replaces the old Skip button. Shows the user
+              how close Tina is to finishing the signup flow (0-50% mandatory
+              fields, 50-99% 360° persona quiz, 100% archetype reveal).
+              Without this the user had no way to know when the chat would
+              actually end. */}
+          <View
+            style={styles.progressPill}
+            accessibilityLabel={`Signup progress ${completionPct}%`}
+            accessibilityRole="progressbar"
+            accessibilityValue={{ min: 0, max: 100, now: completionPct }}
+            testID="tina-progress-pill"
+          >
+            <View style={styles.progressTrack}>
+              <View
+                style={[
+                  styles.progressFill,
+                  { width: `${Math.max(4, completionPct)}%` },
+                ]}
+              />
+            </View>
+            <Text style={styles.progressText}>{completionPct}%</Text>
+          </View>
         </View>
       </SafeAreaView>
 
@@ -1110,6 +1144,37 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: 'rgba(255,255,255,0.7)',
+  },
+
+  // Progress pill (header top-right) — shows signup completion 0-100%
+  progressPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    minWidth: 92,
+  },
+  progressTrack: {
+    flex: 1,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#FFFFFF',
+  },
+  progressText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    minWidth: 30,
+    textAlign: 'right',
   },
 
   // Progress
