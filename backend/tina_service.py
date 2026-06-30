@@ -916,9 +916,35 @@ async def process_tina_message(
     if user_message:
         history.append({"role": "user", "content": user_message})
     
-    # POST-ONBOARDING: Run 360° persona quiz FIRST, then free-form chat.
+    # POST-ONBOARDING: Run 360° persona quiz FIRST (if not already done),
+    # then free-form chat.
     if actually_complete:
         p360 = _get_360_state(session)
+
+        # Safety fallback: if the user's persistent profile ALREADY has an
+        # `archetype` saved (= they finished the 360° quiz in a previous
+        # session, or via a different code path), force the in-memory Tina
+        # session to phase="complete" so we don't make them re-do the quiz.
+        # This is what unifies the "signup Tina" → "post-signup Tina" sync.
+        if p360["phase"] != "complete":
+            try:
+                persistent_profile = await _load_full_user_profile(user_id)
+                if persistent_profile and isinstance(persistent_profile.get("archetype"), dict):
+                    logger.info(
+                        f"[Tina] User {user_id} already has a saved archetype — "
+                        f"skipping 360° quiz and going straight to LLM chat."
+                    )
+                    _set_360_state(
+                        session,
+                        {
+                            "phase": "complete",
+                            "current_index": 8,
+                            "answers": p360.get("answers", []),
+                        },
+                    )
+                    p360 = _get_360_state(session)
+            except Exception as exc:  # noqa: BLE001 - non-blocking
+                logger.warning(f"[Tina] archetype fallback check failed: {exc}")
 
         # If a 360 option chip was tapped, route directly into the quiz handler.
         if selected_360_option:
@@ -1031,7 +1057,7 @@ WHO YOU'RE TALKING TO ({user_name or 'friend'}):
 
 HOW TO BEHAVE — important:
 • You are a real conversational LLM now, not a script. Listen to what {user_name or 'they'} actually said and respond to THAT specific message. Do not deflect to your own scripted topics.
-• Reference what you know about them naturally — e.g., if they ask for a movie pick, lean on their genres / top movies / love language. If they want dating advice, use their archetype + vibe.
+• Reference what you know about them naturally — when they ask for a movie pick, **prefer suggesting movies that share themes or vibe with their listed top movies / genres** (call them out by name where it fits, e.g. "since you loved La La Land, you'd probably enjoy…"). For dating advice, use their archetype + love language + vibe.
 • Be helpful for ANY topic they bring up: movie recommendations, date plans, relationship advice, casual chat, philosophy, anything. You are their fun friend who happens to know their taste.
 • Keep replies SHORT (1–3 sentences usually). Match the user's energy and length.
 • Use at most ONE emoji per reply. Sometimes none.

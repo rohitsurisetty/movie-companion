@@ -10156,6 +10156,71 @@ agent_communication:
              then Tina closes naturally and onboarding completes.
           5. Verify no regression on the existing free-text + chip handling.
 
+  - task: "Tina Phase 1 — Sync signup/post-signup + voice quality + LLM-driven post-onboarding chat"
+    implemented: true
+    working: true
+    file: "/app/backend/tina_service.py, /app/frontend/src/components/TinaCallScreen.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: |
+          iteration_17: 6/6 backend tests PASSED for the post-onboarding LLM
+          path. Sample multi-turn output (TestUser, Cozy Companion archetype):
+          T1: "Hey Test User! 🌟 Since you're into drama and romance, how
+          about Pride and Prejudice?..."
+          T2 referenced funny mood from T1
+          T3 referenced prior context with "for a film lover like you 💫"
+          - show_options=null, show_movie_picker=false, completion=100 ✅
+          - Negative regression intact (incomplete user still hits scripted
+            onboarding) ✅
+          - Voice transcribe endpoint unbroken ✅
+      - working: true
+        agent: "main"
+        comment: |
+          PHASE 1 SHIPPED (June 30, 2026):
+
+          1. POST-ONBOARDING LLM CHAT (backend):
+             - tina_service.py now has _load_full_user_profile() that pulls
+               archetype/love language/intent/top movies/genres/languages/
+               watch frequency/OTT preference/city from MongoDB user_profiles.
+             - Built a rich system prompt that turns Tina into a real LLM:
+               she remembers the user, refers to their top movies by name
+               (e.g. "since you loved La La Land…"), uses their love language
+               for dating advice, never offers chip-options, keeps replies
+               short with ≤1 emoji.
+
+          2. SIGNUP/POST-SIGNUP SYNC FALLBACK (backend):
+             - If actually_complete=True AND p360.phase != "complete" AND the
+               persistent profile already has an `archetype` saved, force the
+               in-memory session to phase="complete" so legacy users / users
+               with reset Tina sessions DON'T have to redo the 360° quiz.
+             - This unifies the signup-Tina → post-signup-Tina experience.
+
+          3. VOICE CALL — REMOVED LIVE TRANSCRIPT (frontend):
+             - TinaCallScreen.tsx: removed both the "You: '...'" transcript
+               preview AND the Tina-reply preview caption.
+             - Only the avatar animation + status label remain as feedback.
+
+          4. VOICE CALL — TIGHTER SILENCE DETECTION (frontend):
+             - SILENCE_THRESHOLD: -45 → -42 dBFS (filters out room hum)
+             - SILENCE_DURATION_MS: 1400 → 1500 (~1.5s before ending turn)
+             - MIN_SPEECH_DURATION_MS: 600 → 800 (require 0.8s of speech
+               before we'll consider ending a turn)
+             - MAX_TURN_DURATION_MS: 18000 → 20000 (give people time to think)
+             - METERING_INTERVAL_MS: 150 → 120 (faster polling)
+             - NEW: 900ms deliberate "thinking" pause AFTER transcription
+               and LLM response, BEFORE TTS starts — gives a natural
+               human-conversation cadence.
+
+          REMAINING (Phase 2 — when user is ready):
+          - Visual unification of TinaChatScreen.tsx + GlobalTinaChatScreen.tsx
+            (extract shared bubble/header/avatar components)
+          - Signup Tina becomes more LLM-flexible (free-text answers, less
+            scripted) — the 360° quiz can stay chip-driven.
+
 agent_communication:
     -agent: "main"
     -message: |
