@@ -1389,7 +1389,12 @@ MOCK_USERS = [
 
 
 def get_all_mock_users() -> List[Dict]:
-    """Return all mock users for testing - with mode fields added"""
+    """Return all mock users for testing - with mode fields and is_bot flag added.
+
+    The `is_bot=True` marker is critical: downstream features (auto-reply
+    gating, admin dashboard analytics, public-facing match labels) all need
+    to distinguish between scripted bots and real signed-up humans.
+    """
     # Add movieBuddyMode and movieDateMode to all mock users
     users_with_modes = []
     for user in MOCK_USERS:
@@ -1408,8 +1413,132 @@ def get_all_mock_users() -> List[Dict]:
             # Buddy mode only
             user_copy["movieBuddyMode"] = True
             user_copy["movieDateMode"] = False
+        # Tag as bot — Phase 3 (auto-reply gating) and admin dashboard need this.
+        user_copy["is_bot"] = True
         users_with_modes.append(user_copy)
     return users_with_modes
+
+
+async def get_all_real_users(exclude_user_id: str, limit: int = 200) -> List[Dict]:
+    """Fetch real (signed-up) users from MongoDB user_profiles.
+
+    Returns the most-recently-signed-up users first (recency boost) so the
+    feed feels fresh — new users surfacing the moment they finish onboarding.
+
+    Args:
+        exclude_user_id: the requesting user (don't match them with themselves)
+        limit: cap candidate pool size to keep the AI compatibility step fast
+
+    Returns:
+        List of profile dicts shaped like MOCK_USERS, each tagged `is_bot=False`.
+    """
+    if _db is None:
+        return []
+
+    try:
+        # Pull all real profiles except the requester. Sort by created_at /
+        # updated_at desc so the freshest signups bubble up first. Bot user_ids
+        # use the 'mock_user_' prefix so we explicitly exclude them here too —
+        # they come from get_all_mock_users(), not this collection.
+        cursor = _db.user_profiles.find(
+            {
+                "user_id": {"$ne": exclude_user_id, "$not": {"$regex": "^mock_user_"}},
+            },
+            {"_id": 0},
+        ).sort([("updated_at", -1), ("created_at", -1)]).limit(limit)
+
+        real_profiles = await cursor.to_list(length=limit)
+    except Exception as exc:  # noqa: BLE001 - non-blocking
+        print(f"[matchmaking] get_all_real_users failed: {exc}")
+        return []
+
+    # Hydrate each profile with the picture URLs from the parallel
+    # `user_pictures` collection (picture_service stores them separately).
+    enriched: List[Dict] = []
+    try:
+        user_ids = [p.get("user_id") for p in real_profiles if p.get("user_id")]
+        pic_docs = []
+        if user_ids:
+            pic_docs = await _db.user_pictures.find(
+                {"user_id": {"$in": user_ids}},
+                {"_id": 0},
+            ).to_list(length=len(user_ids))
+        pics_by_user: Dict[str, Dict] = {d["user_id"]: d for d in pic_docs if d.get("user_id")}
+    except Exception as exc:  # noqa: BLE001
+        print(f"[matchmaking] picture hydration failed: {exc}")
+        pics_by_user = {}
+
+    for p in real_profiles:
+        uid = p.get("user_id")
+        if not uid:
+            continue
+
+        # Collect URL fields picture_1..picture_5 from the parallel doc
+        pic_doc = pics_by_user.get(uid, {})
+        pictures_list = [
+            pic_doc.get(f"picture_{i}") for i in range(1, 6)
+            if pic_doc.get(f"picture_{i}")
+        ]
+        primary_pic = pictures_list[0] if pictures_list else None
+
+        # Coerce location (sometimes stored as nested dict {city,state,...})
+        loc = p.get("location") or ""
+        if isinstance(loc, dict):
+            loc = loc.get("city") or loc.get("state") or ""
+
+        # Coerce topMovies — must be a list of dicts with at least 'title'
+        top_movies = p.get("topMovies") or []
+        if not isinstance(top_movies, list):
+            top_movies = []
+
+        # relationshipIntent — backend stores either a list or a single string;
+        # apply_hard_filters expects a list
+        intent = p.get("relationshipIntent") or []
+        if isinstance(intent, str):
+            intent = [intent] if intent else []
+
+        enriched.append({
+            "user_id": uid,
+            "name": p.get("name") or "Someone",
+            "age": p.get("age") or 0,
+            "gender": p.get("gender") or "",
+            "location": loc,
+            "avatar": p.get("avatar") or "",
+            "profile_picture": primary_pic,
+            "pictures": pictures_list,
+            "bio": p.get("bio") or "",
+            "partnerPreference": p.get("partnerPreference") or "",
+            "relationshipIntent": intent,
+            "genres": p.get("genres") or [],
+            "filmLanguages": p.get("filmLanguages") or [],
+            "languagesSpoken": p.get("languagesSpoken") or [],
+            "topMovies": top_movies,
+            "movieFrequency": p.get("movieFrequency") or "",
+            "ottTheatre": p.get("ottTheatre") or "",
+            "height": p.get("height") or "",
+            "religion": p.get("religion") or "",
+            "zodiac": p.get("zodiac") or "",
+            "smoking": p.get("smoking") or "",
+            "drinking": p.get("drinking") or "",
+            "exercise": p.get("exercise") or "",
+            "education": p.get("education") or "",
+            "workProfile": p.get("workProfile") or "",
+            "movieBuddyMode": bool(p.get("movieBuddyMode", False)),
+            "movieDateMode": bool(p.get("movieDateMode", False)),
+            "swipe_history": p.get("swipe_history") or {
+                "liked_genres": p.get("genres") or [],
+                "disliked_genres": [],
+                "liked_actors": [],
+                "liked_directors": [],
+            },
+            # Real users get is_bot=False; auto-reply / admin / chat all key on this.
+            "is_bot": False,
+            # Tiny recency boost field — sorted earlier in the pool already, but
+            # also surfaced so the AI scorer can optionally weight it.
+            "is_fresh_signup": True,
+        })
+
+    return enriched
 
 
 def get_mock_user_by_id(user_id: str) -> Optional[Dict]:
@@ -1429,6 +1558,28 @@ def set_db(db_instance):
     """Set the MongoDB database instance for caching"""
     global _db
     _db = db_instance
+
+
+async def invalidate_all_match_caches() -> int:
+    """Drop every entry in the match_cache collection.
+
+    Call this whenever the candidate pool changes meaningfully — most
+    importantly, when a new user finishes onboarding (their profile lands in
+    `user_profiles`). Without this, every existing user keeps seeing the
+    stale cached match list for up to CACHE_EXPIRY_HOURS and never sees the
+    new face. Returns the number of cache entries deleted.
+    """
+    if _db is None:
+        return 0
+    try:
+        result = await _db.match_cache.delete_many({})
+        deleted = result.deleted_count
+        if deleted:
+            print(f"[matchmaking] invalidated {deleted} match cache entries (new user joined or pool changed)")
+        return deleted
+    except Exception as exc:  # noqa: BLE001 - non-blocking
+        print(f"[matchmaking] cache invalidation failed: {exc}")
+        return 0
 
 
 async def get_cached_matches(user_id: str) -> Optional[Dict]:
@@ -2147,12 +2298,14 @@ async def get_matches_for_user(
             else:
                 print(f"Profile changed for user {user_id}, regenerating matches")
     
-    # Get candidate pool
-    if use_mock_data:
-        candidates = get_all_mock_users()
-    else:
-        # TODO: Fetch from database
-        candidates = []
+    # Get candidate pool — combine real users + bots so the user always sees
+    # a healthy mix even when the user base is small. Real users get sorted
+    # first (recency boost) and bots fill in behind them.
+    real_users = await get_all_real_users(exclude_user_id=user_id, limit=200)
+    bot_users = get_all_mock_users() if use_mock_data else []
+    candidates = real_users + bot_users
+    if real_users:
+        print(f"[matchmaking] candidate pool = {len(real_users)} real + {len(bot_users)} bots for user {user_id}")
     
     # Apply default filters if none provided
     if filters is None:

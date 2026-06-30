@@ -1197,7 +1197,17 @@ async def save_user_profile(req: UserProfileRequest):
         logger.info(f"Saved profile to Supabase for user {req.user_id}")
     except Exception as e:
         logger.error(f"Failed to save to Supabase: {e}")
-    
+
+    # Invalidate global match cache so existing users see the new (or updated)
+    # face in their feed on the next /matches call. Without this, the cached
+    # mock-only list would persist for the entire CACHE_EXPIRY_HOURS window
+    # and the real user would never surface.
+    try:
+        from matchmaking_service import invalidate_all_match_caches
+        await invalidate_all_match_caches()
+    except Exception as cache_err:
+        logger.warning(f"[matchmaking] cache invalidation skipped: {cache_err}")
+
     return {
         "success": True,
         "message": "Profile saved with comprehensive taste vector",

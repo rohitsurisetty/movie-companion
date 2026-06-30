@@ -1,0 +1,39 @@
+{
+  "summary": "Phase 2 real-user matchmaking BACKEND tested end-to-end. All 7 new scenario tests PASS + 33 regression tests (test_supabase_audit + test_audit_iter20) PASS = 40/40. Confirmed: real signed-up users (Alice) surface in Bob's /api/matches feed, mixed real+bot pool, is_bot tag is True for mock_user_* and False for real user_<hash>, recency boost includes the newest signup (Carol), self-exclusion holds, /user/profile invalidates global match_cache so a brand-new Dave appears without force_refresh, and the zero-real-users degenerate path still returns bots without crash. Backend logs confirm '[matchmaking] candidate pool = N real + 35 bots' and '[matchmaking] invalidated N match cache entries' on every fresh signup.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/matches", "issue": "Response field 'cached' is computed as `not force_refresh` (boolean of input flag) rather than a true cache-hit indicator. Review spec asked for cached=true on second call without force_refresh — that holds incidentally only because !force_refresh==True. If a downstream feature relies on this to detect actual cache hits, it will be misleading. Consider returning the real hit/miss status from get_matches_for_user."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_real_user_matchmaking.py",
+    "/app/test_reports/pytest/iter21_real_user_matchmaking.xml",
+    "/app/test_reports/pytest/iter21_regression.xml"
+  ],
+  "action_items": [
+    "No code fixes required. Phase 2 real-user matchmaking is functional and regression-clean.",
+    "OPTIONAL: harden /api/matches response so 'cached' field reflects the actual cache hit/miss from matchmaking_service rather than echoing the request flag — see backend_issues.minor."
+  ],
+  "critical_code_review_comments": [
+    "matchmaking_service.get_all_real_users: regex anchor uses '$not: {$regex: ^mock_user_}' — works on PyMongo/Motor, validated empirically.",
+    "matchmaking_service.invalidate_all_match_caches: simple delete_many({}) is fine for current scale; if cache grows large, consider per-mode targeted invalidation to avoid re-running AI scoring for every user on every signup.",
+    "server.py /user/profile: cache invalidation is fire-and-forget (logger.warning on failure). Good non-blocking pattern.",
+    "matchmaking_service.get_matches_for_user still passes use_mock_data=True hardcoded from server.py:2402; bots are always included. That's the intended Phase 2 design (mixed pool), but flagging in case Phase 3 wants 'real-only' mode."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_real_user_matchmaking.py (new)"
+  ],
+  "success_rate": {"backend": "100% (40/40 — 7 new + 33 regression)", "frontend": "n/a (skipped per request)"},
+  "seed_data_creation": "Each scenario test creates fresh TEST_-prefixed users (Alice/Bob/Carol/Dave + extras) via /auth/send-email-otp → /auth/verify-otp → /user/profile. ~4-6 real user_profiles inserted per run; left in place (no destructive cleanup) — safe because tests rely on uniqueness via uuid4 suffixes.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Phase 2 (real-user matchmaking + cache invalidation) is GREEN. Backend pool grew from ~128 → 130 real users during this run, AI scoring took ~5-15s per /matches call (force_refresh) due to LLM step. If next phase touches matchmaking, reuse /app/backend/tests/test_real_user_matchmaking.py for regression. Use EXPO_PUBLIC_BACKEND_URL env var (BASE_URL also falls back to localhost:8001).",
+  "rca_of_issue": "N/A — no bugs found. Phase 2 implementation works as designed: get_all_real_users hydrates profiles + pictures from MongoDB, sorted by updated_at desc; get_matches_for_user unions real + bot pools; /user/profile triggers invalidate_all_match_caches; is_bot tagging is consistent both directions."
+}
