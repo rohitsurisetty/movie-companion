@@ -24,19 +24,14 @@ const API_BASE =
   process.env.EXPO_PUBLIC_BACKEND_URL || process.env.EXPO_PUBLIC_API_URL || '';
 
 // VAD tunables – `metering` is in dBFS (-160 = silence, 0 = peak).
-// We treat anything below SILENCE_THRESHOLD as silence; once we have at least
-// MIN_SPEECH_DURATION of audio AND SILENCE_DURATION of trailing silence, we
-// auto-stop the turn and send it to the backend.
-//
-// IMPORTANT — these values are tuned for "wait for the user to actually
-// finish speaking before sending to Whisper". Don't lower them or partial
-// utterances will be cut off mid-sentence.
+// Tuned for natural conversation cadence — user asked for the gaps to feel
+// faster while still NOT cutting off mid-sentence.
 const SILENCE_THRESHOLD = -42; // dBFS – tighter than -45 to ignore room hum
-const SILENCE_DURATION_MS = 1500; // ~1.5s trailing silence required to end a turn
-const MIN_SPEECH_DURATION_MS = 800; // require at least 0.8s of speech before we'll end
-const MAX_TURN_DURATION_MS = 20000; // hard cap per turn (give people time to think)
-const METERING_INTERVAL_MS = 120; // poll cadence (≈8 samples/sec)
-const PRE_REPLY_PAUSE_MS = 900; // deliberate human-like pause before Tina speaks
+const SILENCE_DURATION_MS = 1000; // ~1.0s trailing silence required to end a turn (was 1500)
+const MIN_SPEECH_DURATION_MS = 700; // require ~0.7s of speech before we'll end (was 800)
+const MAX_TURN_DURATION_MS = 20000; // hard cap per turn
+const METERING_INTERVAL_MS = 100; // poll cadence (10 samples/sec, was 120)
+const PRE_REPLY_PAUSE_MS = 350; // small human-feel pause before Tina speaks (was 900)
 
 type CallStatus =
   | 'connecting'
@@ -415,9 +410,13 @@ export default function TinaCallScreen({
           return;
         }
         try {
+          // Force loudspeaker routing on both platforms so the call doesn't
+          // play through the earpiece (which is the iOS default when
+          // allowsRecording=true). Users asked for speaker mode by default.
           await setAudioModeAsync({
             allowsRecording: true,
             playsInSilentMode: true,
+            shouldRouteThroughEarpiece: false,
           });
         } catch (e) {
           console.warn('[TinaCall] setAudioModeAsync failed', e);

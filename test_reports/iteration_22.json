@@ -1,0 +1,64 @@
+{
+  "summary": "Iteration 22 launch-prep round tested end-to-end. 7/8 launch-prep tests PASS + 39/40 regression PASS. ONE P0 backend bug found: /api/chat/conversations/{user_id} (server.py:2858) still calls seed_unmatched_for_user UNCONDITIONALLY, polluting every new user's chat list with Anjali Iyer + Priya Bhatia unmatched bot conversations. The dev gated /api/chat/init-mock (DEV_SEED_MOCK_CHATS) and /api/user/match-history (DEV_SEED_MOCK_UNMATCHED) correctly, but missed the third place /api/chat/conversations — same env gate must be applied here. Frontend code inspection: Skip button properly removed from TinaChatScreen JSX (comment retained, only dead styles remain), TinaCallScreen has shouldRouteThroughEarpiece:false at line 419, and voice cadence constants confirmed (SILENCE_DURATION_MS=1000, MIN_SPEECH_DURATION_MS=700, METERING_INTERVAL_MS=100, PRE_REPLY_PAUSE_MS=350) at lines 30-34. Phase 3 auto-reply gating VERIFIED in backend logs — 'AI auto-reply sent in conversation mock_user_001_user_...' appears for bot path, real-to-real conv stays at 1 message with NO auto-reply. Post-onboarding Tina LLM context (Phase 1) still personalised (requires archetype dict in MongoDB; backend's UserProfileRequest model strips archetype field — minor issue, see below). Real+bot mixed matchmaking pool intact.",
+
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "GET /api/chat/conversations/{user_id}",
+        "issue": "Still calls seed_unmatched_for_user(db, user_id) UNCONDITIONALLY at /app/backend/server.py:2858. This is the third (missed) seeding location — /chat/init-mock and /user/match-history were correctly gated behind DEV_SEED_MOCK_CHATS / DEV_SEED_MOCK_UNMATCHED, but /chat/conversations still seeds Anjali Iyer + Priya Bhatia unmatched bot conversations on every call for every new user. Since the frontend hits /chat/conversations as soon as the user lands on the chat tab, every brand-new real user has these two fake unmatched bot conversations in their inbox. Test test_chat_conversations_empty_for_new_user reliably reproduces. Fix: wrap the seed call in the same `if os.getenv('DEV_SEED_MOCK_UNMATCHED', '0') == '1':` guard already used at line 3187.",
+        "priority": "P0"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "POST /api/user/profile",
+        "issue": "UserProfileRequest Pydantic model (server.py:312) does NOT accept `archetype` field — it gets silently stripped from the request body. Means Tina post-onboarding LLM path can only be reached AFTER the user completes the in-session 360° persona quiz (which writes archetype dict to user_profiles via the tina_service path). This is by design but the review payload assumed otherwise. If the frontend ever needs to save archetype directly (e.g. on edit-profile), add `archetype: Optional[Dict] = None` to UserProfileRequest."
+      }
+    ]
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+
+  "test_report_links": [
+    "/app/backend/tests/test_launch_prep_iter22.py",
+    "/app/test_reports/pytest/iter22_launch_prep.xml",
+    "/app/test_reports/pytest/iter22_regression.xml"
+  ],
+
+  "action_items": [
+    "P0 (must fix before launch): /app/backend/server.py:2856-2860 — wrap the `await seed_unmatched_for_user(db, user_id)` call inside `if os.getenv('DEV_SEED_MOCK_UNMATCHED', '0') == '1':` so the chat tab does NOT auto-seed Anjali/Priya for production users. Same gate already applied at server.py:3187 for /user/match-history.",
+    "OPTIONAL: Add `archetype: Optional[Dict[str, Any]] = None` to UserProfileRequest (server.py:312) so /user/profile can persist archetype if a future flow needs to save it outside the 360° quiz path.",
+    "OPTIONAL: test_real_user_appears_in_bobs_feed (iter21) is now flaky because the test user pool has grown to ~134 real users — Alice's score may not always make the top-15 cut. Consider raising the candidate cap or filtering by recency in the assertion."
+  ],
+
+  "critical_code_review_comments": [
+    "server.py:2856 — third (forgotten) seeding location. Same `seed_unmatched_for_user` call is now gated in two other endpoints but left wide-open here. This is the most-hit endpoint of the three (chat tab landing) so the bug is HIGH visibility.",
+    "server.py:2935 — receiver_id.startswith('mock_') gate confirmed working both directions (real-to-real verified no auto-reply, real-to-bot verified auto-reply fires).",
+    "tina_service.py:929-947 — archetype-dict-in-MongoDB fallback for skipping 360° quiz is correct, BUT the only path that writes archetype is the quiz itself. Means a returning user who never completed the 360° quiz will keep being routed into the quiz on every tina/chat call. That is current intended behavior.",
+    "TinaChatScreen.tsx — Skip button removed cleanly from JSX (line 826 comment retained). Dead styles `skipButton`/`skipText` left in StyleSheet (~line 1103) — harmless but can be cleaned up.",
+    "TinaCallScreen.tsx — SILENCE_DURATION_MS=1000 (1.0s), MIN_SPEECH_DURATION_MS=700, METERING_INTERVAL_MS=100, PRE_REPLY_PAUSE_MS=350, shouldRouteThroughEarpiece:false all confirmed at the expected line numbers."
+  ],
+
+  "updated_files": [
+    "/app/backend/tests/test_launch_prep_iter22.py (new — 8 tests covering all 5 review areas)"
+  ],
+
+  "success_rate": {
+    "backend": "94% (47/50 — 7/8 launch-prep + 33/33 audit + 6/7 phase 2 matchmaking + 1 flaky)",
+    "frontend": "100% code-inspection (3/3 — Skip removed, speaker mode, voice cadence constants all verified)"
+  },
+
+  "seed_data_creation": "Per test run: 2 new real users TEST_iter22_userx_/usery_ via /auth/send-email-otp → /auth/verify-otp → /user/profile. archetype dict injected directly into user_profiles for one user to test post-onboarding LLM path. Real-to-real and real-to-bot test messages persisted in chat_messages. All TEST_-prefixed; not destructively cleaned (uuid-suffixed so no collisions).",
+
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+
+  "context_for_next_testing_agent": "After main agent gates /chat/conversations seeding, re-run only test_chat_conversations_empty_for_new_user — should flip from FAIL to PASS. Also re-run test_supabase_audit + test_audit_iter20 (40 tests) to confirm no regression. test_real_user_matchmaking::test_real_user_appears_in_bobs_feed is now flaky due to organic pool growth (134 real users) — not a real bug. AI auto-reply gating (Phase 3) is confirmed working both ways via backend log inspection ('AI auto-reply sent in conversation mock_user_001_user_...' only on bot path).",
+
+  "rca_of_issue": "Root cause: developer gated DEV_SEED_MOCK_CHATS at /chat/init-mock (line 3156) and DEV_SEED_MOCK_UNMATCHED at /user/match-history (line 3187), but the comment at /chat/conversations (line 2850) explicitly says 'Side effect: ensures the demo Anjali/Priya unmatched conversations exist for this user so they can test the post-unmatch flow directly from the main Chat tab' — this seeding was intentional during dev but was NOT updated when the launch-prep gating happened. Mitigation: wrap line 2858 in the same env guard. Frontend already calls /chat/conversations on chat tab mount, so the side-effect propagates to 100% of new real users."
+}

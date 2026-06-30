@@ -823,14 +823,8 @@ export default function TinaChatScreen({
             </Text>
           </View>
 
-          {/* Right - Skip Button */}
-          <TouchableOpacity 
-            style={styles.skipButton} 
-            onPress={handleSkip}
-            disabled={isExiting}
-          >
-            <Text style={styles.skipText}>Skip</Text>
-          </TouchableOpacity>
+          {/* Skip button intentionally removed (June 30, 2026) —
+              Tina signup chat is MANDATORY. User must complete the flow. */}
         </View>
       </SafeAreaView>
 
