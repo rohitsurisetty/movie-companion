@@ -130,6 +130,12 @@ export default function TinaChatScreen({
   const [currentDeepLink, setCurrentDeepLink] = useState<DeepLinkAction | null>(null);
   const [isExiting, setIsExiting] = useState(false);
   const [pendingMoviesProcessed, setPendingMoviesProcessed] = useState(false);
+  // Synchronous guard — React's setPendingMoviesProcessed is async, and BOTH
+  // initializeConversation AND the late-arriving useEffect race to handle
+  // incoming movies on the same tick. A ref flips instantly so only the
+  // first path actually fires handleMoviesReceived. Without this, the user
+  // sees "My top movies: …" and "Great picks!" twice each (bug screenshot).
+  const moviesHandledRef = useRef(false);
   // 360° persona archetype reveal (shown at the end of the quiz)
   const [archetypeReveal, setArchetypeReveal] = useState<{
     emoji: string;
@@ -302,13 +308,18 @@ export default function TinaChatScreen({
       // Handle returning from movie selection - special case
       if (isReturningFromMovieSelection && !welcomeBackShown) {
         setWelcomeBackShown(true);
-        if (incomingMovies && incomingMovies.length > 0 && !pendingMoviesProcessed) {
+        if (incomingMovies && incomingMovies.length > 0 && !moviesHandledRef.current) {
+          // Synchronous guard — flips IMMEDIATELY so the late-arriving
+          // useEffect (line ~470) can't race us and double-fire.
+          moviesHandledRef.current = true;
           setPendingMoviesProcessed(true);
           setCurrentDeepLink(null);
-          setTimeout(() => {
-            addMessage(`Great picks! 🎬`, false);
-            setTimeout(() => handleMoviesReceived(incomingMovies), 300);
-          }, 100);
+          // Do NOT hardcode "Great picks! 🎬" here — handleMoviesReceived
+          // posts the user's "My top movies: …" message first, and then the
+          // backend's contextual acknowledgement (from data.response) lands
+          // naturally AFTER it. Hardcoding a reaction before the user message
+          // both duplicated Tina's reply AND inverted the chat order.
+          setTimeout(() => handleMoviesReceived(incomingMovies), 100);
         } else {
           // Fetch contextual welcome back message from API
           const welcomeMsg = await fetchWelcomeBackMessage(false);
@@ -464,16 +475,19 @@ export default function TinaChatScreen({
   
   // Handle late-arriving movies from navigation
   useEffect(() => {
-    if (isInitialized && incomingMovies && incomingMovies.length > 0 && !pendingMoviesProcessed) {
+    if (isInitialized && incomingMovies && incomingMovies.length > 0 && !moviesHandledRef.current) {
       console.log('[Tina] Late-arriving movies detected');
+      // Synchronous guard — flips IMMEDIATELY so the initializeConversation
+      // path can't race us. Without this BOTH paths fire and we get the
+      // double-message bug (see screenshot reported June 30, 2026).
+      moviesHandledRef.current = true;
       setPendingMoviesProcessed(true);
       setCurrentDeepLink(null);
-      setTimeout(() => {
-        addMessage(`Great picks! 🎬`, false);
-        setTimeout(() => handleMoviesReceived(incomingMovies), 300);
-      }, 100);
+      // No hardcoded "Great picks!" — the backend's contextual response
+      // arrives via handleMoviesReceived after the user's selection bubble.
+      setTimeout(() => handleMoviesReceived(incomingMovies), 100);
     }
-  }, [isInitialized, incomingMovies, pendingMoviesProcessed, addMessage]);
+  }, [isInitialized, incomingMovies, addMessage]);
   
   // SAFETY NET: If somehow we end up with no messages after init, recover immediately
   useEffect(() => {

@@ -426,7 +426,6 @@ export default function TinaCallScreen({
         // Greeting line so the call feels alive
         const greeting = `Hi ${userName?.split(' ')[0] || 'there'}! I'm Tina. What would you like to chat about?`;
         conversationRef.current.push({ role: 'assistant', content: greeting });
-        setTinaReplyPreview(greeting);
         setStatus('speaking');
         setStatusLabel('Tina is speaking…');
         try {
