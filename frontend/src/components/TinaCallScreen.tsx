@@ -27,11 +27,16 @@ const API_BASE =
 // We treat anything below SILENCE_THRESHOLD as silence; once we have at least
 // MIN_SPEECH_DURATION of audio AND SILENCE_DURATION of trailing silence, we
 // auto-stop the turn and send it to the backend.
-const SILENCE_THRESHOLD = -45; // dBFS – anything below this counts as silence
-const SILENCE_DURATION_MS = 1400; // trailing silence required to end a turn
-const MIN_SPEECH_DURATION_MS = 600; // ignore very short noises
-const MAX_TURN_DURATION_MS = 18000; // hard cap per turn
-const METERING_INTERVAL_MS = 150; // how often we poll the recorder status
+//
+// IMPORTANT — these values are tuned for "wait for the user to actually
+// finish speaking before sending to Whisper". Don't lower them or partial
+// utterances will be cut off mid-sentence.
+const SILENCE_THRESHOLD = -42; // dBFS – tighter than -45 to ignore room hum
+const SILENCE_DURATION_MS = 1500; // ~1.5s trailing silence required to end a turn
+const MIN_SPEECH_DURATION_MS = 800; // require at least 0.8s of speech before we'll end
+const MAX_TURN_DURATION_MS = 20000; // hard cap per turn (give people time to think)
+const METERING_INTERVAL_MS = 120; // poll cadence (≈8 samples/sec)
+const PRE_REPLY_PAUSE_MS = 900; // deliberate human-like pause before Tina speaks
 
 type CallStatus =
   | 'connecting'
@@ -71,8 +76,9 @@ export default function TinaCallScreen({
   const [statusLabel, setStatusLabel] = useState('Connecting…');
   const [muted, setMuted] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [transcriptPreview, setTranscriptPreview] = useState<string>('');
-  const [tinaReplyPreview, setTinaReplyPreview] = useState<string>('');
+  // NOTE: live transcript / Tina reply previews were intentionally removed
+  // (user feedback: "I don't want live translation below"). The avatar
+  // animation + status label are now the only visible feedback during a call.
 
   // ---------- Refs for VAD + loop control ----------
   const isActiveRef = useRef(true);
@@ -340,28 +346,30 @@ export default function TinaCallScreen({
       if (!userText) {
         // Silence / no speech — loop again without saying anything
         isProcessingRef.current = false;
-        setTranscriptPreview('');
         if (isActiveRef.current && !mutedRef.current) startRecordingTurn();
         return;
       }
 
-      setTranscriptPreview(userText);
       conversationRef.current.push({ role: 'user', content: userText });
 
       // 2) Chat
       const reply = await sendChatTurn(userText);
       if (!reply) throw new Error('Empty reply from Tina');
       conversationRef.current.push({ role: 'assistant', content: reply });
-      setTinaReplyPreview(reply);
 
       if (!isActiveRef.current) return;
 
-      // 3) TTS playback
+      // 3) Deliberate human-like pause so the conversation doesn't feel
+      // robotic — Tina "listens", "thinks" for a beat, then replies.
+      await new Promise((r) => setTimeout(r, PRE_REPLY_PAUSE_MS));
+      if (!isActiveRef.current) return;
+
+      // 4) TTS playback
       setStatus('speaking');
       setStatusLabel('Tina is speaking…');
       await playTtsAndAwait(reply);
 
-      // 4) Loop
+      // 5) Loop
       isProcessingRef.current = false;
       if (isActiveRef.current && !mutedRef.current) {
         await new Promise((r) => setTimeout(r, 250));
@@ -393,8 +401,6 @@ export default function TinaCallScreen({
     setStatus('connecting');
     setStatusLabel('Connecting…');
     setErrorMsg(null);
-    setTranscriptPreview('');
-    setTinaReplyPreview('');
 
     (async () => {
       try {
@@ -542,16 +548,6 @@ export default function TinaCallScreen({
       {/* Status */}
       <View style={styles.statusWrap}>
         <Text style={styles.statusText}>{statusLabel}</Text>
-        {!!transcriptPreview && (status === 'thinking' || status === 'speaking') && (
-          <Text style={styles.transcript} numberOfLines={2}>
-            You: “{transcriptPreview}”
-          </Text>
-        )}
-        {!!tinaReplyPreview && status === 'speaking' && (
-          <Text style={styles.tinaLine} numberOfLines={3}>
-            {tinaReplyPreview}
-          </Text>
-        )}
         {!!errorMsg && (
           <Text style={styles.errorText} numberOfLines={2}>
             {errorMsg}

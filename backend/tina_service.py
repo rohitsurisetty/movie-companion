@@ -724,6 +724,26 @@ async def get_tina_session(user_id: str) -> Dict[str, Any]:
         return create_empty_session(user_id)
 
 
+async def _load_full_user_profile(user_id: str) -> Optional[Dict[str, Any]]:
+    """Fetch the user's persistent profile from MongoDB (genres, topMovies,
+    archetype, love language, etc.) so post-onboarding Tina can act like a
+    real LLM who remembers everything she learned during signup.
+
+    Returns None if the DB isn't bound or the user isn't found yet.
+    """
+    if _db is None:
+        return None
+    try:
+        profile = await _db.user_profiles.find_one(
+            {"user_id": user_id},
+            {"_id": 0},
+        )
+        return profile
+    except Exception as exc:  # noqa: BLE001 - non-blocking
+        logger.warning(f"[Tina] Failed to load full profile for {user_id}: {exc}")
+        return None
+
+
 def create_empty_session(user_id: str) -> Dict[str, Any]:
     """Create a new empty session."""
     return {
@@ -939,53 +959,109 @@ async def process_tina_message(
     # POST-ONBOARDING: Engage in free-form conversation
     if actually_complete and user_message:
         logger.info(f"Post-onboarding chat for user {user_id}: {user_message[:50]}...")
-        
-        # Build engaging conversation context
-        context = f"""
-You are Tina, a warm and playful matchmaker chatbot on a movie-based dating app.
-The user has completed their profile setup. Now you're just chatting!
 
-USER INFO:
-- Name: {user_name or 'friend'}
+        # Fetch rich user profile from MongoDB so Tina behaves like an LLM
+        # who actually KNOWS this user. Without this, post-signup Tina forgets
+        # everything she learned during onboarding.
+        full_profile = await _load_full_user_profile(user_id) or {}
 
-YOUR PERSONALITY:
-- Warm, playful, curious, slightly cheeky
-- Like a fun friend who loves movies and dating talk
-- Use 1 emoji per message MAX
-- Keep messages SHORT (1-3 lines)
-- Be engaging and ask follow-up questions
-- React to what they say with personality
+        # Pull the bits of context that matter for conversation
+        archetype = full_profile.get("archetype") or {}
+        archetype_title = archetype.get("title") if isinstance(archetype, dict) else None
+        archetype_emoji = archetype.get("emoji", "") if isinstance(archetype, dict) else ""
+        archetype_desc = archetype.get("description", "") if isinstance(archetype, dict) else ""
+        love_lang = full_profile.get("primary_love_language") or (
+            archetype.get("primary_love_language") if isinstance(archetype, dict) else None
+        )
+        intent = full_profile.get("intent") or (archetype.get("intent") if isinstance(archetype, dict) else {}) or {}
+        serious_pct = intent.get("serious") if isinstance(intent, dict) else None
 
-TOPICS YOU CAN DISCUSS:
-- Movies, TV shows, cinema experiences
-- Dating advice, relationship talk
-- Fun questions about preferences
-- Movie recommendations
-- Their taste in movies and what it says about them
-- Fun movie trivia or hot takes
+        top_movies_raw = full_profile.get("topMovies") or session.get("collected_fields", {}).get("topMovies") or []
+        if isinstance(top_movies_raw, list):
+            top_movie_titles = [m.get("title") if isinstance(m, dict) else str(m) for m in top_movies_raw[:5]]
+        else:
+            top_movie_titles = []
+        genres = full_profile.get("genres") or session.get("collected_fields", {}).get("genres") or []
+        languages = full_profile.get("filmLanguages") or session.get("collected_fields", {}).get("filmLanguages") or []
+        movie_freq = full_profile.get("movieFrequency") or session.get("collected_fields", {}).get("movieFrequency") or ""
+        ott_theatre = full_profile.get("ottTheatre") or session.get("collected_fields", {}).get("ottTheatre") or ""
+        location_obj = full_profile.get("location") or {}
+        city = location_obj.get("city") if isinstance(location_obj, dict) else None
 
-User's message: {user_message}
+        # Build a rich, LLM-driven system prompt — no scripts, no chip-options,
+        # just an open-ended assistant who remembers everything.
+        profile_facts = []
+        if archetype_title:
+            profile_facts.append(f"- 360° archetype: {archetype_emoji} {archetype_title} — {archetype_desc}".strip())
+        if love_lang:
+            profile_facts.append(f"- Primary love language: {love_lang}")
+        if serious_pct is not None:
+            vibe = f"{int(serious_pct)}% serious / {100 - int(serious_pct)}% casual"
+            profile_facts.append(f"- Relationship vibe: {vibe}")
+        if top_movie_titles:
+            profile_facts.append(f"- Top 5 favorite movies: {', '.join(top_movie_titles)}")
+        if genres:
+            profile_facts.append(f"- Favorite genres: {', '.join(genres) if isinstance(genres, list) else genres}")
+        if languages:
+            profile_facts.append(f"- Watches movies in: {', '.join(languages) if isinstance(languages, list) else languages}")
+        if movie_freq:
+            profile_facts.append(f"- Watch frequency: {movie_freq}")
+        if ott_theatre:
+            profile_facts.append(f"- Preference: {ott_theatre}")
+        if city:
+            profile_facts.append(f"- Lives in: {city}")
+        profile_block = "\n".join(profile_facts) if profile_facts else "- (not much yet — keep learning)"
 
-Recent conversation:
-{chr(10).join([f"{'User' if m.get('role')=='user' else 'Tina'}: {m.get('content','')[:100]}" for m in history[-4:]])}
+        # Recent dialogue (last 6 turns) — gives the LLM context to follow up
+        recent_dialog_lines = []
+        for m in (history or [])[-6:]:
+            role = m.get("role")
+            content = (m.get("content") or "").strip()
+            if not content:
+                continue
+            speaker = "User" if role == "user" else "Tina"
+            recent_dialog_lines.append(f"{speaker}: {content}")
+        recent_dialog = "\n".join(recent_dialog_lines) if recent_dialog_lines else "(no prior turns yet)"
 
-Generate a friendly, engaging response. Ask a follow-up question to keep the conversation going.
-DO NOT prefix with "Tina:" - just write the response directly.
-"""
-        
+        system_prompt = f"""You are Tina — a warm, playful, slightly cheeky AI friend on a movie-based dating app.
+The user has already completed onboarding and the 360° persona quiz, so you know them.
+
+WHO YOU'RE TALKING TO ({user_name or 'friend'}):
+{profile_block}
+
+HOW TO BEHAVE — important:
+• You are a real conversational LLM now, not a script. Listen to what {user_name or 'they'} actually said and respond to THAT specific message. Do not deflect to your own scripted topics.
+• Reference what you know about them naturally — e.g., if they ask for a movie pick, lean on their genres / top movies / love language. If they want dating advice, use their archetype + vibe.
+• Be helpful for ANY topic they bring up: movie recommendations, date plans, relationship advice, casual chat, philosophy, anything. You are their fun friend who happens to know their taste.
+• Keep replies SHORT (1–3 sentences usually). Match the user's energy and length.
+• Use at most ONE emoji per reply. Sometimes none.
+• Never re-ask onboarding questions. Never offer chip-options or lists of pre-defined choices.
+• Don't start every reply with "Hey {user_name or 'there'}!" — only greet on the very first turn.
+• If you don't know something specific about them, just ask naturally instead of hallucinating.
+
+RECENT CONVERSATION:
+{recent_dialog}
+
+The user just said: "{user_message}"
+
+Reply directly as Tina, no prefix, no labels. Just your message."""
+
         # Get LLM response for post-onboarding chat
-        tina_response = await get_llm_response([{"role": "system", "content": context}], user_name)
-        
+        tina_response = await get_llm_response(
+            [{"role": "system", "content": system_prompt}],
+            user_name,
+        )
+
         # Clean up response
         tina_response = tina_response.replace("Tina:", "").strip()
-        
+
         result["response"] = tina_response
         result["completion_percentage"] = 100
-        
+
         # Update history
         history.append({"role": "assistant", "content": tina_response})
         session["conversation_history"] = history[-20:]
-        
+
         await save_tina_session(session)
         return result
     
