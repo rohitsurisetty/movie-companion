@@ -160,6 +160,10 @@ export default function TinaChatScreen({
   const messageAnimations = useRef<{ [key: string]: Animated.Value }>({});
   // Use a ref that tracks if THIS instance has initialized (reset on unmount)
   const hasInitializedThisMount = useRef(false);
+  // Animated value that drives the progress-pill fill width. Mirrors the
+  // numeric completionPct so the bar animates smoothly between turns instead
+  // of snapping (gives the user a satisfying "moving forward" feel).
+  const progressAnim = useRef(new Animated.Value(0)).current;
   
   // ========== HELPER FUNCTIONS ==========
   
@@ -467,6 +471,40 @@ export default function TinaChatScreen({
       hasInitializedThisMount.current = false;
     };
   }, []); // Empty deps - only run on mount
+
+  // Seed the progress pill from the backend on mount so the user immediately
+  // sees their current onboarding completion, instead of staring at 0% until
+  // the first chat round-trip lands. Without this, returning users (e.g.
+  // mid-quiz) would see "0%" briefly which felt buggy.
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/tina/onboarding-status/${encodeURIComponent(userId)}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled) return;
+        if (typeof data.completion_percentage === 'number') {
+          setCompletionPct(Math.max(0, Math.min(100, data.completion_percentage)));
+        }
+      } catch (e) {
+        console.log('[Tina] seed completion fetch failed (non-fatal):', e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  // Smoothly animate the progress fill width whenever completionPct changes.
+  useEffect(() => {
+    Animated.timing(progressAnim, {
+      toValue: completionPct,
+      duration: 500,
+      easing: Easing.out(Easing.cubic),
+      // width can't use native driver; layout animation only.
+      useNativeDriver: false,
+    }).start();
+  }, [completionPct, progressAnim]);
   
   // Sync messages with parent whenever they change
   useEffect(() => {
@@ -849,15 +887,24 @@ export default function TinaChatScreen({
             accessibilityValue={{ min: 0, max: 100, now: completionPct }}
             testID="tina-progress-pill"
           >
+            <View style={styles.progressLabelRow}>
+              <Text style={styles.progressLabelText}>Progress</Text>
+              <Text style={styles.progressText}>{completionPct}%</Text>
+            </View>
             <View style={styles.progressTrack}>
-              <View
+              <Animated.View
                 style={[
                   styles.progressFill,
-                  { width: `${Math.max(4, completionPct)}%` },
+                  {
+                    width: progressAnim.interpolate({
+                      inputRange: [0, 100],
+                      outputRange: ['0%', '100%'],
+                      extrapolate: 'clamp',
+                    }),
+                  },
                 ]}
               />
             </View>
-            <Text style={styles.progressText}>{completionPct}%</Text>
           </View>
         </View>
       </SafeAreaView>
@@ -1146,19 +1193,34 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.7)',
   },
 
-  // Progress pill (header top-right) — shows signup completion 0-100%
+  // Progress pill (header top-right) — shows signup completion 0-100%.
+  // Made deliberately prominent (110px wide, branded fill, two-row layout
+  // with label + percentage on top and a thicker track below) because users
+  // reported they couldn't tell it was a progress bar in the previous tight
+  // version.
   progressPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
     paddingHorizontal: 10,
     paddingVertical: 6,
-    borderRadius: 14,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    minWidth: 92,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,107,107,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,107,107,0.3)',
+    width: 110,
+  },
+  progressLabelRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 5,
+  },
+  progressLabelText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.7)',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   progressTrack: {
-    flex: 1,
     height: 6,
     borderRadius: 3,
     backgroundColor: 'rgba(255,255,255,0.18)',
@@ -1167,14 +1229,12 @@ const styles = StyleSheet.create({
   progressFill: {
     height: 6,
     borderRadius: 3,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#FF6B6B',
   },
   progressText: {
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '800',
     color: '#FFFFFF',
-    minWidth: 30,
-    textAlign: 'right',
   },
 
   // Progress

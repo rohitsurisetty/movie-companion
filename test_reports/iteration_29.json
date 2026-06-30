@@ -1,0 +1,31 @@
+{
+  "summary": "Frontend-only verification of the Tina signup chat progress pill (iter29). FULL E2E flow executed via Playwright on the public Expo Web preview: email OTP login (test OTP 123456) → BasicInfo (name/gender/DoB-2000/location Mumbai) → PhotoUpload (1 photo uploaded via expect_file_chooser) → STEP_TINA_AUTO. The progress pill renders IMMEDIATELY on entering TinaChatScreen showing 'PROGRESS 0%' before any chat round-trip — confirming the seed-on-mount fix from /api/tina/onboarding-status/{userId}. After tapping the 'Casual' chip and Send, percentage updated 0% → 5% and the inline width style on the fill animated to 'width: 5%;'. Pill is positioned top-right (x=264 on 390px viewport, w=110, h=39), red #FF6B6B fill clearly visible on the dark header. accessibilityRole renders as role='progressbar' (✓), accessibilityLabel renders as aria-label='Signup progress N%' and updates dynamically (✓). MINOR a11y gap: accessibilityValue {min,max,now} does NOT map to aria-valuenow / aria-valuemin / aria-valuemax in React Native Web — only aria-label carries the numeric value. All other acceptance criteria met.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "TinaChatScreen progress pill (line ~887)", "issue": "accessibilityValue={{ min: 0, max: 100, now: completionPct }} does NOT render aria-valuenow/aria-valuemin/aria-valuemax attributes on web — only aria-label contains the numeric value. Screen readers that depend on aria-valuenow for progressbar role will not announce the current value. Verified in DOM: only role, aria-label, class, data-testid were present. Reference: /app/frontend/src/components/TinaChatScreen.tsx:883-888"}
+    ]
+  },
+  "test_report_links": [
+    "/app/test_reports/iteration_29.json"
+  ],
+  "action_items": [
+    "(Optional a11y polish) On TinaChatScreen progress pill, supplement accessibilityValue with explicit HTML aria attributes via Platform.OS==='web' (e.g. pass aria-valuenow/min/max via accessibilityProps or a Web-specific style attribute), OR set accessibilityLabel-only (current label already contains the % so this is largely cosmetic for AT). Not blocking — visual pill is fully functional."
+  ],
+  "critical_code_review_comments": [
+    "TinaChatScreen.tsx:479-496 — Seed-on-mount via /api/tina/onboarding-status/{userId} is correctly implemented with a cancelled-ref cleanup and bounded to [0,100]. Confirmed in network log (200 response observed on initial mount).",
+    "TinaChatScreen.tsx:498-507 — Animated.timing on completionPct uses useNativeDriver:false (correct for width animations) and Easing.out(Easing.cubic). Animation observed working — the fill div's inline 'width' style went from 0% to 5% smoothly after the chip answer.",
+    "TinaChatScreen.tsx:1201-1238 — Pill styles: 110px width, two-row layout (label + percentage on top, 6px track + animated fill below), branded #FF6B6B fill, rgba(255,107,107,0.12) tinted background, 1px brand-color border. Matches the spec exactly.",
+    "TinaChatScreen.tsx:883-908 — JSX wraps everything in a single View with testID='tina-progress-pill', role='progressbar', and a dynamic accessibilityLabel. Layout renders correctly; the only nit is the aria-value* attribute gap (see react_native_issues)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not tested (frontend-only request)", "frontend": "100% — all 7 acceptance criteria from the review request verified end-to-end"},
+  "seed_data_creation": "Created 3 fresh TEST users via OTP signup (tina_pill_*/tina_pill2_*/tina_pill3_*@example.com) using mock OTP 123456. No teardown — these are isolated test users that will be ignored.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "The Tina signup progress pill is fully functional and verified end-to-end via UI. testID='tina-progress-pill', role='progressbar', aria-label='Signup progress N%' (dynamic), inline 'width: N%;' on the animated fill. Pill is in top-right of header (x≈264 on 390px viewport). E2E navigation through onboarding requires: (1) test OTP '123456' shortcut, (2) clicking a year text directly (e.g. '2000') to trigger validateAndSetDate — mouse.wheel does NOT trigger RN Web ScrollView onScroll, (3) use Playwright `page.expect_file_chooser()` for PhotoUpload because expo-image-picker on web spawns a hidden file input on tap. Minor a11y note: aria-valuenow/min/max are NOT emitted by React Native Web for accessibilityValue — only aria-label carries the percent. Document this as known RN Web limitation or polish in a future iteration.",
+  "rca_of_issue": "Original bug ('progress bar is missing') is fully fixed. Root cause was 2-fold: (a) no initial seed from backend so the pill started at 0% with no fill visible on a dark header, AND (b) the previous pill design was too narrow/subtle to be recognized. iter29 fix correctly addresses both: useEffect on userId calls /api/tina/onboarding-status to seed completionPct on mount, and the redesigned 110px two-row pill with #FF6B6B fill is plainly visible. E2E test confirmed both — pill shows 'PROGRESS 0%' immediately on screen entry and animates to 5% after the first answered chip."
+}

@@ -10544,3 +10544,41 @@ agent_communication:
           
           CRITICAL: Hidden scores must NEVER appear in the chat response or
           /api/tina/360/profile output.
+
+  - task: "Tina Signup Progress Bar in TinaChatScreen Header"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/components/TinaChatScreen.tsx"
+    stuck_count: 1
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          User explicitly asked for a progress bar in the Tina signup chat header
+          so they know how close they are to finishing. Backend math
+          (get_completion_percentage in tina_service.py) returns 0-100 spanning
+          mandatory signup fields (0-50%) + 360° persona quiz (50-99%) + archetype
+          reveal (100%). User reported "progress bar is missing" after first
+          attempt. Diagnosis: the pill was too dim (rgba white 12% on dark BG)
+          and at 0% only had 4% fill of a 34px track (~1px) so users perceived it
+          as absent.
+
+          FIX APPLIED (June 30 2026):
+          1. Pill redesigned: 110px wide, two-row layout — "PROGRESS · NN%" label
+             on top, full-width 6px track on bottom. Brand red fill (#FF6B6B) on
+             a contrasting track. Border in branded red for prominence.
+          2. completionPct is now seeded from /api/tina/onboarding-status/{userId}
+             on mount so returning users see their current % immediately rather
+             than 0% briefly.
+          3. progressAnim (Animated.Value) drives the fill width via
+             interpolate(['0%','100%']) for smooth transitions between turns.
+
+          NEEDS TESTING (testing agent):
+          1. Open the Tina chat screen via the signup/onboarding flow.
+          2. Confirm the progress pill is visibly rendered in the top-right of
+             the header with the label "PROGRESS" and a percentage number.
+          3. Confirm the red fill bar grows after answering Tina's questions.
+          4. testID: "tina-progress-pill" is present in the DOM/UI tree.
+          5. Accessibility role is "progressbar" with numeric `now` value.
