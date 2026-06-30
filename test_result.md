@@ -10319,6 +10319,68 @@ agent_communication:
           previously-dead save_visibility_toggles branch can fire. Backend
           reloads clean.
 
+  - task: "Phase 2 — Real-people matchmaking + recency boost + cache invalidation"
+    implemented: true
+    working: true
+    file: "/app/backend/matchmaking_service.py, /app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: |
+          iteration_21: 40/40 backend tests PASS (7 new + 33 regression).
+
+          NEW: /app/backend/tests/test_real_user_matchmaking.py
+          - Real signed-up users now appear in other users' /api/matches feed
+          - is_bot tag: True for all mock_user_*, False for all user_<hash>
+          - Self-exclusion intact (Bob never matches Bob)
+          - Recency boost: newest signups present in the pool
+          - Cache invalidation: new signup → existing users see them on next
+            /matches call (no force_refresh required)
+          - Degenerate path: zero-real-users → bot-only list, no crash
+
+          Backend logs verified: '[matchmaking] candidate pool = 130 real
+          + 35 bots', '[matchmaking] invalidated N match cache entries'.
+
+          Regression: test_supabase_audit.py (13) + test_audit_iter20.py
+          (20) all GREEN. No Phase 2 regressions.
+
+          Minor non-blocking note: /api/matches response field `cached` is
+          computed as `not force_refresh` (echoes input). Not a bug per
+          current spec, can harden in Phase 3 if telemetry needed.
+      - working: true
+        agent: "main"
+        comment: |
+          PHASE 2 SHIPPED (June 30, 2026):
+
+          1. NEW get_all_real_users(exclude_user_id, limit=200) in
+             matchmaking_service.py:
+             - Pulls from MongoDB user_profiles (skips mock_user_* and self)
+             - Sorted by updated_at desc, created_at desc (RECENCY BOOST)
+             - Hydrates with picture URLs from parallel user_pictures
+               collection
+             - Coerces location dict → city, relationshipIntent str → list,
+               topMovies → list[dict]
+             - Tags every entry with is_bot=False, is_fresh_signup=True
+
+          2. get_all_mock_users now tags every bot with is_bot=True
+             (downstream features — Phase 3 auto-reply gating, admin
+             dashboard, analytics — all key on this).
+
+          3. get_matches_for_user candidate pool = real_users + bots (was
+             bot-only). Mixed pool keeps feed healthy even when user base
+             is small.
+
+          4. NEW invalidate_all_match_caches() in matchmaking_service.py:
+             drops every entry in match_cache so existing users see new
+             faces on next /matches call.
+
+          5. /api/user/profile POST handler now calls
+             invalidate_all_match_caches() after saving so the cache is
+             always fresh.
+
 agent_communication:
     -agent: "main"
     -message: |
