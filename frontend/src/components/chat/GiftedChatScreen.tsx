@@ -1,8 +1,15 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal,
-  Pressable, Platform, ActivityIndicator, Alert, TextInput, KeyboardAvoidingView,
+  Pressable, ActivityIndicator, Alert, TextInput,
 } from 'react-native';
+// Use the KeyboardAvoidingView from react-native-keyboard-controller (NOT
+// the one from react-native). The RN version relies on the activity being
+// resized when the keyboard opens — that no longer happens on Android APK
+// builds with edgeToEdgeEnabled=true, so the input gets hidden behind the
+// keyboard. The keyboard-controller version uses the native WindowInsets
+// API and works identically in Expo Go and production.
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { Ionicons } from '@expo/vector-icons';
 import { GiftedChat, Bubble, IMessage } from 'react-native-gifted-chat';
 import { Avatar } from '../Avatar';
@@ -248,8 +255,13 @@ export const GiftedChatScreen: React.FC<Props> = ({
   return (
     <KeyboardAvoidingView
       style={styles.chatContainer}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+      // translate-with-padding is the chat-app-optimized behavior from
+      // react-native-keyboard-controller — works identically on iOS and
+      // Android (including APK builds with edgeToEdgeEnabled=true) by
+      // translating the view above the keyboard via native insets, not by
+      // relying on the activity to resize.
+      behavior="translate-with-padding"
+      keyboardVerticalOffset={0}
     >
       <View style={styles.chatHeader}>
         <TouchableOpacity onPress={onBack} style={styles.backBtn}>

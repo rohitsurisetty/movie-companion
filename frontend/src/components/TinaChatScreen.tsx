@@ -1,9 +1,14 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Image, TextInput,
-  FlatList, Platform, KeyboardAvoidingView,
+  FlatList, Platform,
   Dimensions, ScrollView, Animated, Easing, ActivityIndicator,
 } from 'react-native';
+// Use react-native-keyboard-controller's KeyboardAvoidingView — the RN one
+// breaks on Android APK builds when edgeToEdgeEnabled=true (input gets
+// hidden behind the keyboard). The kbd-controller version uses native
+// WindowInsets and behaves identically in Expo Go and production.
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../theme';
@@ -922,7 +927,11 @@ export default function TinaChatScreen({
       {/* Chat Area */}
       <KeyboardAvoidingView 
         style={styles.chatArea}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        // translate-with-padding from react-native-keyboard-controller — the
+        // chat-app-optimized behavior. Identical on iOS and Android (works
+        // on APK builds with edgeToEdgeEnabled=true, unlike RN's stock
+        // KeyboardAvoidingView which relied on activity resize).
+        behavior="translate-with-padding"
         keyboardVerticalOffset={0}
       >
         {/* Loading State - Shows animated indicator while initializing */}

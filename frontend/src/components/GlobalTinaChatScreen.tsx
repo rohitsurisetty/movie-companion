@@ -1,9 +1,14 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Image, TextInput,
-  FlatList, Platform, Keyboard, 
+  FlatList, Platform,
   Dimensions, Animated, Easing, ActivityIndicator,
 } from 'react-native';
+// KeyboardEvents from react-native-keyboard-controller fires reliably on
+// Android APK builds with edgeToEdgeEnabled=true — the stock RN Keyboard
+// API doesn't fire keyboardDidShow consistently when the activity is not
+// resized, leaving the composer hidden behind the keyboard.
+import { KeyboardEvents } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -100,35 +105,34 @@ export default function GlobalTinaChatScreen({
   const mountedRef = useRef(true);
 
   // ========== KEYBOARD HANDLING ==========
-  
+  // Use KeyboardEvents from react-native-keyboard-controller so the
+  // composer reliably tracks the keyboard on Android APK builds with
+  // edgeToEdgeEnabled=true (the stock RN Keyboard API misses events when
+  // the activity isn't resized). On iOS the library forwards
+  // keyboardWillShow/Hide too so animations stay smooth.
   useEffect(() => {
-    const keyboardWillShow = Keyboard.addListener(
-      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
-      (e) => {
-        const kbHeight = e.endCoordinates.height;
-        setKeyboardHeight(kbHeight);
-        
-        // When keyboard opens, scroll to position latest message in visible area
-        // Wait for keyboard animation to complete
-        setTimeout(() => {
-          if (messages.length > 0 && flatListRef.current) {
-            // Scroll to end first, then the extra padding will position the message
-            flatListRef.current.scrollToEnd({ animated: true });
-          }
-        }, 250);
-      }
-    );
-    
-    const keyboardWillHide = Keyboard.addListener(
-      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
-      () => {
-        setKeyboardHeight(0);
-      }
-    );
-    
+    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const keyboardShowSub = KeyboardEvents.addListener(showEvt, (e: any) => {
+      const kbHeight = (e?.height ?? e?.endCoordinates?.height ?? 0) as number;
+      setKeyboardHeight(kbHeight);
+
+      // When keyboard opens, scroll to position latest message in visible area
+      setTimeout(() => {
+        if (messages.length > 0 && flatListRef.current) {
+          flatListRef.current.scrollToEnd({ animated: true });
+        }
+      }, 250);
+    });
+
+    const keyboardHideSub = KeyboardEvents.addListener(hideEvt, () => {
+      setKeyboardHeight(0);
+    });
+
     return () => {
-      keyboardWillShow.remove();
-      keyboardWillHide.remove();
+      keyboardShowSub.remove();
+      keyboardHideSub.remove();
     };
   }, [messages.length]);
 
