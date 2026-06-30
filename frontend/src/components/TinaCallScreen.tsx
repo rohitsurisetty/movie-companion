@@ -28,11 +28,11 @@ const API_BASE =
 // it should answer". We can't avoid the Whisper + GPT + TTS round-trip
 // latency (~1-2s combined) but every other delay is now stripped out.
 const SILENCE_THRESHOLD = -42; // dBFS – tighter than -45 to ignore room hum
-const SILENCE_DURATION_MS = 700; // ~0.7s trailing silence required to end a turn (was 1000)
-const MIN_SPEECH_DURATION_MS = 500; // require ~0.5s of speech before we'll end (was 700)
+const SILENCE_DURATION_MS = 500; // ~0.5s trailing silence to end a turn (was 700)
+const MIN_SPEECH_DURATION_MS = 400; // require ~0.4s of speech (was 500)
 const MAX_TURN_DURATION_MS = 20000; // hard cap per turn
-const METERING_INTERVAL_MS = 80; // poll faster — 12.5 samples/sec (was 100)
-const PRE_REPLY_PAUSE_MS = 0; // ZERO pause — start TTS the instant LLM response arrives (was 350)
+const METERING_INTERVAL_MS = 60; // poll faster — 16 samples/sec (was 80)
+const PRE_REPLY_PAUSE_MS = 0; // ZERO pause — start TTS the instant LLM response arrives
 
 type CallStatus =
   | 'connecting'
@@ -163,30 +163,17 @@ export default function TinaCallScreen({
 
   const playTtsAndAwait = useCallback(
     async (text: string) => {
-      const resp = await fetch(`${API_BASE}/api/tina/voice/speak`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
-      });
-      const data = await resp.json();
-      if (!resp.ok || !data.success || !data.audio) {
-        throw new Error(data.detail || 'TTS failed');
-      }
-      let src: string = data.audio;
-      if (Platform.OS === 'web' && src.startsWith('data:')) {
-        try {
-          const r = await fetch(src);
-          const b = await r.blob();
-          const url = URL.createObjectURL(b);
-          blobUrlsRef.current.push(url);
-          src = url;
-        } catch (e) {
-          /* fall back to data uri */
-        }
-      }
+      // Use the streaming TTS endpoint — the expo-audio / browser audio
+      // player handles HTTP-streamed MP3 natively, so playback can start as
+      // soon as the first few KB arrive (~300ms) instead of waiting for the
+      // full base64 payload (~1.5s). Backend yields ElevenLabs MP3 chunks
+      // directly via FastAPI StreamingResponse.
+      const streamUrl =
+        `${API_BASE}/api/tina/voice/speak-stream?text=` +
+        encodeURIComponent(text);
 
       // @ts-ignore – replace is on AudioPlayer at runtime
-      player.replace({ uri: src });
+      player.replace({ uri: streamUrl });
       try { player.seekTo(0); } catch { /* noop */ }
       player.play();
 
@@ -208,7 +195,10 @@ export default function TinaCallScreen({
             const dur = player.duration;
             const finished =
               dur > 0 && cur >= dur - 0.15;
-            if ((!playing && Date.now() - start > 350) || finished) {
+            // Streaming start: give the network a brief grace period (~600ms)
+            // before treating !playing as "done" — otherwise the first poll
+            // might fire before the buffer has data.
+            if ((!playing && Date.now() - start > 800) || finished) {
               clearInterval(poll);
               resolve();
             }
@@ -234,6 +224,10 @@ export default function TinaCallScreen({
           message: userText,
           is_onboarding_complete: isOnboardingComplete ?? true,
           conversation_context: recentContext,
+          // Tell the backend to use the low-latency model (gpt-4o-mini) +
+          // brevity instructions so TTS finishes faster. The text-chat
+          // branch (TinaModal) sends voice_mode: false → full gpt-4o.
+          voice_mode: true,
         }),
       });
       const data = await res.json();

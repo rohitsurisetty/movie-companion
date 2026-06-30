@@ -858,6 +858,7 @@ async def process_tina_message(
     is_onboarding_complete: bool = False,
     conversation_context: List[Dict] = None,
     selected_360_option: Optional[Dict[str, str]] = None,
+    voice_mode: bool = False,
 ) -> Dict[str, Any]:
     """
     Process a message in the Tina conversation.
@@ -1086,37 +1087,43 @@ async def process_tina_message(
             recent_dialog_lines.append(f"{speaker}: {content}")
         recent_dialog = "\n".join(recent_dialog_lines) if recent_dialog_lines else "(no prior turns yet)"
 
-        system_prompt = f"""You are Tina — a warm, playful, slightly cheeky AI friend on a movie-based dating app.
-The user has already completed onboarding and the 360° persona quiz, so you know them.
+        system_prompt = f"""You are Tina — a warm, playful, slightly cheeky AI friend on a movie-based dating app. The user has already finished onboarding so you already know them well.
 
 WHO YOU'RE TALKING TO ({user_name or 'friend'}):
 {profile_block}
 
-HOW TO BEHAVE — important:
-• You are a real conversational LLM now, not a script. Listen to what {user_name or 'they'} actually said and respond to THAT specific message. Do not deflect to your own scripted topics.
-• Reference what you know about them naturally — when they ask for a movie pick, **prefer suggesting movies that share themes or vibe with their listed top movies / genres** (call them out by name where it fits, e.g. "since you loved La La Land, you'd probably enjoy…"). For dating advice, use their archetype + love language + vibe.
-• Be helpful for ANY topic they bring up: movie recommendations, date plans, relationship advice, casual chat, philosophy, anything. You are their fun friend who happens to know their taste.
-• Keep replies SHORT (1–3 sentences usually). Match the user's energy and length.
-• Use at most ONE emoji per reply. Sometimes none.
-• Never re-ask onboarding questions. Never offer chip-options or lists of pre-defined choices.
-• Don't start every reply with "Hey {user_name or 'there'}!" — only greet on the very first turn.
-• If you don't know something specific about them, just ask naturally instead of hallucinating.
+CORE BEHAVIOR (do not break):
+1. You're a REAL conversational LLM, not a script. Respond to what {user_name or 'they'} actually said — never deflect to a pre-canned topic.
+2. NEVER re-ask onboarding questions (movie taste, languages, gender, etc.). You know them.
+3. NEVER offer chip-options, numbered lists, or pre-defined choices. Plain conversational reply only.
+4. Don't start every reply with "Hey {user_name or 'there'}!" — only greet on the very first turn.
+5. Use AT MOST one emoji per reply. Sometimes zero is better.
+
+MOVIE RECOMMENDATIONS (your specialty):
+• When they ask for a movie pick, pick ONE specific title (or two max) and explain in ONE sentence why it fits their taste — reference their top movies, genres, archetype, or love language by name. Example: "Since *La La Land* landed for you, you'd probably love *Past Lives* — same slow-burn ache, lighter on the musical."
+• Don't list 5 movies. One confident pick beats a wall of options.
+• If they ask for a date-movie rec, weight their archetype + vibe (serious/casual).
+
+DATING ADVICE:
+• Use their archetype + primary love language to ground the answer. Be specific. Don't sound like a generic relationship advice column.
+
+LENGTH:
+{'• KEEP REPLIES VERY SHORT (1 sentence, max 2). This is a VOICE call — long replies sound robotic and add latency. Be punchy.' if voice_mode else '• Keep replies SHORT (1-3 sentences). Match their energy and length.'}
 
 RECENT CONVERSATION:
 {recent_dialog}
 
 The user just said: "{user_message}"
 
-Reply directly as Tina, no prefix, no labels. Just your message."""
+Reply directly as Tina. No prefix, no labels, just your message."""
 
-        # Get LLM response for post-onboarding chat. fast=True swaps to
-        # gpt-4o-mini which is ~2-3x lower latency — critical for voice mode
-        # where the user perceives the gap directly. Quality is still very
-        # high for short conversational replies.
+        # Voice path: gpt-4o-mini for low latency (~2-3x faster). Text path:
+        # full gpt-4o for richer reasoning + nuance. Quality difference is
+        # noticeable for movie recs and dating advice.
         tina_response = await get_llm_response(
             [{"role": "system", "content": system_prompt}],
             user_name,
-            fast=True,
+            fast=voice_mode,
         )
 
         # Clean up response
@@ -1340,8 +1347,9 @@ async def generate_welcome_back_message(
     session["completed_fields"] = list(all_collected)
     await save_tina_session(session)
     
-    # Track asked topics to avoid repetition
-    asked_topics = session.get("asked_engagement_topics", [])
+    # NOTE: previously tracked `asked_engagement_topics` for the scripted
+    # POST_ONBOARDING_TOPICS rotation — we dropped that path in favor of a
+    # smart LLM opener, so the field is intentionally unused now.
     
     result = {
         "message": "",
@@ -1417,58 +1425,66 @@ async def generate_welcome_back_message(
             result["message"] = f"Welcome back, {name}! Looks like your profile is ready 🎉"
     
     else:
-        # === ONBOARDING COMPLETE - ENGAGEMENT MODE ===
-        # Find a topic we haven't asked yet
-        available_topics = [t for t in POST_ONBOARDING_TOPICS if t["topic"] not in asked_topics]
-        
-        # Always pick a fresh engaging greeting + question
-        import random
-        
-        # Varied opening greetings to make it feel personal
-        opening_greetings = [
-            f"Hey {name}! Look who's back 💕",
-            f"Oooh, {name}'s here! 🥰",
-            f"Well, well, well... {name}! 💫",
-            f"There you are, {name}! 😊",
-            f"Yay! {name}'s back! 🎉",
-            f"Hey you! Missed chatting with you 💭",
-            f"Oh hello, {name}! 👋",
-            f"Back for more? I like that, {name} 😏",
-            f"{name}! Perfect timing ✨",
-            f"Hey stranger! JK, it's my fave, {name} 💫",
-        ]
-        
-        greeting = random.choice(opening_greetings)
-        
-        if available_topics:
-            chosen = random.choice(available_topics)
-            result["message"] = f"{greeting}\n\n{chosen['question']}"
-            result["topic"] = chosen["topic"]
-            
-            # Save that we asked this topic
-            asked_topics.append(chosen["topic"])
-            session["asked_engagement_topics"] = asked_topics
-            await save_tina_session(session)
-        else:
-            # Asked all topics, generate AI-powered response for variety
-            generic_questions = [
-                "What's the last movie that made you ugly cry? 🥹",
-                "Quick - name a movie you'd never admit to loving 😅",
-                "What movie do you wish you could watch for the first time again? 🎬",
-                "Got any movie plans this weekend? 🍿",
-                "What's your go-to comfort movie? The one you watch when you need a hug? 🤗",
-                "Movie hot take time - which beloved movie do you just not get? 😬",
-                "If you could live in any movie universe, which would you pick? 🌟",
-                "What movie made you fall in love with cinema? 💕",
-                "Popcorn or nachos at the theatre? This is important 🍿",
-                "Who would play you in a movie about your life? 🎭",
-            ]
-            
-            result["message"] = f"{greeting}\n\n{random.choice(generic_questions)}"
-            
-            # Reset topics so we can ask again next time
-            session["asked_engagement_topics"] = []
-            await save_tina_session(session)
+        # === ONBOARDING COMPLETE — SMART PERSONAL OPENER ===
+        # Drop the old scripted topic spam (POST_ONBOARDING_TOPICS). Users
+        # complained Tina kept asking "what's your comfort movie?" on every
+        # reopen, ignoring what they actually wanted to talk about. Generate a
+        # short, contextual opener using the LLM + their profile + recent
+        # history. ONE short line, then we wait for them to lead.
+        try:
+            full_profile = await _load_full_user_profile(user_id) or {}
+            archetype = full_profile.get("archetype") or {}
+            arche_title = archetype.get("title") if isinstance(archetype, dict) else None
+            arche_emoji = archetype.get("emoji", "") if isinstance(archetype, dict) else ""
+            love_lang = full_profile.get("primary_love_language")
+            top_movies_raw = full_profile.get("topMovies") or []
+            top_movie_titles = []
+            if isinstance(top_movies_raw, list):
+                for m in top_movies_raw[:3]:
+                    t = m.get("title") if isinstance(m, dict) else str(m)
+                    if t:
+                        top_movie_titles.append(t)
+
+            # Recent dialogue tail so the opener can callback to last thread
+            recent_pair = []
+            for m in (session.get("conversation_history") or [])[-4:]:
+                role = "User" if m.get("role") == "user" else "Tina"
+                txt = (m.get("content") or "").strip()
+                if txt:
+                    recent_pair.append(f"{role}: {txt[:140]}")
+            recent_tail = "\n".join(recent_pair) if recent_pair else "(no prior turns)"
+
+            opener_prompt = f"""You are Tina — a warm, witty AI friend on a movie-based dating app reopening a chat with {name}.
+What you know:
+- Archetype: {arche_emoji} {arche_title or '(none)'}
+- Love language: {love_lang or '(none)'}
+- Top movies: {', '.join(top_movie_titles) if top_movie_titles else '(none yet)'}
+
+Recent conversation tail:
+{recent_tail}
+
+Write ONE short personal opener (max 1 sentence, ~15 words). Rules:
+• Sound like a friend texting, not a bot. Casual, warm.
+• If there's a recent thread, callback to it naturally ("So did you end up watching X?").
+• Otherwise reference one specific thing you know (an archetype trait, a top movie) — never generic "how are you".
+• Don't ask a scripted onboarding-style question. Don't offer chip options.
+• Max one emoji. Often zero.
+
+Output just the opener text. No labels, no quotes."""
+
+            opener = await get_llm_response(
+                [{"role": "system", "content": opener_prompt}],
+                name,
+                fast=True,  # short single-line generation, mini is plenty
+            )
+            opener = (opener or "").strip().strip('"').strip("'")
+            # Safety fallback if LLM returns empty or scripted-feeling
+            if not opener or len(opener) < 4:
+                opener = f"Hey {name} — been thinking of a movie rec for you. Ask me anything."
+            result["message"] = opener
+        except Exception as _opener_err:
+            logger.warning(f"smart opener failed, using safe fallback: {_opener_err}")
+            result["message"] = f"Hey {name} — what's on your mind today?"
     
     return result
 

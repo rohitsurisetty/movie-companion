@@ -80,6 +80,7 @@ from tina_service import (
 # Tina voice (ElevenLabs) – TTS + STT for the "Voice Call with Tina" feature
 from tina_voice_service import (
     synthesize_speech as tina_synthesize_speech,
+    stream_speech as tina_stream_speech,
     transcribe_audio as tina_transcribe_audio,
     is_voice_enabled as tina_voice_enabled,
 )
@@ -3296,6 +3297,10 @@ class TinaChatRequest(BaseModel):
     collected_fields: Optional[List[str]] = None
     conversation_context: Optional[List[Dict[str, str]]] = None
     selected_360_option: Optional[Dict[str, str]] = None  # {question_id, option_key}
+    # When True, instructs Tina to use the low-latency model (gpt-4o-mini)
+    # AND aggressive 1-2 sentence brevity so TTS finishes faster on voice
+    # calls. Defaults to False (text chat → gpt-4o, longer replies allowed).
+    voice_mode: bool = False
 
 
 @api_router.post("/tina/chat")
@@ -3320,6 +3325,7 @@ async def tina_chat_endpoint(req: TinaChatRequest):
             is_onboarding_complete=req.is_onboarding_complete,
             conversation_context=req.conversation_context,
             selected_360_option=req.selected_360_option,
+            voice_mode=req.voice_mode,
         )
 
         # Audit log: store user message + Tina's response (best-effort)
@@ -3486,6 +3492,38 @@ async def tina_voice_speak_endpoint(req: TinaSpeakRequest):
         raise
     except Exception as e:
         logger.error(f"Tina TTS error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.get("/tina/voice/speak-stream")
+async def tina_voice_speak_stream_endpoint(text: str, voice_id: Optional[str] = None):
+    """Streaming TTS — yields MP3 chunks as ElevenLabs produces them so the
+    frontend can start playback after the first chunk (~300ms) instead of
+    waiting for the full base64 audio (~1.5s). Used by the voice-call mode
+    to cut perceived reply latency.
+
+    GET so it's trivial to use as an <audio src=...> URL on web, and via a
+    streaming AudioPlayer URL on native.
+    """
+    from fastapi.responses import StreamingResponse
+    try:
+        if not text or not text.strip():
+            raise HTTPException(status_code=400, detail="text is required")
+        return StreamingResponse(
+            tina_stream_speech(text, voice_id),
+            media_type="audio/mpeg",
+            headers={
+                # Cache aggressively for identical replies (rare but cheap),
+                # disable buffering on intermediary proxies so chunks land
+                # immediately client-side.
+                "Cache-Control": "no-store",
+                "X-Accel-Buffering": "no",
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Tina TTS stream error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

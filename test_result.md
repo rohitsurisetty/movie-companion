@@ -10602,3 +10602,83 @@ metadata:
   current_test_iteration: 29
   last_user_message: "I tested this and the progress bar is missing"
   resolved_in_this_session: ["Tina Signup Progress Bar visibility (TinaChatScreen.tsx)"]
+
+  - task: "Post-signup Tina (Home Page) — quality overhaul + voice latency"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/tina_service.py + /app/backend/tina_voice_service.py + /app/backend/server.py + /app/frontend/src/components/TinaCallScreen.tsx"
+    stuck_count: 1
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          User reported post-signup Tina (Home Page) is doing a "really really bad
+          job" AND that the gap between user finishing speaking and Tina replying
+          on voice calls is too long.
+
+          FIXES APPLIED (June 30 2026):
+
+          1. KILLED the scripted POST_ONBOARDING_TOPICS rotation in
+             generate_welcome_back_message. Welcome-back is now an LLM-generated
+             ONE-line personal opener that references the user's archetype, top
+             movies, or callbacks to the recent conversation tail. No more
+             "What's your comfort movie?" robotic re-asks on every reopen.
+
+          2. Post-onboarding chat system prompt rewritten (tina_service.py):
+             tighter, more friend-like, explicit movie-rec depth (pick ONE
+             title and explain why it fits their taste — no list-spam),
+             dating advice grounded in archetype + love language.
+
+          3. Added voice_mode flag (TinaChatRequest.voice_mode). Voice path
+             uses gpt-4o-mini + 1-sentence-max instruction (latency-optimized).
+             Text path (GlobalTinaChatScreen, default voice_mode=false) now
+             uses full gpt-4o for richer recommendations and conversations —
+             noticeable quality lift over the previous mini-on-everything setup.
+
+          4. Voice latency: tightened VAD (SILENCE_DURATION_MS 700→500,
+             MIN_SPEECH_DURATION_MS 500→400, METERING_INTERVAL_MS 80→60).
+
+          5. Voice latency: added streaming TTS endpoint
+             GET /api/tina/voice/speak-stream that yields ElevenLabs MP3
+             chunks via FastAPI StreamingResponse. Frontend now uses this
+             endpoint by passing the URL to the AudioPlayer instead of
+             waiting for the full base64 payload.
+
+          MEASURED IMPACT (TTS):
+          - OLD POST /tina/voice/speak: Time-to-first-byte 707ms (full audio
+            generated → base64 → JSON before any bytes leave the server).
+          - NEW GET /tina/voice/speak-stream: TTFB ~1ms, total transfer
+            unchanged (~700ms), but the player can begin playback as soon as
+            the first chunk lands instead of waiting for full audio.
+          - Combined with tighter VAD and shorter voice replies, total
+            perceived end-of-speech → reply-audio gap should drop ~1-1.5s.
+
+          MEASURED IMPACT (text chat quality):
+          - Voice mode test: "How about The Secret Life of Walter Mitty? It's
+            got that perfect blend of adventure and heartwarming moments for
+            a chill night." (1 sentence, specific title, contextual)
+          - Text mode test: "I'm on it! 😊 Since you have a knack for laid-back
+            vibes, I'd suggest *Chef*..." (3 sentences, richer reasoning).
+          - Welcome-back opener: "So, what do you think of *The Secret Life of
+            Walter Mitty*? It's quite a mood! 🌟" (callback to prior turn).
+
+          NEEDS TESTING (testing agent):
+          BACKEND:
+          1. POST /api/tina/chat with is_onboarding_complete=true + voice_mode=true
+             returns a SHORT (≤2 sentences) reply. voice_mode=false returns
+             longer richer reply.
+          2. POST /api/tina/welcome-back with is_onboarding_complete=true returns
+             a single contextual line (NOT a scripted "What's your comfort
+             movie?" question) and references profile context where available.
+          3. GET /api/tina/voice/speak-stream?text=Hello returns
+             Content-Type: audio/mpeg with status 200 and binary MP3 bytes.
+
+          FRONTEND (browser preview is OK as final visual check):
+          4. Open Tina from home page (post-onboarding) and confirm the welcome
+             line is contextual and SHORT (not "What's your comfort movie?").
+          5. Confirm text chat replies sound richer and reference the user's
+             top movies / archetype.
+          6. Voice call: TTFB to first audio playback should feel snappier
+             (subjective but ~1s improvement over previous).
