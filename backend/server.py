@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, Request, Response, HTTPException, BackgroundTasks, UploadFile, File, Form
+from fastapi import FastAPI, APIRouter, Request, Response, HTTPException, BackgroundTasks, UploadFile, File, Form, Depends
 from fastapi.responses import FileResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -106,6 +106,20 @@ from picture_service import (
     update_single_picture,
     initialize_picture_service,
     set_mongodb_db
+)
+
+# Centralised security dependencies — see security_deps.py for design notes.
+from security_deps import (
+    set_security_db,
+    set_admin_tokens_provider,
+    get_current_user_id,
+    get_current_admin,
+    require_owner,
+    INSECURE_DEV_AUTH,
+    OTP_LIMITER,
+    TTS_LIMITER,
+    LOGIN_ATTEMPT_LIMITER,
+    client_ip,
 )
 
 # Import mock-data seeder for unmatched flow testing
@@ -413,6 +427,82 @@ async def root():
     return {"message": "Film Companion API"}
 
 
+# ============================================================================
+# GLOBAL AUTH MIDDLEWARE
+# ============================================================================
+# Defense-in-depth: every /api/* route (except a small explicit allow-list)
+# REQUIRES a valid session before the handler runs. This closes the systemic
+# BOLA hole flagged in the security audit — no more relying on every author
+# remembering to add Depends(...) to each new endpoint.
+#
+# Auth flow:
+#   • /api/auth/*  → public (login/signup paths)
+#   • /api/admin/login → public (issues an admin token)
+#   • /api/admin/*  → requires admin token (get_current_admin)
+#   • everything else under /api/ → requires user session (get_current_user_id)
+#
+# Per-route handlers can additionally call `require_owner(body_user_id,
+# request.state.user_id)` for the highest-risk endpoints that take user_id
+# in the body or path.
+
+_PUBLIC_PREFIXES = (
+    "/api/auth/",
+    "/api/tmdb/",
+    "/api/places/",
+    "/api/prototype/",
+)
+_PUBLIC_EXACT = {
+    "/api/",
+    "/api",
+    "/api/tina/greeting",
+    "/api/tina/field-options",
+    "/api/tina/360/questions",
+    "/api/tina/voice/status",
+    "/api/movie/catalog/stats",
+    "/api/admin/login",
+}
+
+
+@app.middleware("http")
+async def auth_gate(request: Request, call_next):
+    path = request.url.path
+    method = request.method
+
+    # Non-API and CORS preflight always pass through
+    if not path.startswith("/api") or method == "OPTIONS":
+        return await call_next(request)
+
+    if path in _PUBLIC_EXACT or any(path.startswith(p) for p in _PUBLIC_PREFIXES):
+        return await call_next(request)
+
+    # Admin routes (everything under /api/admin/ except /login)
+    if path.startswith("/api/admin/"):
+        try:
+            admin_info = await get_current_admin(request)
+            request.state.admin = admin_info
+        except HTTPException as exc:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={"detail": exc.detail},
+                headers=getattr(exc, "headers", {}) or {},
+            )
+        return await call_next(request)
+
+    # Default: require a logged-in user session
+    try:
+        uid = await get_current_user_id(request)
+        request.state.user_id = uid
+    except HTTPException as exc:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.detail},
+            headers=getattr(exc, "headers", {}) or {},
+        )
+    return await call_next(request)
+
+
 # ============ PROTOTYPE V1 - Static HTML prototype for investors/colleagues ============
 PROTOTYPE_V1_PATH = "/app/Film_Companion_Prototype_V1.html"
 
@@ -532,13 +622,23 @@ def send_mock_welcome_email(email: str, name: str):
 
 
 @api_router.post("/auth/send-email-otp")
-async def send_email_otp(req: SendEmailOTPRequest):
+async def send_email_otp(req: SendEmailOTPRequest, request: Request):
     """
     Send OTP to email address (mocked).
     Returns is_new_user to indicate if name is needed during verification.
+
+    SECURITY:
+      • Rate-limited per identifier (OTP_LIMITER, 5/10min).
+      • The actual OTP is NEVER returned in the response body or logged
+        to stdout unless INSECURE_DEV_AUTH=true (QA-only override).
     """
     email = req.email.lower().strip()
-    
+
+    # Rate-limit by identifier so a single victim email can't be brute-forced
+    # via repeated send-otp. Also rate-limit by IP to slow per-attacker abuse.
+    OTP_LIMITER.check_or_raise(f"otp_email:{email}")
+    OTP_LIMITER.check_or_raise(f"otp_ip:{client_ip(request)}")
+
     # Check if this email is already registered with another account (1:1 mapping)
     existing = await db.users.find_one({"email": email})
     is_new_user = existing is None
@@ -554,38 +654,40 @@ async def send_email_otp(req: SendEmailOTPRequest):
         "existing_user_id": existing.get("user_id") if existing else None,
         "existing_name": existing.get("name") if existing else None,
     }
-    
-    # In production, send actual email here
-    logger.info(f"""
-    ================================================================================
-    📧 EMAIL OTP SENT (MOCK)
-    ================================================================================
-    From: noreply@filmcompanion.com
-    To: {email}
-    Subject: Your Film Companion OTP
-    
-    Your verification code is: {otp}
-    
-    This code will expire in 5 minutes.
-    ================================================================================
-    """)
-    
-    return {
+
+    # PROD: send actual email here (SendGrid / Resend / SES, TBD).
+    # DEV ONLY: when INSECURE_DEV_AUTH=true we log the OTP for local QA so
+    # automation tests can read it from stdout. Never logged in prod.
+    if INSECURE_DEV_AUTH:
+        logger.info(f"[DEV] Email OTP for {email}: {otp}")
+    else:
+        logger.info(f"Email OTP issued (length={len(otp)}) to address ending ...{email[-6:]}")
+
+    response: Dict[str, Any] = {
         "success": True,
         "message": "OTP sent to your email",
         "is_new_user": is_new_user,
-        "otp": otp,  # ONLY for testing - remove in production
     }
+    if INSECURE_DEV_AUTH:
+        # Local QA convenience only — gated by env flag.
+        response["otp"] = otp
+        response["dev_mode"] = True
+    return response
 
 
 @api_router.post("/auth/send-phone-otp")
-async def send_phone_otp(req: SendPhoneOTPRequest):
+async def send_phone_otp(req: SendPhoneOTPRequest, request: Request):
     """
     Send OTP to phone number (mocked).
     Returns is_new_user to indicate if name is needed during verification.
+
+    SECURITY: OTP never leaks to response/logs unless INSECURE_DEV_AUTH=true.
     """
     phone = req.phone.strip()
-    
+
+    OTP_LIMITER.check_or_raise(f"otp_phone:{phone}")
+    OTP_LIMITER.check_or_raise(f"otp_ip:{client_ip(request)}")
+
     # Check if this phone is already registered with another account (1:1 mapping)
     existing = await db.users.find_one({"phone": phone})
     is_new_user = existing is None
@@ -601,23 +703,23 @@ async def send_phone_otp(req: SendPhoneOTPRequest):
         "existing_user_id": existing.get("user_id") if existing else None,
         "existing_name": existing.get("name") if existing else None,
     }
-    
-    # In production, send actual SMS here via Twilio/etc
-    logger.info(f"""
-    ================================================================================
-    📱 SMS OTP SENT (MOCK)
-    ================================================================================
-    To: {phone}
-    Message: Your Film Companion OTP is: {otp}. Valid for 5 minutes.
-    ================================================================================
-    """)
-    
-    return {
+
+    if INSECURE_DEV_AUTH:
+        logger.info(f"[DEV] Phone OTP for {phone}: {otp}")
+    else:
+        # Mask all but last 4 digits
+        masked = ("*" * max(0, len(phone) - 4)) + phone[-4:] if phone else "<empty>"
+        logger.info(f"Phone OTP issued (length={len(otp)}) to {masked}")
+
+    response: Dict[str, Any] = {
         "success": True,
         "message": "OTP sent to your phone",
         "is_new_user": is_new_user,
-        "otp": otp,  # ONLY for testing - remove in production
     }
+    if INSECURE_DEV_AUTH:
+        response["otp"] = otp
+        response["dev_mode"] = True
+    return response
 
 
 @api_router.post("/auth/verify-otp")
@@ -633,9 +735,11 @@ async def verify_otp(req: VerifyOTPRequest):
     
     # Check if OTP exists
     stored = otp_store.get(otp_key)
-    
-    # Test mode: Accept "123456" as a valid OTP for any user (for automation testing)
-    is_test_otp = req.otp == "123456"
+
+    # SECURITY: The universal "123456" bypass is QA-only — gated behind
+    # INSECURE_DEV_AUTH=true. In production deploys this MUST stay False or
+    # any account can be taken over with the magic six digits.
+    is_test_otp = INSECURE_DEV_AUTH and req.otp == "123456"
     
     if not stored and not is_test_otp:
         raise HTTPException(status_code=400, detail="OTP expired or not found. Please request a new one.")
@@ -1785,7 +1889,7 @@ async def get_swipe_history(user_id: str, limit: int = 50):
 
 
 @api_router.delete("/user/{user_id}/reset-feed")
-async def reset_user_feed(user_id: str):
+async def reset_user_feed(user_id: str, request: Request):
     """
     Reset user's swipe history to get fresh recommendations.
     Useful for:
@@ -1794,7 +1898,10 @@ async def reset_user_feed(user_id: str):
     - When user's preferences have changed significantly
     
     Note: This does NOT reset the taste profile, only swipe history.
+
+    AUTH: Caller must own this user_id.
     """
+    require_owner(user_id, request.state.user_id)
     # Delete swipe history
     swipe_result = await db.user_swipes.delete_many({"user_id": user_id})
     
@@ -1827,11 +1934,14 @@ async def reset_user_feed(user_id: str):
 
 
 @api_router.delete("/user/{user_id}/reset-all")
-async def reset_user_completely(user_id: str):
+async def reset_user_completely(user_id: str, request: Request):
     """
     Completely reset user - removes profile, taste vector, and swipes.
     User will need to go through onboarding again.
+
+    AUTH: Caller must own this user_id.
     """
+    require_owner(user_id, request.state.user_id)
     # Delete everything
     profile_result = await db.user_profiles.delete_many({"user_id": user_id})
     taste_result = await db.user_taste_vectors.delete_many({"user_id": user_id})
@@ -3304,7 +3414,7 @@ class TinaChatRequest(BaseModel):
 
 
 @api_router.post("/tina/chat")
-async def tina_chat_endpoint(req: TinaChatRequest):
+async def tina_chat_endpoint(req: TinaChatRequest, request: Request):
     """
     Chat with Tina AI for conversational profile building.
     
@@ -3313,7 +3423,10 @@ async def tina_chat_endpoint(req: TinaChatRequest):
     - Whether to show movie picker
     - Collected field info
     - Profile completion percentage
+
+    AUTH: req.user_id must match the authenticated user.
     """
+    require_owner(req.user_id, request.state.user_id)
     try:
         result = await process_tina_message(
             user_id=req.user_id,
@@ -3380,8 +3493,9 @@ async def tina_greeting_endpoint(user_name: str = ""):
 
 
 @api_router.get("/tina/missing-fields/{user_id}")
-async def tina_missing_fields_endpoint(user_id: str):
+async def tina_missing_fields_endpoint(user_id: str, request: Request):
     """Get list of profile fields not yet collected by Tina."""
+    require_owner(user_id, request.state.user_id)
     try:
         missing = await get_missing_fields(user_id)
         return {"success": True, "missing_fields": missing, "count": len(missing)}
@@ -3391,8 +3505,9 @@ async def tina_missing_fields_endpoint(user_id: str):
 
 
 @api_router.get("/tina/profile-data/{user_id}")
-async def tina_profile_data_endpoint(user_id: str):
+async def tina_profile_data_endpoint(user_id: str, request: Request):
     """Get all profile data collected by Tina."""
+    require_owner(user_id, request.state.user_id)
     try:
         data = await get_collected_profile_data(user_id)
         return {"success": True, "profile_data": data}
@@ -3402,8 +3517,9 @@ async def tina_profile_data_endpoint(user_id: str):
 
 
 @api_router.delete("/tina/session/{user_id}")
-async def tina_clear_session_endpoint(user_id: str):
+async def tina_clear_session_endpoint(user_id: str, request: Request):
     """Clear Tina session for a user (start fresh)."""
+    require_owner(user_id, request.state.user_id)
     try:
         await clear_tina_session(user_id)
         return {"success": True, "message": "Tina session cleared"}
@@ -3420,8 +3536,9 @@ class WelcomeBackRequest(BaseModel):
 
 
 @api_router.post("/tina/welcome-back")
-async def tina_welcome_back_endpoint(req: WelcomeBackRequest):
+async def tina_welcome_back_endpoint(req: WelcomeBackRequest, request: Request):
     """Generate a contextual welcome-back message when user returns to Tina."""
+    require_owner(req.user_id, request.state.user_id)
     try:
         result = await generate_welcome_back_message(
             user_id=req.user_id,
@@ -3436,8 +3553,9 @@ async def tina_welcome_back_endpoint(req: WelcomeBackRequest):
 
 
 @api_router.get("/tina/onboarding-status/{user_id}")
-async def tina_onboarding_status_endpoint(user_id: str):
+async def tina_onboarding_status_endpoint(user_id: str, request: Request):
     """Check user's onboarding status."""
+    require_owner(user_id, request.state.user_id)
     try:
         status = await get_user_onboarding_status(user_id)
         return {"success": True, **status}
@@ -3480,12 +3598,18 @@ async def tina_voice_status_endpoint():
 
 
 @api_router.post("/tina/voice/speak")
-async def tina_voice_speak_endpoint(req: TinaSpeakRequest):
+async def tina_voice_speak_endpoint(req: TinaSpeakRequest, request: Request):
     """Generate Tina's voice reply (Sarah – premade female, Free-tier compatible)
-    and return a base64-encoded MP3 audio data URI suitable for `expo-audio`."""
+    and return a base64-encoded MP3 audio data URI suitable for `expo-audio`.
+
+    Auth: handled by global middleware. Rate-limited per user via TTS_LIMITER.
+    """
     try:
         if not req.text or not req.text.strip():
             raise HTTPException(status_code=400, detail="text is required")
+        # Per-user rate limit so ElevenLabs quota can't be drained by a single
+        # compromised session or runaway client retry.
+        TTS_LIMITER.check_or_raise(f"tts:{getattr(request.state, 'user_id', 'anon')}")
         audio_data_uri = tina_synthesize_speech(req.text, req.voice_id)
         return {"success": True, "audio": audio_data_uri}
     except HTTPException:
@@ -3497,6 +3621,7 @@ async def tina_voice_speak_endpoint(req: TinaSpeakRequest):
 
 @api_router.get("/tina/voice/speak-stream")
 async def tina_voice_speak_stream_endpoint(
+    request: Request,
     text: Optional[str] = None,
     voice_id: Optional[str] = None,
 ):
@@ -3505,16 +3630,17 @@ async def tina_voice_speak_stream_endpoint(
     waiting for the full base64 audio (~1.5s). Used by the voice-call mode
     to cut perceived reply latency.
 
-    GET so it's trivial to use as an <audio src=...> URL on web, and via a
-    streaming AudioPlayer URL on native. `text` is Optional so we control
-    the 400 response shape ourselves (FastAPI would default to 422 if it
-    were required).
+    Auth: handled by the global middleware. The middleware extracts the
+    session token from `?session_token=` query param when present, which is
+    the only way native `<audio src=>` players can pass auth (no header
+    support). Rate-limited per user via TTS_LIMITER.
     """
     from fastapi.responses import StreamingResponse
     if not text or not text.strip():
         raise HTTPException(status_code=400, detail="text is required")
     if not tina_voice_enabled():
         raise HTTPException(status_code=503, detail="Voice service is not configured")
+    TTS_LIMITER.check_or_raise(f"tts:{getattr(request.state, 'user_id', 'anon')}")
 
     # Eagerly drain the first MP3 chunk from ElevenLabs BEFORE constructing
     # the StreamingResponse. Any auth / quota / config error will surface
@@ -3714,9 +3840,19 @@ socket_app = socketio.ASGIApp(sio, app)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    # Lock CORS to known origins. Read from env so prod can extend without
+    # code changes. Wildcard "*" + allow_credentials=True is browser-rejected
+    # AND a CSRF foot-gun, so we never use it. Defaults cover the Emergent
+    # tunnel, localhost dev preview, and the Expo web preview.
+    allow_origins=[o.strip() for o in os.getenv(
+        "ALLOWED_ORIGINS",
+        "https://match-history-dev.preview.emergentagent.com,"
+        "http://localhost:3000,http://localhost:19006,"
+        "http://127.0.0.1:3000"
+    ).split(",") if o.strip()],
+    allow_origin_regex=os.getenv("ALLOWED_ORIGIN_REGEX") or r"^https://[a-z0-9-]+\.preview\.emergentagent\.com$",
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Session-Token", "X-Admin-Token"],
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -3726,6 +3862,16 @@ logger = logging.getLogger(__name__)
 @app.on_event("startup")
 async def startup_event():
     """Initialize services on startup"""
+    # Wire the centralised security deps to Mongo + admin tokens store.
+    # Done FIRST so any subsequent startup task can rely on auth being live.
+    set_security_db(db)
+    set_admin_tokens_provider(lambda: admin_tokens)
+    logger.info(
+        "Security subsystem initialised (INSECURE_DEV_AUTH=%s, ALLOWED_ORIGINS=%s)",
+        INSECURE_DEV_AUTH,
+        os.getenv("ALLOWED_ORIGINS", "<default>"),
+    )
+
     # Pass MongoDB db to picture service
     set_mongodb_db(db)
     logger.info("Picture service connected to MongoDB")

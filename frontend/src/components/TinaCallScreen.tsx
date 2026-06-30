@@ -168,9 +168,17 @@ export default function TinaCallScreen({
       // soon as the first few KB arrive (~300ms) instead of waiting for the
       // full base64 payload (~1.5s). Backend yields ElevenLabs MP3 chunks
       // directly via FastAPI StreamingResponse.
+      //
+      // Auth: <audio src=URL> can't forward Authorization headers, so we
+      // append the session token as a query param. The backend security
+      // middleware accepts ?session_token= specifically for streaming
+      // media endpoints.
+      const { getSessionToken } = await import('../store');
+      const token = await getSessionToken();
       const streamUrl =
         `${API_BASE}/api/tina/voice/speak-stream?text=` +
-        encodeURIComponent(text);
+        encodeURIComponent(text) +
+        (token ? `&session_token=${encodeURIComponent(token)}` : '');
 
       // @ts-ignore – replace is on AudioPlayer at runtime
       player.replace({ uri: streamUrl });

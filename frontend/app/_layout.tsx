@@ -7,6 +7,14 @@ import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { TinaProvider } from '../src/context/TinaContext';
 import FloatingTinaButton from '../src/components/FloatingTinaButton';
 import TinaModal from '../src/components/TinaModal';
+import { installAuthenticatedFetch } from '../src/store';
+
+// Install the auto-auth fetch wrapper as early as possible (module-load
+// time, before any route mounts). After this every `fetch()` call to the
+// backend gets `Authorization: Bearer <token>` automatically — required
+// now that the backend enforces auth on all non-public /api routes.
+const API_BASE = (process.env.EXPO_PUBLIC_BACKEND_URL || '').trim();
+installAuthenticatedFetch(API_BASE);
 
 export default function RootLayout() {
   return (

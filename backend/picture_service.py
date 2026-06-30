@@ -106,6 +106,43 @@ async def upload_picture_to_storage(
         logger.error(f"Picture upload: invalid base64 ({e})")
         return None
 
+    # Reject oversized uploads early so we don't burn Supabase egress.
+    # 8 MB is generous for profile photos; phones routinely shoot 4-6 MB.
+    MAX_PICTURE_BYTES = 8 * 1024 * 1024
+    if len(image_bytes) > MAX_PICTURE_BYTES:
+        logger.warning(
+            f"Picture upload rejected: {len(image_bytes)} bytes exceeds "
+            f"{MAX_PICTURE_BYTES} cap (user_id={user_id} pic#{picture_number})"
+        )
+        return None
+
+    # Validate MIME by sniffing the first bytes — never trust the
+    # client-provided content_type. Limit to JPEG/PNG/WEBP/HEIC/GIF.
+    ALLOWED_MIMES = {
+        b"\xff\xd8\xff": "image/jpeg",
+        b"\x89PNG\r\n\x1a\n": "image/png",
+        b"RIFF": "image/webp",  # WEBP files start with RIFF....WEBP
+        b"ftypheic": "image/heic",
+        b"GIF87a": "image/gif",
+        b"GIF89a": "image/gif",
+    }
+    sniffed_mime: Optional[str] = None
+    if image_bytes:
+        head = image_bytes[:16]
+        for sig, mime in ALLOWED_MIMES.items():
+            if sig in head:
+                sniffed_mime = mime
+                break
+    if image_bytes and not sniffed_mime:
+        logger.warning(
+            f"Picture upload rejected: unsupported MIME (user_id={user_id} pic#{picture_number})"
+        )
+        return None
+    # Override the client-provided content_type with what we sniffed so the
+    # CDN serves the correct header.
+    if sniffed_mime:
+        content_type = sniffed_mime
+
     size_bytes = len(image_bytes)
     storage_path: Optional[str] = None
     public_url: Optional[str] = None

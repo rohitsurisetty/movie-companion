@@ -1,4 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
 import { create } from 'zustand';
 import { FiltersData, SwipeState } from './types';
 
@@ -69,13 +71,54 @@ export const getMode = async (): Promise<AppMode> => {
   return 'date';
 };
 
+// Session token MUST be stored in SecureStore (Keychain/Keystore-backed) not
+// AsyncStorage — an APK on a rooted/compromised device can read AsyncStorage
+// in plaintext. Web doesn't have SecureStore so we transparently fall back
+// to AsyncStorage there (web preview is dev-only). Same idiom used in expo
+// docs.
+const TOKEN_KEY = 'film_companion_session_token';
+const _useSecure = Platform.OS !== 'web';
+
+async function _saveSecret(key: string, value: string | null | undefined) {
+  if (_useSecure) {
+    if (!value) {
+      try { await SecureStore.deleteItemAsync(key); } catch { /* ignore */ }
+      return;
+    }
+    await SecureStore.setItemAsync(key, value);
+  } else {
+    if (!value) {
+      try { await AsyncStorage.removeItem(`@secure:${key}`); } catch { /* ignore */ }
+      return;
+    }
+    await AsyncStorage.setItem(`@secure:${key}`, value);
+  }
+}
+
+async function _loadSecret(key: string): Promise<string | null> {
+  if (_useSecure) {
+    try { return await SecureStore.getItemAsync(key); } catch { return null; }
+  }
+  try { return await AsyncStorage.getItem(`@secure:${key}`); } catch { return null; }
+}
+
 export const saveAuth = async (data: any) => {
-  await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(data));
+  // Split the auth payload: session_token (sensitive) → SecureStore,
+  // everything else (user_id/name/email — already revealed to the server
+  // and not directly exploitable) → AsyncStorage. Keeps existing callers
+  // working unchanged: they hand us {session_token, ...rest}, we read it
+  // back the same way via getAuth().
+  const { session_token, ...rest } = data || {};
+  await _saveSecret(TOKEN_KEY, session_token);
+  await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(rest));
 };
 
 export const getAuth = async () => {
-  const data = await AsyncStorage.getItem(AUTH_KEY);
-  return data ? JSON.parse(data) : null;
+  const raw = await AsyncStorage.getItem(AUTH_KEY);
+  const rest = raw ? JSON.parse(raw) : null;
+  const session_token = await _loadSecret(TOKEN_KEY);
+  if (!rest && !session_token) return null;
+  return { ...(rest || {}), session_token: session_token || undefined };
 };
 
 export const getUserId = async (): Promise<string> => {
@@ -205,4 +248,45 @@ export const getSwipeState = async (): Promise<SwipeState | null> => {
 
 export const clearAll = async () => {
   await AsyncStorage.multiRemove([AUTH_KEY, PROFILE_KEY, ONBOARDING_KEY, FILTERS_KEY, SWIPES_KEY]);
+  // Also wipe the session token from SecureStore so logout truly clears auth.
+  await _saveSecret(TOKEN_KEY, null);
 };
+
+// Install a global fetch monkey-patch that automatically attaches the
+// session token to any backend API request, so the 50+ existing fetch()
+// call sites keep working unchanged after we added the global auth
+// middleware. Must be called ONCE at app boot (root _layout.tsx).
+let _authFetchInstalled = false;
+export function installAuthenticatedFetch(apiBase: string) {
+  if (_authFetchInstalled) return;
+  _authFetchInstalled = true;
+  const originalFetch = (globalThis as any).fetch?.bind(globalThis);
+  if (!originalFetch) return;
+  (globalThis as any).fetch = async (input: any, init: any = {}) => {
+    try {
+      let url: string = typeof input === 'string' ? input : (input?.url || '');
+      // Only inject for backend API calls — never for third-party or static URLs.
+      const isBackend = apiBase && url && url.startsWith(apiBase);
+      if (!isBackend) return originalFetch(input, init);
+      const token = await _loadSecret(TOKEN_KEY);
+      if (!token) return originalFetch(input, init);
+      const headers = new Headers(init?.headers || {});
+      if (!headers.has('Authorization')) {
+        headers.set('Authorization', `Bearer ${token}`);
+      }
+      // expo-audio AudioPlayer in native won't forward headers — let any
+      // helpers that build streaming URLs (e.g. tts speak-stream) read this
+      // value if needed. Not added globally because we only want it on the
+      // few endpoints that actually consume <audio src=URL>.
+      return originalFetch(input, { ...init, headers });
+    } catch (e) {
+      return originalFetch(input, init);
+    }
+  };
+}
+
+// Convenience: read the raw token for components that need to append it as
+// a query param on streaming-media URLs (audio src=). Returns '' if none.
+export async function getSessionToken(): Promise<string> {
+  return (await _loadSecret(TOKEN_KEY)) || '';
+}
