@@ -350,6 +350,14 @@ class UserProfileRequest(BaseModel):
     # App modes
     movieBuddyMode: bool = False
     movieDateMode: bool = False
+    # Visibility toggles — controls which profile sections show publicly.
+    # Optional dict; absent on cold signup, populated on edits from the
+    # Profile screen. Persisted to Supabase `toggle_visibility_profile`
+    # for full audit trail.
+    visibilityToggles: Optional[Dict[str, bool]] = None
+    # Session id from frontend (for grouping signup events across multiple
+    # PATCH-style profile saves)
+    session_id: Optional[str] = None
 
 
 class SwipeRequest(BaseModel):

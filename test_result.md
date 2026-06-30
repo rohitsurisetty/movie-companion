@@ -10277,6 +10277,48 @@ agent_communication:
              that still mentioned "Great picks!" — unreachable from the picker
              path but flagged by testing agent for hygiene.
 
+  - task: "Launch-prep data completeness audit — every signup/match/chat event recorded in real-time"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: |
+          iteration_20: 33/33 backend tests PASS.
+          NEW SUITE: /app/backend/tests/test_audit_iter20.py (20 tests)
+          REGRESSION: iter14 suite (13 tests) still GREEN.
+
+          All 5 NEW audit hooks verified end-to-end against Supabase
+          PostgREST (rows actually land):
+          • /chat/accept    → match_events.event_type='request_accepted'
+          • /chat/decline   → match_events.event_type='request_declined'
+          • /chat/delete    → match_events.event_type='chat_deleted'
+          • /chat/meeting-report  → match_events.event_type='meeting_reported'
+          • /chat/meeting-status  → match_events.event_type='meeting_verified'
+          • /user/pictures/upload-batch → user_pictures (1 row per pic)
+
+          Existing tables also verified populated: user_logged_in,
+          user_sign_up_details, top_5_movies, mode_selected,
+          preferences_and_filters, exclusive_toggle, expand_if_run_out,
+          user_pictures, user_chat_messages, tina_chat_messages,
+          match_events (matches_generated), unmatch_events, report_events.
+
+          Bootstrap line "✅ All audit tables present. Audit logging is
+          fully active." still printed on startup. Zero RLS 42501 errors.
+          Zero non-blocking audit warnings in backend.err.log.
+      - working: true
+        agent: "main"
+        comment: |
+          Closed the one minor gap flagged by testing agent: added
+          `visibilityToggles: Optional[Dict[str, bool]]` and `session_id:
+          Optional[str]` to UserProfileRequest pydantic model so the
+          previously-dead save_visibility_toggles branch can fire. Backend
+          reloads clean.
+
 agent_communication:
     -agent: "main"
     -message: |
