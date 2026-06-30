@@ -180,6 +180,16 @@ export default function TinaCallScreen({
       // Wait for playback to finish
       await new Promise<void>((resolve) => {
         const start = Date.now();
+        // Track when the player actually started playing audio. We give the
+        // network up to 4s to deliver the first chunk before treating
+        // !playing as "done" — otherwise on slow networks the very first
+        // poll fires before the buffer has data and we'd cut Tina off
+        // before she even spoke. Once the player IS playing, the grace
+        // window shrinks to ~600ms after the last `playing=true` reading.
+        let hasStartedPlaying = false;
+        let lastPlayingAt = 0;
+        const INITIAL_GRACE_MS = 4000;
+        const POST_PLAY_GRACE_MS = 600;
         const poll = setInterval(() => {
           if (!isActiveRef.current) {
             clearInterval(poll);
@@ -193,12 +203,26 @@ export default function TinaCallScreen({
             const cur = player.currentTime;
             // @ts-ignore
             const dur = player.duration;
-            const finished =
-              dur > 0 && cur >= dur - 0.15;
-            // Streaming start: give the network a brief grace period (~600ms)
-            // before treating !playing as "done" — otherwise the first poll
-            // might fire before the buffer has data.
-            if ((!playing && Date.now() - start > 800) || finished) {
+
+            if (playing) {
+              hasStartedPlaying = true;
+              lastPlayingAt = Date.now();
+            }
+
+            const finished = dur > 0 && cur >= dur - 0.15;
+            const elapsed = Date.now() - start;
+            const sincePlay = lastPlayingAt ? Date.now() - lastPlayingAt : 0;
+
+            // End condition 1: Player reached end of buffer cleanly.
+            // End condition 2: Player was playing, then stopped, and the
+            //   POST_PLAY grace window has elapsed (Tina actually finished).
+            // End condition 3: Player NEVER started, and we've been waiting
+            //   past the INITIAL_GRACE window (stream genuinely failed).
+            if (
+              finished ||
+              (hasStartedPlaying && !playing && sincePlay > POST_PLAY_GRACE_MS) ||
+              (!hasStartedPlaying && elapsed > INITIAL_GRACE_MS)
+            ) {
               clearInterval(poll);
               resolve();
             }

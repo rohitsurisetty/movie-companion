@@ -3496,35 +3496,63 @@ async def tina_voice_speak_endpoint(req: TinaSpeakRequest):
 
 
 @api_router.get("/tina/voice/speak-stream")
-async def tina_voice_speak_stream_endpoint(text: str, voice_id: Optional[str] = None):
+async def tina_voice_speak_stream_endpoint(
+    text: Optional[str] = None,
+    voice_id: Optional[str] = None,
+):
     """Streaming TTS — yields MP3 chunks as ElevenLabs produces them so the
     frontend can start playback after the first chunk (~300ms) instead of
     waiting for the full base64 audio (~1.5s). Used by the voice-call mode
     to cut perceived reply latency.
 
     GET so it's trivial to use as an <audio src=...> URL on web, and via a
-    streaming AudioPlayer URL on native.
+    streaming AudioPlayer URL on native. `text` is Optional so we control
+    the 400 response shape ourselves (FastAPI would default to 422 if it
+    were required).
     """
     from fastapi.responses import StreamingResponse
+    if not text or not text.strip():
+        raise HTTPException(status_code=400, detail="text is required")
+    if not tina_voice_enabled():
+        raise HTTPException(status_code=503, detail="Voice service is not configured")
+
+    # Eagerly drain the first MP3 chunk from ElevenLabs BEFORE constructing
+    # the StreamingResponse. Any auth / quota / config error will surface
+    # here as a clean 5xx instead of a 200 with a broken stream body.
     try:
-        if not text or not text.strip():
-            raise HTTPException(status_code=400, detail="text is required")
-        return StreamingResponse(
-            tina_stream_speech(text, voice_id),
-            media_type="audio/mpeg",
-            headers={
-                # Cache aggressively for identical replies (rare but cheap),
-                # disable buffering on intermediary proxies so chunks land
-                # immediately client-side.
-                "Cache-Control": "no-store",
-                "X-Accel-Buffering": "no",
-            },
-        )
+        upstream = tina_stream_speech(text, voice_id)
+        first_chunk = next(upstream, b"")
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Tina TTS stream error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Tina TTS stream init failed: {e}")
+        raise HTTPException(status_code=502, detail=f"TTS upstream error: {e}")
+    if not first_chunk:
+        raise HTTPException(status_code=502, detail="TTS upstream returned empty audio")
+
+    def _stitched_stream():
+        # Replay the first chunk we already fetched, then continue draining
+        # the rest. Errors mid-stream can only be logged — by this point the
+        # client already has a 200 + audio/mpeg response.
+        try:
+            yield first_chunk
+            for chunk in upstream:
+                if chunk:
+                    yield chunk
+        except Exception as e:
+            logger.warning(f"Tina TTS stream interrupted mid-flight: {e}")
+
+    return StreamingResponse(
+        _stitched_stream(),
+        media_type="audio/mpeg",
+        headers={
+            # Cache aggressively for identical replies (rare but cheap),
+            # disable buffering on intermediary proxies so chunks land
+            # immediately client-side.
+            "Cache-Control": "no-store",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @api_router.post("/tina/voice/transcribe")

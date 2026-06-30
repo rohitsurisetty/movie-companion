@@ -659,6 +659,27 @@ async def _handle_360_turn(
     qid = selected_360_option.get("question_id")
     okey = selected_360_option.get("option_key")
     if not qid or not okey:
+        # Malformed payload — never leave the user staring at an empty
+        # Tina bubble. Re-prompt the current question instead.
+        try:
+            idx = max(0, min(state.get("current_index", 0), len(PERSONALITY_QUESTIONS) - 1))
+            q = PERSONALITY_QUESTIONS[idx]
+            result["response"] = (
+                "Hmm, that didn't come through — tap one of the options below to continue."
+            )
+            result["show_options"] = {
+                "field": "personality_360",
+                "mode": "personality_360",
+                "question_id": q["id"],
+                "options": [
+                    {"key": o["key"], "label": o["label"], "emoji": o.get("emoji", "")}
+                    for o in q["options"]
+                ],
+                "multi_select": False,
+            }
+        except Exception:
+            result["response"] = "Hmm, that didn't register — please pick an option to continue."
+        result["persona_360_phase"] = "active"
         return
 
     # De-dupe by question_id, append the new answer
@@ -940,9 +961,10 @@ async def process_tina_message(
     
     # Check if onboarding is complete - either from flag or all mandatory fields done.
     # IMPORTANT: We split this into two flags now so we DON'T conflate them:
-    #   • mandatory_done — all 12 signup fields collected. Used to gate the
-    #     360° persona quiz (which only runs DURING signup, never on the home
-    #     page).
+    #   • mandatory_done — all mandatory signup fields collected (currently
+    #     10 entries in PROFILE_FIELDS marked non-optional). Used to gate
+    #     the 360° persona quiz (which only runs DURING signup, never on
+    #     the home page).
     #   • actually_complete — frontend explicitly tells us the user is in
     #     post-onboarding free-chat mode (home page Tina). Only when this is
     #     True do we run the LLM free-chat branch.
@@ -1015,8 +1037,29 @@ async def process_tina_message(
             result["profile_data"] = session.get("collected_fields", {})
             await save_tina_session(session)
             return result
-        # else: quiz already complete during signup — fall through to the
-        # short closing acknowledgement path below.
+
+        # Quiz already complete during signup (e.g. user closed the app right
+        # after the reveal and re-entered the onboarding chat before the
+        # frontend persisted is_onboarding_complete=true). Without this
+        # short-circuit the request would fall through to
+        # get_next_field_to_collect, which returns the first uncollected
+        # OPTIONAL field (height/religion/etc.) and Tina would re-ask
+        # scripted questions — exactly the bug we just fixed. Always return
+        # the closing line + signup_complete flag instead.
+        result["response"] = (
+            "Hey, I've got everything I need to set up your profile 💫 "
+            "You can chat with me anytime — I'm always here."
+        )
+        result["signup_complete"] = True
+        result["completion_percentage"] = 100
+        result["profile_data"] = session.get("collected_fields", {})
+        # Echo the existing archetype on the result so the frontend overlay
+        # still has data to show even on this fallthrough path.
+        archetype = session.get("archetype")
+        if archetype:
+            result["archetype_reveal"] = archetype
+        await save_tina_session(session)
+        return result
 
     # POST-ONBOARDING: Free-form LLM chat. (Previously this branch also gated
     # a 360° persona quiz in front of free-chat, but the quiz uses scripted
@@ -1227,7 +1270,7 @@ Remember to end with [SHOW_OPTIONS:{next_field}] if this field has predefined op
 """
         
         if session.get("awaiting_clarification"):
-            context += f"\nThe user's response didn't match expected options. Ask for clarification in a friendly way."
+            context += "\nThe user's response didn't match expected options. Ask for clarification in a friendly way."
         
         history.append({"role": "system", "content": context})
         
@@ -1415,24 +1458,24 @@ async def generate_welcome_back_message(
                 greetings = [
                     f"Hey {name}! 👋 Let's keep building your profile!",
                     f"Welcome back, {name}! Ready to continue? 😊",
-                    f"Good to see you again! Let's pick up where we left off 💫",
+                    "Good to see you again! Let's pick up where we left off 💫",
                 ]
             elif completion < 60:
                 greetings = [
                     f"You're back! 🎉 We're making great progress, {name}!",
                     f"Hey {name}! Almost halfway there - let's keep going! 💪",
-                    f"Welcome back! Your profile is coming together nicely 😊",
+                    "Welcome back! Your profile is coming together nicely 😊",
                 ]
             elif completion < 90:
                 greetings = [
                     f"So close, {name}! Just a few more things and you're all set 🚀",
-                    f"Almost there! Let's finish up your profile 🎯",
-                    f"Hey! You're nearly done - let's wrap this up! ✨",
+                    "Almost there! Let's finish up your profile 🎯",
+                    "Hey! You're nearly done - let's wrap this up! ✨",
                 ]
             else:
                 greetings = [
                     f"Just one more thing, {name}! Let's complete your profile 🎊",
-                    f"Final stretch! One more question and you're good to go 💫",
+                    "Final stretch! One more question and you're good to go 💫",
                 ]
             
             import random

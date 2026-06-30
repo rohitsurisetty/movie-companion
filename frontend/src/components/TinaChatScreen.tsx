@@ -710,6 +710,24 @@ export default function TinaChatScreen({
         return;
       }
 
+      // Backend may emit `signup_complete: true` on the fallthrough path
+      // (e.g. user re-enters the signup chat after the quiz finished but
+      // before is_onboarding_complete=true was persisted). When this fires
+      // without archetype_reveal, we still want to lock the composer and
+      // show the closing line — never let optional/scripted field prompts
+      // appear after the quiz is done.
+      if (data.signup_complete) {
+        setCompletionPct(100);
+        setCurrentOptions(null);
+        setCurrentDeepLink(null);
+        // If the backend re-echoed the archetype on this path, show overlay
+        if (data.archetype_reveal === undefined && (data as any).archetype_reveal) {
+          setArchetypeReveal((data as any).archetype_reveal);
+        }
+        setArchetypeProfileData(data.profile_data || {});
+        return;
+      }
+
       // Show options if needed (legacy or 360)
       if (data.show_options) {
         setTimeout(() => {

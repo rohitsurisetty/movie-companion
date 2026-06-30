@@ -1691,13 +1691,20 @@ def generate_profile_hash(profile: Dict) -> str:
     """
     Generate a simple hash of profile to detect changes.
     If profile changes significantly, we should regenerate matches.
+
+    NOTE: We also fold `DEMO_FEED_MOCKS_ONLY` into the hash so flipping the
+    flag at deploy time auto-invalidates every existing cache entry. Without
+    this, a cached entry built while the flag was OFF could continue serving
+    real/audit-tester profiles for up to CACHE_EXPIRY_HOURS after the flag
+    flips ON.
     """
     key_fields = [
         str(profile.get("partnerPreference", "")),
         str(profile.get("genres", [])),
         str(profile.get("filmLanguages", [])),
         str(profile.get("relationshipIntent", [])),
-        str(profile.get("topMovies", []))
+        str(profile.get("topMovies", [])),
+        f"demo:{int(DEMO_FEED_MOCKS_ONLY)}",  # cache-buster for flag-flip
     ]
     return str(hash("".join(key_fields)))
 
