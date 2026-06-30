@@ -2848,24 +2848,21 @@ async def api_meeting_report(req: MeetingReportRequest):
 
 
 @api_router.get("/chat/conversations/{user_id}")
-async def api_get_conversations(user_id: str, request: Request):
+async def api_get_conversations(user_id: str):
     """Get all active conversations for a user.
 
-    Note: previously this endpoint auto-seeded Anjali/Priya unmatched bot
-    conversations on every call — convenient during dev but it polluted
-    every real user's inbox the moment they opened the Chat tab.
-    Auto-seeding is now gated behind DEV_SEED_MOCK_UNMATCHED=1 env var or
-    the X-Dev-Seed-Mock: 1 request header (latter is used by the audit
-    test suite to opt-in per-call without flipping a process-wide flag).
-    Production users see ONLY real conversations + accepted bot requests.
+    Side effect: ensures the demo Anjali/Priya unmatched conversations exist
+    for this user so they can test the post-unmatch flow directly from the
+    main Chat tab. The seed function is idempotent and skips if already done.
+    (Auto-seed restored June 30, 2026 — the previous gating env var/header
+    has been removed.)
     """
     try:
-        dev_header = request.headers.get("x-dev-seed-mock", "") == "1"
-        if os.getenv("DEV_SEED_MOCK_UNMATCHED", "0") == "1" or dev_header:
-            try:
-                await seed_unmatched_for_user(db, user_id)
-            except Exception as seed_err:
-                logger.warning(f"Auto-seed unmatched mocks failed for {user_id}: {seed_err}")
+        # Best-effort seed; never block conversation fetch if seeding fails
+        try:
+            await seed_unmatched_for_user(db, user_id)
+        except Exception as seed_err:
+            logger.warning(f"Auto-seed unmatched mocks failed for {user_id}: {seed_err}")
 
         conversations = await get_conversations(user_id)
         return {"success": True, "conversations": conversations}
@@ -3153,21 +3150,13 @@ async def api_get_reply_suggestions(req: ReplySuggestionsRequest):
 
 
 @api_router.post("/chat/init-mock/{user_id}")
-async def api_init_mock_conversations(user_id: str, request: Request):
-    """DEPRECATED for production. Was used during early dev to auto-seed
-    mock_user_001/002/003 conversations into a new user's inbox. Now disabled
-    by default — real users should only see real conversations + accepted
-    requests from bots that come through the matchmaking → message-request
-    flow. The endpoint still exists (so existing frontend calls don't 500)
-    but it's a no-op unless either DEV_SEED_MOCK_CHATS=1 is set in the
-    environment OR the caller sends the header X-Dev-Seed-Mock: 1
-    (the header path lets the audit test suite run end-to-end without
-    flipping a process-wide env var).
+async def api_init_mock_conversations(user_id: str):
+    """Seed mock_user_001/002/003 conversations into a user's inbox.
+
+    Restored as default behavior (June 30, 2026) so new test users get
+    convenient default chats to play with. Previously gated by
+    DEV_SEED_MOCK_CHATS — flag removed.
     """
-    dev_header = request.headers.get("x-dev-seed-mock", "") == "1"
-    if os.getenv("DEV_SEED_MOCK_CHATS", "0") != "1" and not dev_header:
-        logger.info(f"[init-mock] skipped for {user_id} (production mode — set DEV_SEED_MOCK_CHATS=1 or X-Dev-Seed-Mock: 1 to re-enable)")
-        return {"success": True, "skipped": True, "reason": "production_mode"}
     try:
         mock_users = get_all_mock_users()[:3]
         await create_mock_conversations(user_id, mock_users)
@@ -3190,17 +3179,17 @@ async def api_get_match_history(user_id: str):
     - Report users even after they've unmatched
     - View read-only chat history if they were unmatched by someone
 
-    Note: previously this endpoint auto-seeded Anjali/Priya unmatched bot
-    conversations on every call. That was a dev convenience that polluted
-    real users' history. Auto-seeding is now disabled in production — set
-    DEV_SEED_MOCK_UNMATCHED=1 in the env to re-enable for QA.
+    Side effect: ensures the demo Anjali/Priya unmatched conversations exist
+    for this user so they can manually test the post-unmatch flows. The seed
+    function is idempotent and skips if already done. (Auto-seed restored
+    June 30, 2026 — the previous DEV_SEED_MOCK_UNMATCHED gate has been removed.)
     """
     try:
-        if os.getenv("DEV_SEED_MOCK_UNMATCHED", "0") == "1":
-            try:
-                await seed_unmatched_for_user(db, user_id)
-            except Exception as seed_err:
-                logger.warning(f"Auto-seed unmatched mocks failed for {user_id}: {seed_err}")
+        # Best-effort seed; never block history fetch if seeding fails
+        try:
+            await seed_unmatched_for_user(db, user_id)
+        except Exception as seed_err:
+            logger.warning(f"Auto-seed unmatched mocks failed for {user_id}: {seed_err}")
 
         history = await get_match_history(user_id)
         return {"success": True, "history": history, "total": len(history)}
