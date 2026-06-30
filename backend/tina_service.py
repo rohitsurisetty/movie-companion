@@ -938,10 +938,12 @@ async def process_tina_message(
     # mandatory onboarding, so by the time we hit this post-onboarding path
     # the user is done with scripted Q&A forever.)
     if actually_complete:
+        # Force the 360° quiz to look "complete" in this session. The signup
+        # TinaChatScreen already runs the quiz inline as part of mandatory
+        # onboarding, so by the time we hit this post-onboarding path the
+        # user is done with scripted Q&A forever.
         p360 = _get_360_state(session)
         if p360["phase"] != "complete":
-            # Force completion in-memory so downstream code that reads p360
-            # sees a finished quiz. We do NOT trigger _handle_360_turn here.
             _set_360_state(
                 session,
                 {
@@ -951,35 +953,24 @@ async def process_tina_message(
                 },
             )
 
-        # Defensive: if a chip option somehow arrived from a stale frontend
-        # session, ignore it instead of routing to the quiz handler. We treat
-        # any selected chip as just another free-text message.
-        if selected_360_option and not user_message:
-            user_message = str(selected_360_option)
+        # If a chip option came in (stale frontend session), coerce it into
+        # the user_message so the LLM treats it as plain text. Without this,
+        # an empty-message chip payload would silently fall through to the
+        # SCRIPTED onboarding flow below (relationshipIntent etc.) — exactly
+        # the bug we're fixing.
+        if selected_360_option:
+            if not user_message:
+                user_message = str(selected_360_option)
             history.append({"role": "user", "content": user_message})
-            await save_tina_session(session)
-            return result
 
-        # No 360 chip tapped — either start the quiz or handle free text mid-quiz.
-        if p360["phase"] == "inactive":
-            await _begin_360_quiz(session, result, user_name)
-            history.append({"role": "assistant", "content": result["response"]})
-            session["conversation_history"] = history[-20:]
-            result["completion_percentage"] = 100
-            result["profile_data"] = session.get("collected_fields", {})
-            await save_tina_session(session)
-            return result
-
-        if p360["phase"] == "active":
-            await _handle_360_turn(session, result, None, user_message, user_id)
-            history.append({"role": "assistant", "content": result["response"]})
-            session["conversation_history"] = history[-20:]
-            result["completion_percentage"] = 100
-            result["profile_data"] = session.get("collected_fields", {})
-            await save_tina_session(session)
-            return result
-
-        # phase == "complete" — fall through to free-form post-onboarding chat below.
+        # CRITICAL: We DO NOT invoke _begin_360_quiz or _handle_360_turn from
+        # this branch under ANY circumstances. The previous version checked
+        # the local `p360` (a stale copy from before _set_360_state mutated
+        # the session) and could still route into scripted quiz handlers,
+        # which is exactly what users reported as "Tina keeps asking the
+        # same first-meet question every time".
+        #
+        # Fall through to the free-form LLM chat path below.
 
     # POST-ONBOARDING: Engage in free-form conversation
     if actually_complete and user_message:

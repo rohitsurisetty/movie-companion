@@ -1,0 +1,63 @@
+{
+  "summary": "Bug 1 (PARTIAL FIX): The stale-p360 quiz routing is RESOLVED — fresh complete users no longer get the 360 persona quiz on their first turn. test_01 and test_02 now PASS (previously FAILED in iter26). However, test_04 (chip-only payload) STILL FAILS: the fix at /app/backend/tina_service.py:961 only coerces `selected_360_option` (a dict) into user_message, but the review-request edge case sends `selected_option` (a plain string, the legacy onboarding chip param). When {message:'', selected_option:'Casual movie buff', is_onboarding_complete:true} arrives, selected_360_option is None → no coercion happens → user_message stays '' → the `if actually_complete and user_message:` guard at line 976 is False → request falls through to scripted onboarding and is shown the 'relationshipIntent' chip block (Casual / Friendship / Serious / Exploring). Fix is a one-liner: also coerce selected_option / selected_options into user_message at the top of the actually_complete branch. test_03 fails for a different, softer reason — the LLM organically replied 'what's your idea of a perfect first date? 🎉' to a 'tell me about yourself' prompt, which contains the substring 'first date' that the QUIZ_PHRASES heuristic flags; no show_options or persona_360_phase=active in the payload, so the bug is NOT actually triggered (LLM nondeterminism + over-broad test phrase match). Bug 2 latency optimization is still intact: avg 1.3-1.6s over 3 trials, well under the 2.5s target. Regression: test_supabase_audit 13/13 PASS, test_audit_iter20 20/20 PASS. Iteration 27 result: 7/9 PASS on iter26 Tina suite (up from 6/9), 33/33 PASS on the audit regression suites.",
+
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/tina/chat",
+        "issue": "Chip-only payload still falls through to scripted onboarding. Root cause: /app/backend/tina_service.py:961 only handles `selected_360_option` (dict from 360 quiz chips) but NOT `selected_option` / `selected_options` (string / list from legacy onboarding chips). For an `is_onboarding_complete=True` user, an incoming payload {message:'', selected_option:'Casual movie buff'} leaves user_message empty → the `if actually_complete and user_message:` LLM gate at line 976 is False → control falls through to lines 1088+ which asks the legacy onboarding field 'relationshipIntent' with chips. Live evidence: response={'show_options': {'field': 'relationshipIntent', 'options': ['Casual','Friendship','Serious relationship','Exploring'], 'multi_select': True}, 'completion_percentage': 0}. Fix: extend the coercion block at lines 961-964 to also pick up `selected_option` (str) and `selected_options` (list) when user_message is empty.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "POST /api/tina/chat",
+        "issue": "test_03 LLM-prompt drift: when the user types 'tell me about yourself', the post-onboarding system prompt steers Tina back to dating/movies and she asks 'what's your idea of a perfect first date?'. There is no scripted quiz triggered (no show_options / no persona_360_phase=active / no archetype_reveal), so the bug fix itself is fine — this is the LLM choosing the phrase. The QUIZ_PHRASES heuristic in the test flags it as a false positive because the substring 'first date' is in the blocklist. Two options: (a) relax the system prompt to avoid funneling 'tell me about yourself' into dating questions, or (b) tighten the test heuristic to only flag scripted phrases when show_options/archetype_reveal are also present."
+      }
+    ]
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+
+  "test_report_links": [
+    "/app/backend/tests/test_tina_bug_fixes_iter26.py",
+    "/app/test_reports/pytest/iter27_tina_bugfixes.xml",
+    "/app/test_reports/pytest/iter27_regression.xml"
+  ],
+
+  "action_items": [
+    "FIX /app/backend/tina_service.py:961 — broaden the chip-payload coercion to handle ALL chip param variants, not just selected_360_option. Suggested patch (insert at top of `if actually_complete:` block, BEFORE the existing selected_360_option check):\n```python\n# Coerce ANY chip-only payload into user_message so it flows into the LLM path.\nif not user_message:\n    if selected_option:\n        user_message = str(selected_option)\n    elif selected_options:\n        user_message = ', '.join(str(o) for o in selected_options)\n    elif selected_360_option:\n        user_message = str(selected_360_option.get('option_key') or selected_360_option)\n    if user_message:\n        history.append({'role': 'user', 'content': user_message})\n```\nThen remove the existing duplicate coercion at lines 961-964 to avoid double-appending to history.",
+
+    "OPTIONAL — softer system-prompt steering for post-onboarding LLM at /app/backend/tina_service.py:1042+. Currently the prompt strongly pushes Tina back to 'finding your person' when the user says 'tell me about yourself', causing her to ask 'what's your idea of a perfect first date?' — this is technically free-chat but uses phrasing that the test (and a real user) might still perceive as scripted onboarding. Consider relaxing line 1049 ('Do not deflect to your own scripted topics') to also forbid funneling generic 'tell me about yourself' questions into dating questions.",
+
+    "OPTIONAL — tighten QUIZ_PHRASES heuristic in /app/backend/tests/test_tina_bug_fixes_iter26.py to only flag a response as a quiz when at least one of {show_options non-empty, archetype_reveal present, persona_360_phase=='active'} is ALSO true. The phrase blocklist alone produces false positives against LLM organic output."
+  ],
+
+  "critical_code_review_comments": [
+    "/app/backend/tina_service.py:940-973 — Bug 1's primary root cause (stale p360 → _begin_360_quiz/_handle_360_turn) IS fixed by removing those branches. ✓",
+    "/app/backend/tina_service.py:961-964 — Coercion only handles selected_360_option (dict). The review request's test case explicitly uses selected_option (string), which is NOT covered. This is the remaining hole.",
+    "/app/backend/tina_service.py:976 — `if actually_complete and user_message:` is still the dispatcher. If the chip coercion above misses any param, control silently drops into scripted onboarding (line 1088+). Consider replacing the conjunction with an unconditional LLM-path entry when actually_complete=True, with a sensible default like 'they tapped \"<chip>\"' or just a friendly greeting if message+chips are all empty.",
+    "/app/backend/tina_service.py:1069-1073 — `get_llm_response(..., fast=True)` is correctly in place. ✓ Latency avg 1.3-1.6s, well under 2.5s target."
+  ],
+
+  "updated_files": [],
+
+  "success_rate": {
+    "backend": "iter27 Tina bug-fix suite: 7/9 PASS (77.8%). Bug 1 stale-p360 fix is verified (test_01/02 PASS, was FAIL in iter26). Remaining failures: test_03 (LLM phrase false positive, no actual quiz fired), test_04 (real bug — selected_option string variant not coerced). Bug 2 fully verified. Audit regression: 33/33 PASS (100%). Combined: 40/42 (95.2%).",
+    "frontend": "not tested (backend-only per request)"
+  },
+
+  "seed_data_creation": "Fresh test user per module via /api/auth/send-email-otp + /api/auth/verify-otp (mock OTP returned in body). Mongo upsert of full user_profiles doc + DELETE tina_sessions to ensure no pre-seeded 360 state. Cleanup on teardown.",
+
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+
+  "context_for_next_testing_agent": "Main fix from iter26 (Bug 1) is now correctly applied — the stale p360 quiz handlers are gone. Only ONE remaining code gap: the chip-coercion at /app/backend/tina_service.py:961 was written to handle selected_360_option (dict) but missed selected_option (str) and selected_options (list). The review request's test_04 case uses selected_option, so the fix needs to be broadened (see action_items[0] for the patch). Once that one-liner extension lands, expect 8/9 PASS. test_03 is an LLM-prompt issue + test heuristic that produces false positives; treat as soft/optional. Audit regressions are clean (33/33). DO NOT touch the onboarding-incomplete path — test_08 confirms it still works.",
+
+  "rca_of_issue": "Iter26 fix made two changes: (a) DELETED the `if p360['phase'] == 'inactive':` and `if p360['phase'] == 'active':` branches that previously routed actually_complete=True users into _begin_360_quiz / _handle_360_turn — verified working (test_01/02 PASS). (b) Added a coercion that turns selected_360_option into user_message so chip-only payloads land in the LLM path. However, the review-request's chip-only test case sends `selected_option` (string, used by legacy onboarding chips), NOT `selected_360_option` (dict, used by 360 quiz chips). The coercion at line 961 only checks for the dict variant, so `selected_option:'Casual movie buff'` is dropped on the floor — user_message stays '', the `if actually_complete and user_message:` LLM gate at line 976 returns False, and the request falls through to the legacy scripted onboarding at line 1088+ which asks for 'relationshipIntent'. Reproduction (100%): POST /api/tina/chat {user_id:<fresh complete user>, message:'', selected_option:'Casual movie buff', is_onboarding_complete:true} → response.show_options={field:'relationshipIntent', options:['Casual','Friendship','Serious relationship','Exploring'], multi_select:true}, completion_percentage=0. Fix (one-liner): broaden the coercion to also pick up selected_option (str → user_message) and selected_options (list → joined str) at the top of the `if actually_complete:` block (see action_items[0] for exact patch)."
+}
