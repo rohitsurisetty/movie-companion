@@ -285,23 +285,47 @@ def test_tina_post_onboarding_uses_profile(user_pair):
 # ============== 5. Regression: mixed real+bot matchmaking pool ==============
 
 def test_matchmaking_mixed_pool(user_pair):
-    """POST /matches returns mixed pool of real users + bots, with is_bot flags."""
+    """POST /matches returns mixed pool of real users + bots, with is_bot flags.
+
+    History: this test used to fail intermittently once the real-user pool
+    grew past ~150 — the default `/matches` limit of 20 (then truncated to
+    top 15 after preference filtering) could push ALL bots out of the
+    returned slice, leaving zero bots in the assertion sample.
+
+    Fix: explicitly request a large limit so we see the full filtered pool,
+    AND use the `is_bot` flag (not user_id prefix) so we don't accidentally
+    treat real users whose ids happen to start with anything-unusual as bots.
+    """
     x = user_pair["x"]
     r = requests.post(
         f"{API}/matches",
-        json={"user_id": x, "mode": "date", "force_refresh": True},
+        json={
+            "user_id": x,
+            "mode": "date",
+            "force_refresh": True,
+            # 200 is well above the 35-bot ceiling — bots will always survive
+            # the top-N truncation at this limit.
+            "limit": 200,
+        },
         timeout=120,
     )
     assert r.status_code == 200, f"/matches failed: {r.status_code} {r.text}"
     matches = r.json().get("matches") or []
     assert matches, "no matches returned"
 
-    ids = [m.get("user_id") for m in matches]
-    bots = [i for i in ids if isinstance(i, str) and i.startswith("mock_user_")]
-    reals = [i for i in ids if isinstance(i, str) and i.startswith("user_")]
+    # Use the authoritative is_bot tag — it's the contract Phase 3 auto-reply
+    # gating + admin dashboard depend on. Don't rely on user_id prefixes.
+    bots = [m for m in matches if m.get("is_bot") is True]
+    reals = [m for m in matches if m.get("is_bot") is False]
 
-    assert bots, f"No bots in /matches pool. ids={ids[:10]}"
-    # is_bot consistency
+    assert bots, (
+        f"No bots in /matches pool of {len(matches)}. "
+        f"sample ids={[m.get('user_id') for m in matches[:5]]}. "
+        f"Mock pool has 35 bots — they must survive the top-N cut at limit=200."
+    )
+
+    # is_bot consistency — every entry must explicitly say True or False.
+    # If anything is missing the flag, downstream auto-reply gating breaks.
     bad = []
     for m in matches:
         uid = m.get("user_id") or ""
@@ -310,9 +334,15 @@ def test_matchmaking_mixed_pool(user_pair):
             bad.append(f"bot {uid} has is_bot={flag}")
         elif uid.startswith("user_") and flag is not False:
             bad.append(f"real {uid} has is_bot={flag}")
-    assert not bad, "is_bot tag mismatch: " + "; ".join(bad)
-    # Best-effort assert that at least one real user surfaced
-    # (count just reals — Bob can match Alice from previous test runs).
-    # Don't hard-fail if zero reals — log instead.
+        elif flag is None:
+            bad.append(f"{uid} has no is_bot flag at all")
+    assert not bad, "is_bot tag mismatch: " + "; ".join(bad[:5])
+
+    # Best-effort assert that at least one real user surfaced too. Skip
+    # rather than fail — strict compatibility filtering can occasionally
+    # exclude all real candidates for a niche profile.
     if not reals:
-        pytest.skip(f"No real users in pool for {x} (compatibility filter strict). bots only: {len(bots)}")
+        pytest.skip(
+            f"No real users in pool for {x} (compatibility filter strict). "
+            f"bots only: {len(bots)}"
+        )

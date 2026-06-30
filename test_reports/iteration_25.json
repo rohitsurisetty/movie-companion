@@ -1,0 +1,62 @@
+{
+  "summary": "test_matchmaking_mixed_pool STILL FAILS after the iter25 test-only edit. The fix premise — 'limit=200 means bots survive the top-N cut' — is INCORRECT because the top-N truncation does NOT happen at /api/matches' final slice (matches[:req.limit] on server.py:2423); it happens DEEPER, inside get_ai_compatibility_scores(..., top_n=15) in /app/backend/matchmaking_service.py:2320 which is HARDCODED to 15. So requesting limit=200 still returns at most 15 matches, and with a 162-real + 35-bot candidate pool that filters to ~42 valid candidates, the LLM compatibility scorer consistently picks 15 real users (recency-boosted) and ZERO bots survive. Verified two consecutive runs: pool sizes returned 15 and 11 — both 100%% real users, len(bots) == 0. Other 7 tests in iter22 suite PASS. Regression: test_supabase_audit 13/13 PASS, test_audit_iter20 20/20 PASS, test_iter24_header_optin 7/7 PASS in isolation (timeouts when bundled were transient LLM back-pressure). test_real_user_matchmaking has 3 pre-existing failures (test_real_user_appears_in_bobs_feed, test_cache_invalidation_on_new_signup, test_matches_with_no_profile_user_still_ok) — ALL three are the SAME root cause as iter22's flake: top_n=15 truncates bots out of the response. Backend /api/ healthy, mock-users endpoint returns 35 bots, candidate pool log shows '160 real + 35 bots → 42 after filter' confirming bots reach the scorer but lose the top-15 cut.",
+
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/matches",
+        "issue": "MatchRequest.limit (default 15) is NOT propagated to get_ai_compatibility_scores(top_n=15) — server.py:2320 hardcodes top_n=15. The req.limit only governs the FINAL slice at server.py:2423 (matches[:req.limit]), which is downstream of the cap. So limit=200 has zero practical effect; you cannot get more than 15 matches back from /api/matches, and bots are systematically culled by the LLM scorer that prefers real recency-boosted candidates. This is the actual root cause of the iter22 flake and of 3 failing tests in test_real_user_matchmaking.py.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "POST /api/matches",
+        "issue": "MatchRequest model (server.py:2316) has no upper bound on limit and the docstring/default of 15 differs from the 20 mentioned in the review request. Default = 15 not 20."
+      }
+    ]
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+
+  "test_report_links": [
+    "/app/test_reports/pytest/iter25_launch_prep.xml",
+    "/app/test_reports/pytest/iter25_regression.xml",
+    "/app/backend/tests/test_launch_prep_iter22.py",
+    "/app/backend/tests/test_real_user_matchmaking.py"
+  ],
+
+  "action_items": [
+    "FIX THE PRODUCTION CODE, NOT JUST THE TEST. Two viable options: (A) In /app/backend/server.py:2398-2405, pass top_n=req.limit (or max(req.limit, 50)) into get_matches_for_user → get_ai_compatibility_scores so that limit=200 actually produces a large pool. (B) Alternatively, after the AI scorer returns its top 15, inject N bots back into the result list (e.g., shuffle 3-5 bots from the filtered candidate pool into the response so the mixed-pool contract is preserved) — this is what the test really expects.",
+    "Once production code is patched per (A) or (B), test_launch_prep_iter22.py::test_matchmaking_mixed_pool will pass without further test edits — the current test (limit=200, is_bot flag check) is correctly written, it just needs the backend to actually honor limit.",
+    "Same fix also resolves the 3 pre-existing failures in test_real_user_matchmaking.py: test_real_user_appears_in_bobs_feed, test_cache_invalidation_on_new_signup, test_matches_with_no_profile_user_still_ok — all three fail for the identical reason (no bots survive top_n=15).",
+    "Optional: tighten MatchRequest with a Field(ge=1, le=200) bound on limit to make the API contract explicit."
+  ],
+
+  "critical_code_review_comments": [
+    "/app/backend/matchmaking_service.py:2320 — `matches = await get_ai_compatibility_scores(user_profile, filtered_candidates, top_n=15)` hardcodes the cap. The function signature accepts top_n as a parameter but the caller never threads req.limit through. This is the single line that breaks the iter22 test contract.",
+    "/app/backend/server.py:2423 — `matches[:req.limit]` is a no-op when len(matches) is already ≤ req.limit (which it always is, since the upstream cap is 15). Misleading because it looks like limit is honored.",
+    "/app/backend/server.py:2316-2322 — MatchRequest.limit default is 15, not 20 as stated in the review request. No upper bound declared (Pydantic permits any int)."
+  ],
+
+  "updated_files": [],
+
+  "success_rate": {
+    "backend": "iter22 7/8 (87.5%%, same one test still failing) + supabase 13/13 (100%%) + audit_iter20 20/20 (100%%) + iter24_header_optin 7/7 in isolation (100%%) + real_user_matchmaking 3/6 (50%%, 3 pre-existing failures with identical root cause) = 50/54 overall (92.6%%). The target test_matchmaking_mixed_pool is DETERMINISTICALLY failing, not flaky.",
+    "frontend": "not tested (backend-only per request)"
+  },
+
+  "seed_data_creation": "Per-test fresh real users via /api/auth/send-email-otp (OTP mocked, returned in body). Naming: TEST_iter22_userx_{8hex}@example.com / TEST_iter22_usery_{8hex}@example.com.",
+
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+
+  "context_for_next_testing_agent": "The iter25 test edit (limit=200 + is_bot flag) is correctly written but ineffective because /api/matches truncates at top_n=15 INSIDE the LLM compatibility scorer (matchmaking_service.py:2320), upstream of where req.limit is applied (server.py:2423). The candidate pool log confirms '160 real + 35 bots → 42 after filter' — bots reach the scorer but the LLM/fallback ranker prefers recency-boosted real users for the top 15 slots. To make the test pass, the production code must thread req.limit through to get_ai_compatibility_scores top_n, OR bots must be re-injected into the response post-scoring. Once the backend fix lands, do NOT need to touch the test again. The 3 sibling failures in test_real_user_matchmaking.py share this exact root cause and will fix together.",
+
+  "rca_of_issue": "Root cause: hardcoded top_n=15 in matchmaking_service.py:2320. Reproduction (deterministic, 2/2 runs): POST /api/matches with {user_id: <fresh real user>, mode: 'date', force_refresh: True, limit: 200} → response has 11–15 matches, all with is_bot=False. Backend log shows 'candidate pool = 160 real + 35 bots → Filtered down to 42 after applying preferences' confirming bots ARE in the scorer's input. After scoring the top 15 are all real users. Mitigation (production-side fix needed, not test-side): change server.py:2398-2405 to `await get_matches_for_user(..., top_n=req.limit)` and add `top_n: int = 15` param to get_matches_for_user that is passed to get_ai_compatibility_scores. Alternatively, splice ~5 bots from filtered_candidates into the result before returning to guarantee mixed pool."
+}
