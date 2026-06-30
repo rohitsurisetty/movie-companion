@@ -10582,3 +10582,23 @@ agent_communication:
           3. Confirm the red fill bar grows after answering Tina's questions.
           4. testID: "tina-progress-pill" is present in the DOM/UI tree.
           5. Accessibility role is "progressbar" with numeric `now` value.
+      - working: true
+        agent: "testing"
+        comment: |
+          Tested in iteration_29 — PASS on all 7 acceptance criteria via Playwright E2E:
+          - Email OTP login → BasicInfo → PhotoUpload → STEP_TINA_AUTO completed.
+          - Pill is visible IMMEDIATELY ("PROGRESS 0%") before any chat round-trip
+            (seed-on-mount working via GET /api/tina/onboarding-status/{userId}, 200 OK).
+          - data-testid="tina-progress-pill" findable, role="progressbar",
+            aria-label="Signup progress N%" updates dynamically.
+          - After tapping "Casual" chip + Send, pct went 0% → 5% and animated
+            fill's inline width updated to "5%".
+          - Visual: 110px two-row pill with branded #FF6B6B fill, positioned
+            top-right (x=264 on 390px viewport). Clearly visible on dark header.
+          Minor a11y polish: added Platform.OS==='web' branch to also set
+          aria-valuenow/min/max for stricter axe-core progressbar compliance.
+
+metadata:
+  current_test_iteration: 29
+  last_user_message: "I tested this and the progress bar is missing"
+  resolved_in_this_session: ["Tina Signup Progress Bar visibility (TinaChatScreen.tsx)"]

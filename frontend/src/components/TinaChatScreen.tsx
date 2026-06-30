@@ -886,6 +886,16 @@ export default function TinaChatScreen({
             accessibilityRole="progressbar"
             accessibilityValue={{ min: 0, max: 100, now: completionPct }}
             testID="tina-progress-pill"
+            // On RN Web, accessibilityValue doesn't translate into
+            // aria-valuenow/min/max — patch directly so screen-reader-only
+            // audits like axe-core report a fully-compliant progressbar.
+            {...(Platform.OS === 'web'
+              ? ({
+                  'aria-valuenow': completionPct,
+                  'aria-valuemin': 0,
+                  'aria-valuemax': 100,
+                } as any)
+              : {})}
           >
             <View style={styles.progressLabelRow}>
               <Text style={styles.progressLabelText}>Progress</Text>
