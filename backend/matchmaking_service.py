@@ -2309,7 +2309,22 @@ async def get_matches_for_user(
     # first (recency boost) and bots fill in behind them.
     real_users = await get_all_real_users(exclude_user_id=user_id, limit=200)
     bot_users = get_all_mock_users() if use_mock_data else []
-    candidates = real_users + bot_users
+    raw_candidates = real_users + bot_users
+
+    # De-dup by user_id BEFORE we feed the AI scorer. Without this, a single
+    # collision (e.g. a real user that was also seeded as a bot for testing)
+    # bubbles all the way into the frontend as "Encountered two children
+    # with the same key" — React then silently drops the second tile.
+    seen_ids: set = set()
+    candidates: List[Dict] = []
+    for cand in raw_candidates:
+        uid = cand.get("user_id") if isinstance(cand, dict) else None
+        if not uid or uid in seen_ids:
+            continue
+        seen_ids.add(uid)
+        candidates.append(cand)
+    if len(raw_candidates) != len(candidates):
+        print(f"[matchmaking] dropped {len(raw_candidates) - len(candidates)} duplicate user_ids from candidate pool")
     if real_users:
         print(f"[matchmaking] candidate pool = {len(real_users)} real + {len(bot_users)} bots for user {user_id}")
     

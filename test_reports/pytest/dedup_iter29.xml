@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="5" time="42.609" timestamp="2026-06-30T05:13:48.499020+00:00" hostname="agent-env-afbbaeec-dfa2-4c42-a2b1-91b147e5eead"><testcase classname="backend.tests.test_matches_dedup_iter29" name="test_api_root_200" time="0.799" /><testcase classname="backend.tests.test_matches_dedup_iter29" name="test_matches_response_has_unique_user_ids" time="13.536" /><testcase classname="backend.tests.test_matches_dedup_iter29" name="test_matches_default_limit_capped_at_20_and_unique" time="20.007" /><testcase classname="backend.tests.test_matches_dedup_iter29" name="test_induced_duplicate_is_deduped_by_backend" time="0.001"><failure message="Failed: async def functions are not natively supported.&#10;You need to install a suitable plugin for your async framework, for example:&#10;  - anyio&#10;  - pytest-asyncio&#10;  - pytest-tornasync&#10;  - pytest-trio&#10;  - pytest-twisted">async def functions are not natively supported.
+You need to install a suitable plugin for your async framework, for example:
+  - anyio
+  - pytest-asyncio
+  - pytest-tornasync
+  - pytest-trio
+  - pytest-twisted</failure></testcase><testcase classname="backend.tests.test_matches_dedup_iter29" name="test_is_bot_flag_present_after_dedup" time="8.208" /></testsuite></testsuites>

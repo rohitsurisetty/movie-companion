@@ -405,9 +405,35 @@ export default function FeedScreen() {
 
       if (response.ok) {
         const data = await response.json();
-        const matchList = data.matches || [];
+        const rawMatches = data.matches || [];
+
+        // Defensive de-dup: the candidate pool can occasionally return the
+        // same user_id twice (e.g. a user that was both seeded as a mock
+        // friend AND surfaced as a real signup, or a stale cache merging
+        // with a fresh pool). React then throws "Encountered two children
+        // with the same key" and the duplicate tile is silently omitted.
+        // We dedup here so the UI always shows a clean unique list, and
+        // log the collision count so backend regressions are visible.
+        const seen = new Set<string>();
+        const matchList: typeof rawMatches = [];
+        let dupes = 0;
+        for (const m of rawMatches) {
+          const uid = m?.user_id;
+          if (!uid) continue;
+          if (seen.has(uid)) {
+            dupes += 1;
+            continue;
+          }
+          seen.add(uid);
+          matchList.push(m);
+        }
+        if (dupes > 0) {
+          console.warn(
+            `[feed] backend returned ${dupes} duplicate user_id(s) in /matches — deduped client-side`,
+          );
+        }
         setMatches(matchList);
-        
+
         // Determine empty state reason if no matches
         if (matchList.length === 0) {
           setEmptyReason(determineEmptyReason(matchList.length, userProfile));
