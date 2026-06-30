@@ -1,0 +1,70 @@
+{
+  "summary": "Bug 1 fix is INCOMPLETE — the 360° persona quiz STILL triggers for users with is_onboarding_complete=True on a fresh tina_sessions doc. Root cause confirmed by code review AND live API test: at /app/backend/tina_service.py line 941, `p360 = _get_360_state(session)` returns a COPY of the state dict. Then on line 945, `_set_360_state(session, {phase:'complete',...})` mutates the SESSION but the local variable `p360` is left STALE pointing at the original (inactive) dict. The very next branches on lines 964 (`if p360['phase'] == 'inactive':`) and 973 (`if p360['phase'] == 'active':`) check the stale local — so when the session starts in 'inactive' (any user who never started the quiz), the code STILL falls into `_begin_360_quiz(...)` and returns a scripted question. Verified live: turn 1 of a fresh complete user returns show_options.mode='personality_360', question_id='first_night_vibe' and persona_360_phase='active'. Bug 2 (fast=True / gpt-4o-mini swap + frontend cadence constants) is CORRECTLY APPLIED — latency averaged 1.45s over 3 trials (well below the 2.5s target, was previously 3-5s with gpt-4o), the `fast: bool = False` param and `model_name = 'gpt-4o-mini' if fast else 'gpt-4o'` branch are present, the post-onboarding call passes `fast=True`, and TinaCallScreen.tsx has SILENCE=700, MIN_SPEECH=500, METERING=80, PRE_REPLY_PAUSE=0. Regression: test_supabase_audit 13/13 PASS, test_audit_iter20 20/20 PASS, test_real_user_matchmaking 4/6 (2 pre-existing failures from iter25 — top_n=15 matchmaking cap, NOT touched by this fix). A SECOND bug surfaced: when is_onboarding_complete=True and user_message='' (chip-only payload, e.g. `selected_option:'Casual movie buff'`), the code falls through to scripted ONBOARDING (asks 'relationshipIntent') — see line 985: `if actually_complete and user_message:` — empty message skips the free-chat path and lands in the legacy field-collection scripted flow at line 1097+.",
+
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/tina/chat",
+        "issue": "Bug 1 fix INCOMPLETE — 360° quiz still triggers for is_onboarding_complete=True users. Root cause: stale `p360` local variable at /app/backend/tina_service.py:941. The code calls `_set_360_state(session, {'phase':'complete',...})` on lines 945-952 to force completion in-memory, but the local `p360` dict captured on line 941 is NOT re-read. Lines 964 (`if p360['phase'] == 'inactive':`) and 973 (`if p360['phase'] == 'active':`) then check the stale value and call `_begin_360_quiz` or `_handle_360_turn`, returning a scripted quiz question. Live evidence (turn 1 of fresh complete user): response='Okay Alice Test your profile's looking 🔥\\n\\nNow help me understand you better — a quick fun round so I can find you the perfect match 💫\\n\\nIf you matched tonight, what's most likely to happen first?', show_options.mode='personality_360', persona_360_phase='active'.",
+        "priority": "CRITICAL"
+      },
+      {
+        "endpoint": "POST /api/tina/chat",
+        "issue": "Secondary Bug — chip-only payload (message='', selected_option='Casual movie buff', is_onboarding_complete=True) routes into scripted ONBOARDING (field='relationshipIntent', completion_percentage=0) instead of free-chat LLM. Root cause: line 985 `if actually_complete and user_message:` — empty user_message short-circuits the LLM path and falls through to scripted field-collection at line 1097. The review request explicitly required this case to NOT enter quiz/scripted state.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": []
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+
+  "test_report_links": [
+    "/app/backend/tests/test_tina_bug_fixes_iter26.py",
+    "/app/test_reports/pytest/iter26_tina_bugfixes.xml",
+    "/app/test_reports/pytest/iter26_regression.xml"
+  ],
+
+  "action_items": [
+    "FIX /app/backend/tina_service.py lines 940-981. Two safe options:\n  (A) Re-read p360 AFTER forcing complete:\n     ```\n     if actually_complete:\n         _set_360_state(session, {'phase':'complete', 'current_index':8,\n                                  'answers': _get_360_state(session).get('answers', [])})\n         p360 = _get_360_state(session)   # ← RE-READ here\n         ...\n     ```\n  (B) Or simpler — delete the entire `if p360['phase'] == 'inactive':` and `if p360['phase'] == 'active':` branches (lines 964-980) so we ALWAYS fall through to free-chat. The 360 quiz should only run during initial onboarding (is_onboarding_complete=False path), never here.",
+
+    "FIX the empty-message fallthrough at /app/backend/tina_service.py:985. Change `if actually_complete and user_message:` to handle empty message + chip payload by coercing selected_option / selected_options into user_message, OR explicitly return a short LLM greeting when message is empty but actually_complete=True. Current behavior: empty-message complete-user request bypasses the LLM and asks scripted 'relationshipIntent' question (line ~1097+).",
+
+    "Recommend Option B above — the signup TinaChatScreen (per the code comment on line 937-939) already runs the 360 quiz inline during mandatory onboarding, so the post-onboarding path should NEVER run quiz handlers. Removing those two branches is safer than keeping the in-memory force + re-read pattern.",
+
+    "Retest by re-running /app/backend/tests/test_tina_bug_fixes_iter26.py — should go from 6/9 → 9/9 once both fixes land. test_05/06/07 already PASS (Bug 2 verified)."
+  ],
+
+  "critical_code_review_comments": [
+    "/app/backend/tina_service.py:941 — `p360 = _get_360_state(session)` returns a COPY. The subsequent `_set_360_state(session, {...'complete'...})` does NOT mutate the local `p360`. Lines 964/973 read the STALE local variable. This is the literal root cause of Bug 1.",
+    "/app/backend/tina_service.py:964-980 — Both `_begin_360_quiz` and `_handle_360_turn` are still callable from the post-onboarding branch. The fix description says these are 'never called', but the code clearly calls them when the stale local says inactive/active. The branches should be removed entirely.",
+    "/app/backend/tina_service.py:985 — `if actually_complete and user_message:` causes empty-message chip payloads to skip the post-onboarding LLM block and fall through to scripted onboarding field collection. The review request's test case (`{message:'', selected_option:'Casual movie buff', is_onboarding_complete:true}`) hits this hole.",
+    "/app/backend/tina_service.py:322 — get_llm_response signature correctly accepts `fast: bool = False`. ✓",
+    "/app/backend/tina_service.py:360 — `model_name = 'gpt-4o-mini' if fast else 'gpt-4o'`. ✓",
+    "/app/backend/tina_service.py:1078-1082 — `get_llm_response(..., user_name, fast=True)` correctly passed for post-onboarding. ✓",
+    "/app/frontend/src/components/TinaCallScreen.tsx:31-35 — SILENCE=700, MIN_SPEECH=500, METERING=80, PRE_REPLY_PAUSE=0. All four tightened correctly. ✓"
+  ],
+
+  "updated_files": [
+    "/app/backend/tests/test_tina_bug_fixes_iter26.py (NEW test file)"
+  ],
+
+  "success_rate": {
+    "backend": "iter26 Tina bug-fix suite: 6/9 PASS (66.7%) — Bug 2 fully verified (test_05 fast flag, test_06 frontend cadence, test_07 latency 1.45s avg < 2.5s target), regression onboarding still scripted (test_08), sanity (test_backend_root), and test_03 (third LLM turn after quiz had auto-advanced) all PASS. Bug 1 tests test_01/02/04 FAIL — quiz still triggers. Wider regression: test_supabase_audit 13/13 PASS, test_audit_iter20 20/20 PASS, test_real_user_matchmaking 4/6 (2 pre-existing matchmaking failures unrelated to Tina). Total: 44/49 (89.8%) across full suite.",
+    "frontend": "not tested (backend-only per request)"
+  },
+
+  "seed_data_creation": "Single fresh test user per module run via /api/auth/send-email-otp + /api/auth/verify-otp ({type:'email', identifier, otp, name}). Mongo upsert of full user_profiles doc + DELETE tina_sessions to guarantee no pre-seeded 360 state. Cleanup on teardown.",
+
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+
+  "context_for_next_testing_agent": "Bug 1 root cause is unambiguous and reproduces 100% of the time on a fresh user. Once main agent re-reads p360 after _set_360_state (Option A) OR removes the inactive/active quiz branches (Option B, recommended), re-running test_tina_bug_fixes_iter26.py should go to 9/9. Also fix the empty-message fallthrough at line 985 — recommend coercing selected_option/selected_options into user_message at the top of `if actually_complete:` block, BEFORE the existing fall-through guards, so any chip arrival is treated as plain text. Do NOT touch the onboarding-incomplete path (line 1097+) — test_08 confirms it still works correctly for is_onboarding_complete=False users. The 2 pre-existing failures in test_real_user_matchmaking.py are unrelated (top_n=15 cap from iter25) and can be ignored for this iteration.",
+
+  "rca_of_issue": "Bug 1: /app/backend/tina_service.py:941 captures `p360 = _get_360_state(session)` (a new dict). Lines 945-952 call `_set_360_state(session, {'phase':'complete', ...})` which mutates `session['personality_360']` but NOT the local `p360`. Lines 964 and 973 then evaluate `p360['phase']` against the STALE value. For a brand-new user (no prior personality_360 in session), `p360['phase'] == 'inactive'` is True → `_begin_360_quiz(session, result, user_name)` is called → result['show_options'] is set to the personality_360 chips → user sees the SAME scripted question Tina has always shown post-signup. Reproduction: POST /api/tina/chat {user_id:<fresh user>, message:'hello', is_onboarding_complete:true} → response.show_options.mode='personality_360', persona_360_phase='active'. Fix (recommended Option B): delete lines 964-980 entirely. The signup TinaChatScreen already runs the 360 quiz during mandatory onboarding (per the inline code comment), so the post-onboarding /api/tina/chat path must NEVER invoke quiz handlers. Fix Option A (minimal change): insert `p360 = _get_360_state(session)` immediately after line 952 to refresh the local variable. Secondary bug (empty-message fallthrough at line 985): `if actually_complete and user_message:` skips the LLM branch on empty messages, dropping the request into the scripted onboarding fall-through at line 1097+. Reproduction: POST {message:'', selected_option:'Casual movie buff', is_onboarding_complete:true} → response.show_options.field='relationshipIntent', completion_percentage=0. Fix: coerce `selected_option` / `selected_options` into `user_message` at the top of the `if actually_complete:` block."
+}

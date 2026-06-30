@@ -24,14 +24,15 @@ const API_BASE =
   process.env.EXPO_PUBLIC_BACKEND_URL || process.env.EXPO_PUBLIC_API_URL || '';
 
 // VAD tunables – `metering` is in dBFS (-160 = silence, 0 = peak).
-// Tuned for natural conversation cadence — user asked for the gaps to feel
-// faster while still NOT cutting off mid-sentence.
+// Tuned for ZERO perceived gap — user explicitly asked for "immediately
+// it should answer". We can't avoid the Whisper + GPT + TTS round-trip
+// latency (~1-2s combined) but every other delay is now stripped out.
 const SILENCE_THRESHOLD = -42; // dBFS – tighter than -45 to ignore room hum
-const SILENCE_DURATION_MS = 1000; // ~1.0s trailing silence required to end a turn (was 1500)
-const MIN_SPEECH_DURATION_MS = 700; // require ~0.7s of speech before we'll end (was 800)
+const SILENCE_DURATION_MS = 700; // ~0.7s trailing silence required to end a turn (was 1000)
+const MIN_SPEECH_DURATION_MS = 500; // require ~0.5s of speech before we'll end (was 700)
 const MAX_TURN_DURATION_MS = 20000; // hard cap per turn
-const METERING_INTERVAL_MS = 100; // poll cadence (10 samples/sec, was 120)
-const PRE_REPLY_PAUSE_MS = 350; // small human-feel pause before Tina speaks (was 900)
+const METERING_INTERVAL_MS = 80; // poll faster — 12.5 samples/sec (was 100)
+const PRE_REPLY_PAUSE_MS = 0; // ZERO pause — start TTS the instant LLM response arrives (was 350)
 
 type CallStatus =
   | 'connecting'

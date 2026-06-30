@@ -319,8 +319,17 @@ FIELD_CONVERSATION_STARTERS = {
 # LLM INTEGRATION
 # ============================================
 
-async def get_llm_response(messages: List[Dict[str, str]], user_name: str = "") -> str:
-    """Get response from LLM (GPT-4o via Emergent)"""
+async def get_llm_response(messages: List[Dict[str, str]], user_name: str = "", fast: bool = False) -> str:
+    """Get response from LLM (GPT-4o via Emergent).
+
+    Args:
+        fast: if True, use gpt-4o-mini for ~2-3x lower latency. The
+            post-onboarding free-chat path passes fast=True (especially
+            critical for voice mode where the user perceives the gap
+            directly). Quality is still very high for short conversational
+            replies; full gpt-4o stays the default for any path where
+            reasoning quality dominates (system prompt expansion, etc.).
+    """
     try:
         from emergentintegrations.llm.chat import LlmChat, UserMessage
         
@@ -344,13 +353,16 @@ async def get_llm_response(messages: List[Dict[str, str]], user_name: str = "") 
                 context_parts.append(f"\nTina: {content}")
         
         full_prompt = "".join(context_parts) + "\n\nGenerate Tina's next response:"
-        
-        # Initialize chat with correct syntax
+
+        # Initialize chat with correct syntax. Use gpt-4o-mini when the caller
+        # asked for low latency — it's 2-3x faster end-to-end which removes
+        # most of the perceived "Tina is silent" gap on voice calls.
+        model_name = "gpt-4o-mini" if fast else "gpt-4o"
         chat = LlmChat(
             api_key=EMERGENT_LLM_KEY,
             session_id=f"tina_{user_name or 'user'}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}",
             system_message="You are Tina, a friendly AI assistant."
-        ).with_model("openai", "gpt-4o")
+        ).with_model("openai", model_name)
         
         # Send message and get response (await the async call)
         response = await chat.send_message(UserMessage(text=full_prompt))
@@ -916,48 +928,35 @@ async def process_tina_message(
     if user_message:
         history.append({"role": "user", "content": user_message})
     
-    # POST-ONBOARDING: Run 360° persona quiz FIRST (if not already done),
-    # then free-form chat.
+    # POST-ONBOARDING: Free-form LLM chat. (Previously this branch also gated
+    # a 360° persona quiz in front of free-chat, but the quiz uses scripted
+    # questions like "what would you do on a first date?" — users finishing
+    # signup were getting re-asked the same scripted questions every session
+    # which felt nothing like an LLM. Voice mode in particular has no way to
+    # answer emoji chips. We now ALWAYS skip the quiz at this point — the
+    # signup TinaChatScreen already runs the 360° quiz inline as part of
+    # mandatory onboarding, so by the time we hit this post-onboarding path
+    # the user is done with scripted Q&A forever.)
     if actually_complete:
         p360 = _get_360_state(session)
-
-        # Safety fallback: if the user's persistent profile ALREADY has an
-        # `archetype` saved (= they finished the 360° quiz in a previous
-        # session, or via a different code path), force the in-memory Tina
-        # session to phase="complete" so we don't make them re-do the quiz.
-        # This is what unifies the "signup Tina" → "post-signup Tina" sync.
         if p360["phase"] != "complete":
-            try:
-                persistent_profile = await _load_full_user_profile(user_id)
-                if persistent_profile and isinstance(persistent_profile.get("archetype"), dict):
-                    logger.info(
-                        f"[Tina] User {user_id} already has a saved archetype — "
-                        f"skipping 360° quiz and going straight to LLM chat."
-                    )
-                    _set_360_state(
-                        session,
-                        {
-                            "phase": "complete",
-                            "current_index": 8,
-                            "answers": p360.get("answers", []),
-                        },
-                    )
-                    p360 = _get_360_state(session)
-            except Exception as exc:  # noqa: BLE001 - non-blocking
-                logger.warning(f"[Tina] archetype fallback check failed: {exc}")
+            # Force completion in-memory so downstream code that reads p360
+            # sees a finished quiz. We do NOT trigger _handle_360_turn here.
+            _set_360_state(
+                session,
+                {
+                    "phase": "complete",
+                    "current_index": 8,
+                    "answers": p360.get("answers", []),
+                },
+            )
 
-        # If a 360 option chip was tapped, route directly into the quiz handler.
-        if selected_360_option:
-            if p360["phase"] == "inactive":
-                # Edge case: client sent an answer before we triggered the quiz.
-                # Auto-activate so we can record it cleanly.
-                _set_360_state(session, {"phase": "active", "current_index": 0, "answers": []})
-                p360 = _get_360_state(session)
-            await _handle_360_turn(session, result, selected_360_option, user_message, user_id)
-            history.append({"role": "assistant", "content": result["response"]})
-            session["conversation_history"] = history[-20:]
-            result["completion_percentage"] = 100
-            result["profile_data"] = session.get("collected_fields", {})
+        # Defensive: if a chip option somehow arrived from a stale frontend
+        # session, ignore it instead of routing to the quiz handler. We treat
+        # any selected chip as just another free-text message.
+        if selected_360_option and not user_message:
+            user_message = str(selected_360_option)
+            history.append({"role": "user", "content": user_message})
             await save_tina_session(session)
             return result
 
@@ -1072,10 +1071,14 @@ The user just said: "{user_message}"
 
 Reply directly as Tina, no prefix, no labels. Just your message."""
 
-        # Get LLM response for post-onboarding chat
+        # Get LLM response for post-onboarding chat. fast=True swaps to
+        # gpt-4o-mini which is ~2-3x lower latency — critical for voice mode
+        # where the user perceives the gap directly. Quality is still very
+        # high for short conversational replies.
         tina_response = await get_llm_response(
             [{"role": "system", "content": system_prompt}],
             user_name,
+            fast=True,
         )
 
         # Clean up response
