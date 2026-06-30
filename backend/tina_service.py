@@ -953,15 +953,36 @@ async def process_tina_message(
                 },
             )
 
-        # If a chip option came in (stale frontend session), coerce it into
-        # the user_message so the LLM treats it as plain text. Without this,
-        # an empty-message chip payload would silently fall through to the
-        # SCRIPTED onboarding flow below (relationshipIntent etc.) — exactly
-        # the bug we're fixing.
-        if selected_360_option:
-            if not user_message:
-                user_message = str(selected_360_option)
-            history.append({"role": "user", "content": user_message})
+        # If a chip option came in (stale frontend session OR signup-flow
+        # frontend incorrectly hitting this endpoint), coerce ANY chip
+        # variant into the user_message so the LLM treats it as plain text.
+        # Without this, an empty-message chip payload would silently fall
+        # through to the SCRIPTED onboarding flow below (relationshipIntent
+        # etc.) — exactly the bug we're fixing. We handle three variants:
+        #   • selected_360_option (dict with question_id/option_key/label)
+        #   • selected_option      (single string chip)
+        #   • selected_options     (list of string chips)
+        if not user_message:
+            chip_text = ""
+            if isinstance(selected_360_option, dict):
+                chip_text = (
+                    selected_360_option.get("label")
+                    or selected_360_option.get("option_key")
+                    or ""
+                )
+            elif selected_360_option:
+                chip_text = str(selected_360_option)
+            if not chip_text and selected_option:
+                chip_text = str(selected_option)
+            if not chip_text and selected_options:
+                # Multi-select chips — join as a natural-language phrase
+                chip_text = ", ".join(str(o) for o in selected_options if o)
+            if chip_text:
+                user_message = chip_text
+        if (selected_360_option or selected_option or selected_options) and user_message:
+            # Make sure the history reflects the user's chosen input
+            if not history or history[-1].get("content") != user_message:
+                history.append({"role": "user", "content": user_message})
 
         # CRITICAL: We DO NOT invoke _begin_360_quiz or _handle_360_turn from
         # this branch under ANY circumstances. The previous version checked

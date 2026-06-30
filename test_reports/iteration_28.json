@@ -1,0 +1,41 @@
+{
+  "summary": "Final verification of Bug 1 (chip coercion in /api/tina/chat for post-onboarding users) PASSED across ALL three chip variants. Re-ran iter26 Tina bug-fix suite — 9/9 PASS (test_04 chip-only payload now passes; previously failed in iter26/27). Added a new strict iter28 chip-variants suite — 4/4 PASS verifying (a) selected_option string, (b) selected_options list, (c) selected_360_option dict. All three variants coerce into user_message and route to free-form LLM (NO show_options, NO persona_360_phase=='active', NO archetype_reveal). test_03 ('tell me about yourself') is now STRICTLY clean of structured quiz markers. Regression: test_supabase_audit + test_audit_iter20 → 33/33 GREEN. No deprecated Expo packages were inspected this round (backend-only task per request).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/user/profile", "issue": "Returns 422 for the payload used in test_tina_bug_fixes_iter26 _signup_fresh_user(). Non-blocking because the fixture upserts via direct MongoDB write as belt-and-suspenders, so tests still pass. May want to align the test payload's relationshipIntent/topMovies shape with the Pydantic model."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_tina_bug_fixes_iter26.py",
+    "/app/backend/tests/test_tina_chip_variants_iter28.py",
+    "/app/backend/tests/test_supabase_audit.py",
+    "/app/backend/tests/test_audit_iter20.py",
+    "/app/test_reports/pytest/iter28_tina_bugfixes.xml",
+    "/app/test_reports/pytest/iter28_tina_chip_variants.xml",
+    "/app/test_reports/pytest/iter28_regression.xml"
+  ],
+  "action_items": [
+    "Bug 1 is FULLY RESOLVED. No further action required for chip coercion / post-onboarding routing.",
+    "Optional cleanup: align /api/user/profile payload validation so that fixture POST doesn't return 422 (cosmetic — fixture works via direct mongo upsert)."
+  ],
+  "critical_code_review_comments": [
+    "tina_service.py lines 965-985 — chip coercion logic is correct and idempotent across all three variants (selected_360_option dict, selected_option str, selected_options list). The coercion runs BEFORE the empty-message LLM gate, which is the correct location.",
+    "tina_service.py lines 987-994 — the explanatory comment clearly documents that _begin_360_quiz / _handle_360_turn are NEVER invoked on the actually_complete branch. Stale-p360 routing is properly removed."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_tina_chip_variants_iter28.py (NEW — strict variant verification)"
+  ],
+  "success_rate": {"backend": "100% (46/46 tests across all 3 suites)", "frontend": "not tested (backend-only request)"},
+  "seed_data_creation": "Created two fresh TEST_iter28_* users via OTP signup; cleaned up after suite via fixture teardown (user_profiles + tina_sessions delete_many).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Bug 1 (chip coercion → free-form LLM) is fully fixed and verified across all 3 chip variants. The iter26 suite test_04 now passes consistently. iter28 chip-variants suite at /app/backend/tests/test_tina_chip_variants_iter28.py exercises all three chip shapes with empty `message` and STRICT structural assertions (no show_options, no persona_360_phase=='active', no archetype_reveal). Reuse as regression. /api/user/profile returning 422 on the iter26 fixture payload is non-blocking (mongo fallback works) but worth tightening for hygiene.",
+  "rca_of_issue": "Root cause was that the post-onboarding branch in tina_service.py treated chip payloads with empty `message` as 'no user input' and fell through to scripted onboarding/360 quiz branches. Fix coerces ALL three chip variants (selected_360_option dict → label/option_key; selected_option str → str; selected_options list → comma-join) into user_message BEFORE the empty-message gate, AND the stale-p360 quiz dispatch (inactive/active branches) is deleted, so actually_complete users can NEVER be routed into scripted Q&A. Verified by 9/9 iter26 tests + 4/4 iter28 chip-variant tests + 33/33 regression."
+}
