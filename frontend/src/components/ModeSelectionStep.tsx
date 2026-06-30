@@ -16,7 +16,7 @@ export default function ModeSelectionStep({ data, onUpdate, onNext }: Props) {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Choose Your Mode</Text>
-      <Text style={styles.subtitle}>How do you want to use Film Companion?</Text>
+      <Text style={styles.subtitle}>How do you want to use filmydating?</Text>
 
       {/* Movie Buddy Mode */}
       <View style={[styles.modeCard, data.movieBuddyMode && styles.modeCardActive]}>

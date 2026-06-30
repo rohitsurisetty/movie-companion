@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, Modal, TextInput,
   ActivityIndicator, Platform, Alert, Dimensions,
-  ScrollView, KeyboardAvoidingView,
+  ScrollView, KeyboardAvoidingView, Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -327,10 +327,15 @@ export default function AuthScreen() {
       <SafeAreaView style={styles.container} testID="auth-screen">
         <View style={styles.content}>
           <View style={styles.header}>
-            <View style={styles.iconRow}>
-              <Ionicons name="film-outline" size={40} color={COLORS.primary} />
-            </View>
-            <Text style={styles.title}>Film Companion</Text>
+            {/* Brand logo — already contains the "filmydating" wordmark, so we
+                drop the separate <Text title> below it. Source: assets/images/icon.png
+                (the same artwork used for the Android/iOS launcher icon). */}
+            <Image
+              source={require('../assets/images/icon.png')}
+              style={styles.brandLogo}
+              resizeMode="contain"
+              accessibilityLabel="filmydating logo"
+            />
             <View style={styles.divider} />
             <Text style={styles.subtitle}>
               World&apos;s first AI-based matchmaking platform for Movie Lovers
@@ -672,6 +677,14 @@ const styles = StyleSheet.create({
   },
   iconRow: {
     marginBottom: SPACING.m,
+  },
+  // Brand logo on the auth screen — the artwork already includes the
+  // "filmydating" wordmark, so we render it large and standalone (replaces
+  // the old film-icon + text-title combo).
+  brandLogo: {
+    width: 220,
+    height: 220,
+    marginBottom: SPACING.s,
   },
   title: {
     fontSize: 36,

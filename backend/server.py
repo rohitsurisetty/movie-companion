@@ -424,7 +424,7 @@ class FiltersRequest(BaseModel):
 
 @api_router.get("/")
 async def root():
-    return {"message": "Film Companion API"}
+    return {"message": "filmydating API"}
 
 
 # ============================================================================
@@ -509,7 +509,7 @@ PROTOTYPE_V1_PATH = "/app/Film_Companion_Prototype_V1.html"
 
 @api_router.get("/prototype/v1")
 async def serve_prototype_v1():
-    """Serve the Film Companion V1 prototype HTML inline (opens in browser)."""
+    """Serve the filmydating V1 prototype HTML inline (opens in browser)."""
     if not os.path.exists(PROTOTYPE_V1_PATH):
         raise HTTPException(status_code=404, detail="Prototype not found")
     return FileResponse(PROTOTYPE_V1_PATH, media_type="text/html")
@@ -517,7 +517,7 @@ async def serve_prototype_v1():
 
 @api_router.get("/prototype/v1/download")
 async def download_prototype_v1():
-    """Force-download the Film Companion V1 prototype HTML."""
+    """Force-download the filmydating V1 prototype HTML."""
     if not os.path.exists(PROTOTYPE_V1_PATH):
         raise HTTPException(status_code=404, detail="Prototype not found")
     return FileResponse(
@@ -605,18 +605,18 @@ def send_mock_welcome_email(email: str, name: str):
     ================================================================================
     From: noreply@filmcompanion.com
     To: {email}
-    Subject: Welcome to Film Companion! 🎬
+    Subject: Welcome to filmydating! 🎬
     
     Hi {name}!
     
-    Welcome to Film Companion - where movie lovers find their film soulmates!
+    Welcome to filmydating - where movie lovers find their film soulmates!
     
     Start swiping on movies you love (or skip the ones you don't) and we'll help 
     you connect with people who share your taste in cinema.
     
     Happy watching!
     
-    - The Film Companion Team
+    - The filmydating Team
     ================================================================================
     """)
 
@@ -869,7 +869,7 @@ async def forgot_password(req: ForgotPasswordRequest):
     ================================================================================
     From: noreply@filmcompanion.com
     To: {email}
-    Subject: Reset your Film Companion Password
+    Subject: Reset your filmydating Password
     
     Hi there!
     
@@ -879,7 +879,7 @@ async def forgot_password(req: ForgotPasswordRequest):
     
     If you didn't request this, please ignore this email.
     
-    - The Film Companion Team
+    - The filmydating Team
     ================================================================================
     """)
     

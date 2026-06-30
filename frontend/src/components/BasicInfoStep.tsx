@@ -219,7 +219,7 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
       <View style={styles.centerContent}>
         <Ionicons name="sad-outline" size={64} color={COLORS.primary} />
         <Text style={styles.underAgeTitle}>Age Verification Failed</Text>
-        <Text style={styles.underAgeText}>You must be at least 18 years old to use Film Companion.</Text>
+        <Text style={styles.underAgeText}>You must be at least 18 years old to use filmydating.</Text>
         <TouchableOpacity 
           style={styles.retryButton}
           onPress={() => {

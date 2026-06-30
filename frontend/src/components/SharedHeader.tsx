@@ -1,6 +1,6 @@
 import React from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity,
+  View, Text, StyleSheet, TouchableOpacity, Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppStore, AppMode, getAuth } from '../store';
@@ -38,7 +38,7 @@ export const getThemeColors = (_mode?: AppMode): ThemeColors => {
     border: '#333333',
     gold: '#FFD700',
     modeIcon: 'film-outline',
-    modeName: 'Film Companion',
+    modeName: 'filmydating',
   };
 };
 
@@ -65,9 +65,14 @@ export function SharedHeader({
 
   return (
     <View style={[headerStyles.header, { borderBottomColor: colors.border }]}>
-      {/* Brand mark on the left – no longer a mode selector */}
+      {/* Brand mark on the left – uses the filmydating logo artwork */}
       <View style={headerStyles.brandMark}>
-        <Ionicons name="film-outline" size={22} color={colors.primary} />
+        <Image
+          source={require('../../assets/images/icon.png')}
+          style={headerStyles.brandLogoImg}
+          resizeMode="contain"
+          accessibilityLabel="filmydating logo"
+        />
       </View>
       <View style={headerStyles.headerCenter}>
         <Text style={[headerStyles.headerTitle, { color: colors.text }]}>
@@ -136,6 +141,11 @@ const headerStyles = StyleSheet.create({
     height: 40,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  // Brand logo image inside the header brandMark slot
+  brandLogoImg: {
+    width: 32,
+    height: 32,
   },
   headerCenter: {
     flexDirection: 'row',

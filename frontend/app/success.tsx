@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Dimensions } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Dimensions, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -65,7 +65,15 @@ export default function SuccessScreen() {
       <View style={styles.contentContainer}>
         <Animated.View style={[styles.centerContent, contentStyle]}>
           <View style={styles.iconGlow}>
-            <Ionicons name="film-outline" size={64} color={COLORS.gold} />
+            {/* Brand logo replaces the generic film-outline icon. The logo
+                already contains the "filmydating" wordmark, so this also acts
+                as visual confirmation that signup completed for the right app. */}
+            <Image
+              source={require('../assets/images/icon.png')}
+              style={styles.successLogo}
+              resizeMode="contain"
+              accessibilityLabel="filmydating logo"
+            />
           </View>
         </Animated.View>
 
@@ -78,7 +86,7 @@ export default function SuccessScreen() {
         <Animated.View style={[styles.buttonContainer, buttonStyle]}>
           <TouchableOpacity style={styles.enterBtn} testID="enter-app-btn" activeOpacity={0.8} onPress={() => router.replace('/(tabs)/feed')}>
             <Ionicons name="play" size={20} color={COLORS.white} />
-            <Text style={styles.enterBtnText}>Enter Film Companion</Text>
+            <Text style={styles.enterBtnText}>Enter filmydating</Text>
           </TouchableOpacity>
         </Animated.View>
       </View>
@@ -129,6 +137,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 2,
     borderColor: 'rgba(255,215,0,0.2)',
+    overflow: 'hidden',
+  },
+  // Logo art inside the glow circle on the success/welcome screen
+  successLogo: {
+    width: 96,
+    height: 96,
   },
   titleContainer: {
     alignItems: 'center',
