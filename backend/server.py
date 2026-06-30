@@ -2847,17 +2847,19 @@ async def api_meeting_report(req: MeetingReportRequest):
 async def api_get_conversations(user_id: str):
     """Get all active conversations for a user.
 
-    Side effect: ensures the demo Anjali/Priya unmatched conversations exist
-    for this user so they can test the post-unmatch flow directly from the
-    main Chat tab (not just the History tab). The seed function is
-    idempotent and skips if already done.
+    Note: previously this endpoint auto-seeded Anjali/Priya unmatched bot
+    conversations on every call — convenient during dev but it polluted
+    every real user's inbox the moment they opened the Chat tab.
+    Auto-seeding is now gated behind DEV_SEED_MOCK_UNMATCHED=1 (same flag
+    used by /user/match-history). Production users see ONLY real
+    conversations + accepted bot requests.
     """
     try:
-        # Best-effort seed; never block conversation fetch if seeding fails
-        try:
-            await seed_unmatched_for_user(db, user_id)
-        except Exception as seed_err:
-            logger.warning(f"Auto-seed unmatched mocks failed for {user_id}: {seed_err}")
+        if os.getenv("DEV_SEED_MOCK_UNMATCHED", "0") == "1":
+            try:
+                await seed_unmatched_for_user(db, user_id)
+            except Exception as seed_err:
+                logger.warning(f"Auto-seed unmatched mocks failed for {user_id}: {seed_err}")
 
         conversations = await get_conversations(user_id)
         return {"success": True, "conversations": conversations}

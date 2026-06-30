@@ -1,0 +1,52 @@
+{
+  "summary": "P0 from iter22 VERIFIED FIXED. /api/chat/conversations/{user_id} is now correctly gated behind DEV_SEED_MOCK_UNMATCHED=1 at server.py:2858-2862. test_chat_conversations_empty_for_new_user (was FAIL in iter22) is now PASS. All 8 launch-prep tests in test_launch_prep_iter22.py PASS (8/8 GREEN). Backend log inspection after a fresh /api/chat/conversations call shows ZERO 'Seeded unmatched conversation' / 'Upserted mock user Anjali/Priya' lines — confirming no production-side seeding. Bi-directional gate verified: unset env => 0 convos (production); export DEV_SEED_MOCK_UNMATCHED=1 + restart => 2 convos seeded (dev/QA path still works). Phase 3 auto-reply gating still works (real-to-real no auto-reply, real-to-bot fires — both PASS in launch-prep suite). Regression suite (test_supabase_audit + test_audit_iter20 + test_real_user_matchmaking) — 35/40 PASS. 5 failures: 1 is the known-flaky test_real_user_appears_in_bobs_feed (organic real-user pool now ~134, Alice falls outside top-15 cut — same as iter22), and 4 cascading failures in TestMatchFlowPersistence (test_b_init_mock_then_accept_NEW_HOOK and its 3 dependants test_c_decline, test_f_delete, test_g_meeting_report) are TEST BUGS — these tests were implicitly relying on the iter22 P0 bug (/chat/conversations auto-seeding Anjali/Priya) to populate mock conversations, because /chat/init-mock has its own DEV_SEED_MOCK_CHATS gate that ALSO blocks seeding in production. Now that the iter22 bug is correctly fixed, neither endpoint seeds for that test_user, so /chat/conversations returns [] and the chain unwinds. NOT a production regression — only the test needs updating to set DEV_SEED_MOCK_CHATS=1 (or DEV_SEED_MOCK_UNMATCHED=1) before calling init-mock.",
+
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "GET /api/chat/conversations/{user_id}",
+        "issue": "Carry-over from iter22: test_audit_iter20.py::TestMatchFlowPersistence::test_b_init_mock_then_accept_NEW_HOOK (and cascading test_c/f/g) implicitly relied on the now-fixed /chat/conversations auto-seed bug. Test needs to either (a) export DEV_SEED_MOCK_CHATS=1 / DEV_SEED_MOCK_UNMATCHED=1 in the test fixture before calling /chat/init-mock + /chat/conversations, or (b) create a real conversation via /chat/send-message instead of relying on mock seeding. NOT a production bug."
+      }
+    ]
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+
+  "test_report_links": [
+    "/app/backend/tests/test_launch_prep_iter22.py",
+    "/app/test_reports/pytest/iter23_launch_prep.xml",
+    "/app/test_reports/pytest/iter23_regression.xml"
+  ],
+
+  "action_items": [
+    "OPTIONAL (test-only, no prod impact): Update /app/backend/tests/test_audit_iter20.py::TestMatchFlowPersistence — class fixture should set os.environ['DEV_SEED_MOCK_CHATS']='1' (or DEV_SEED_MOCK_UNMATCHED='1') before invoking /chat/init-mock so test_b/c/f/g get the 2 seeded Anjali/Priya conversations they expect. Alternatively, replace mock-conversation dependency with a real /chat/send-message between two TEST_ users.",
+    "OPTIONAL: test_real_user_appears_in_bobs_feed still flaky (organic 134-user pool, Alice ranks outside top 15). Either raise candidate cap in test or scope assertion to 'Alice in candidates list when limit raised'."
+  ],
+
+  "critical_code_review_comments": [
+    "server.py:2856-2868 — gate now correctly applied. Identical pattern to /user/match-history (line 3186-3192) and /chat/init-mock (line 3158). Production users land on Chat tab with empty inbox (no Anjali/Priya pollution).",
+    "All three seed sites (/chat/init-mock, /user/match-history, /chat/conversations) are now consistent: gated, with try/except around the seed call so a seed failure does not crash the user request."
+  ],
+
+  "updated_files": [],
+
+  "success_rate": {
+    "backend": "8/8 (100%) launch-prep + 35/40 (87.5%) regression — 4 cascading test-only failures (not prod) + 1 flaky pool-rank test",
+    "frontend": "not tested this iteration (backend-only review per request)"
+  },
+
+  "seed_data_creation": "Per-test fresh real users via /auth/send-email-otp + /auth/verify-otp + /user/profile (TEST_iter22_* prefixed, uuid-suffixed). Brief env flip DEV_SEED_MOCK_UNMATCHED=1 to verify both gate directions; reverted before finishing.",
+
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+
+  "context_for_next_testing_agent": "P0 from iter22 is closed — /chat/conversations seed gating verified. Only outstanding items are test-only: (a) 4 tests in test_audit_iter20.py TestMatchFlowPersistence depend on the old bug's behavior — needs env flag in fixture, and (b) test_real_user_matchmaking::test_real_user_appears_in_bobs_feed is flaky due to organic pool growth. Phase 3 auto-reply gating, /chat/init-mock gating, /user/match-history gating, /chat/conversations gating ALL confirmed identically gated. Backend on 8001 healthy after env-flip restart cycle.",
+
+  "rca_of_issue": "Root cause confirmed fixed at /app/backend/server.py:2858. Repro for verification: GET /api/chat/conversations/test_fresh_user_xxx → returns {'success': true, 'conversations': []} with NO seed log lines. With DEV_SEED_MOCK_UNMATCHED=1 + supervisor restart, same call returns 2 seeded conversations. Cascading test_audit_iter20 failures explained: /chat/init-mock has been gated since iter22 (DEV_SEED_MOCK_CHATS=1 required), so the only path that ever populated mock convos for those tests was the now-fixed /chat/conversations side-effect. The 4 test failures are EXPECTED side-effect of correctly fixing the P0 — they reveal that the test fixture was depending on the bug. Mitigation: update test fixture to export the env var(s)."
+}
