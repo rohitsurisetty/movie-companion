@@ -2609,7 +2609,27 @@ async def upload_pictures_batch(req: PicturesUpdateRequest):
         
         if not success:
             raise HTTPException(status_code=500, detail="Failed to save pictures to database")
-        
+
+        # Audit: log every picture in the batch (one row each in user_pictures
+        # table — previously the batch endpoint silently skipped audit, only
+        # the single-image endpoint logged events).
+        try:
+            for key, url in picture_urls.items():
+                try:
+                    picture_number = int(key.split("_")[1])
+                except Exception:
+                    continue
+                await supabase.log_picture_event(
+                    user_id=req.user_id,
+                    picture_number=picture_number,
+                    action="upload",
+                    picture_url=url,
+                    source="supabase_storage",
+                    session_id=req.session_id,
+                )
+        except Exception as audit_err:
+            logger.warning(f"[audit] batch picture log failed: {audit_err}")
+
         logger.info(f"Uploaded {len(picture_urls)} pictures for user {req.user_id}")
         
         return {
@@ -2772,7 +2792,7 @@ async def api_meeting_report(req: MeetingReportRequest):
         
         # Store in MongoDB
         await db.meeting_reports.insert_one(report)
-        
+
         # Update conversation with meeting status if they met
         if req.did_meet:
             await db.chat_conversations.update_one(
@@ -2782,7 +2802,22 @@ async def api_meeting_report(req: MeetingReportRequest):
                     "verification_status": req.verification_result
                 }}
             )
-        
+
+        # Audit: meeting reported (reuses match_events table)
+        try:
+            await supabase.log_match_event(
+                user_id=req.user_id,
+                event_type="meeting_reported",
+                source="chat",
+                payload={
+                    "conversation_id": req.conversation_id,
+                    "did_meet": req.did_meet,
+                    "verification_result": req.verification_result,
+                },
+            )
+        except Exception as audit_err:
+            logger.warning(f"[audit] meeting report log failed: {audit_err}")
+
         logger.info(f"Meeting report saved for conversation {req.conversation_id}")
         return {"success": True}
     except Exception as e:
@@ -2941,6 +2976,16 @@ async def api_accept_request(req: AcceptDeclineRequest):
     """Accept a message request"""
     try:
         success = await accept_message_request(req.user_id, req.conversation_id)
+        # Audit: chat request accepted (reuses match_events table)
+        try:
+            await supabase.log_match_event(
+                user_id=req.user_id,
+                event_type="request_accepted",
+                source="chat",
+                payload={"conversation_id": req.conversation_id},
+            )
+        except Exception as audit_err:
+            logger.warning(f"[audit] accept request log failed: {audit_err}")
         return {"success": success}
     except Exception as e:
         logger.error(f"Accept request error: {e}")
@@ -2952,6 +2997,15 @@ async def api_decline_request(req: AcceptDeclineRequest):
     """Decline a message request"""
     try:
         success = await decline_message_request(req.user_id, req.conversation_id)
+        try:
+            await supabase.log_match_event(
+                user_id=req.user_id,
+                event_type="request_declined",
+                source="chat",
+                payload={"conversation_id": req.conversation_id},
+            )
+        except Exception as audit_err:
+            logger.warning(f"[audit] decline request log failed: {audit_err}")
         return {"success": success}
     except Exception as e:
         logger.error(f"Decline request error: {e}")
@@ -2995,6 +3049,20 @@ async def api_set_meeting_status(req: MeetingStatusRequest):
             did_meet=req.did_meet,
             was_same_person=req.was_same_person
         )
+        # Audit
+        try:
+            await supabase.log_match_event(
+                user_id=req.user_id,
+                target_user_id=req.other_user_id,
+                event_type="meeting_verified",
+                source="chat",
+                payload={
+                    "did_meet": req.did_meet,
+                    "was_same_person": req.was_same_person,
+                },
+            )
+        except Exception as audit_err:
+            logger.warning(f"[audit] meeting status log failed: {audit_err}")
         return {"success": success}
     except Exception as e:
         logger.error(f"Set meeting status error: {e}")
@@ -3163,6 +3231,16 @@ async def api_delete_chat(req: DeleteChatRequest):
     try:
         success = await delete_chat_history(req.user_id, req.conversation_id)
         if success:
+            # Audit: chat deletion (soft delete)
+            try:
+                await supabase.log_match_event(
+                    user_id=req.user_id,
+                    event_type="chat_deleted",
+                    source="chat",
+                    payload={"conversation_id": req.conversation_id},
+                )
+            except Exception as audit_err:
+                logger.warning(f"[audit] chat delete log failed: {audit_err}")
             return {"success": True, "message": "Chat deleted successfully"}
         else:
             raise HTTPException(status_code=400, detail="Could not delete chat")
