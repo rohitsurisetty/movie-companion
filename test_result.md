@@ -10682,3 +10682,22 @@ metadata:
              top movies / archetype.
           6. Voice call: TTFB to first audio playback should feel snappier
              (subjective but ~1s improvement over previous).
+      - working: true
+        agent: "testing"
+        comment: |
+          Tested in iteration_30 — PASS on all 7 acceptance criteria
+          (/app/backend/tests/test_tina_voice_mode_iter30.py):
+          - voice_mode=true → short reply (~27 words). voice_mode=false →
+            richer reply with profile context.
+          - Pydantic default works — signup chat without voice_mode unchanged.
+          - 5 consecutive welcome-back calls all returned smart LLM openers
+            (e.g. "So did you end up watching *Eternal Sunshine of the
+            Spotless Mind*?"). ZERO of the 7 forbidden scripted fragments
+            appeared (comfort movie / hot take / hidden gem / etc.).
+            show_options is null on all 5.
+          - GET /tina/voice/speak-stream returns 200, audio/mpeg, 13KB across
+            8 chunks. Status TTFB 49ms, first audio chunk 246ms.
+          - Empty text → 400. Legacy /tina/voice/speak still works.
+          
+          Main agent removed the dead POST_ONBOARDING_TOPICS constant flagged
+          by code-review observation. No further retest needed.

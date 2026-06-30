@@ -938,10 +938,22 @@ async def process_tina_message(
             # Need clarification
             session["awaiting_clarification"] = True
     
-    # Check if onboarding is complete - either from flag or all mandatory fields done
+    # Check if onboarding is complete - either from flag or all mandatory fields done.
+    # IMPORTANT: We split this into two flags now so we DON'T conflate them:
+    #   • mandatory_done — all 12 signup fields collected. Used to gate the
+    #     360° persona quiz (which only runs DURING signup, never on the home
+    #     page).
+    #   • actually_complete — frontend explicitly tells us the user is in
+    #     post-onboarding free-chat mode (home page Tina). Only when this is
+    #     True do we run the LLM free-chat branch.
+    # User feedback (June 30 2026): "I don't want Tina to be very static.
+    # During signup ask the signup details + the 8 360° questions, then END.
+    # No fluff in between, no free-chat." So during signup we ALWAYS run
+    # the quiz and never enter the free-chat branch.
     mandatory_fields = [f for f, c in PROFILE_FIELDS.items() if not c.get("optional", False)]
     completed_count = len([f for f in mandatory_fields if f in session.get("completed_fields", [])])
-    actually_complete = is_onboarding_complete or completed_count >= len(mandatory_fields)
+    mandatory_done = completed_count >= len(mandatory_fields)
+    actually_complete = bool(is_onboarding_complete)
     
     # Build conversation history for LLM
     history = session.get("conversation_history", [])
@@ -954,7 +966,58 @@ async def process_tina_message(
     
     if user_message:
         history.append({"role": "user", "content": user_message})
-    
+
+    # ============================================================
+    # SIGNUP FLOW — 360° persona quiz (after all mandatory fields)
+    # ============================================================
+    # User said (June 30 2026): "I don't want Tina to be very static. Tina
+    # has to ask all the signup details + the 8 360° questions, then end the
+    # conversation. NO fluff in between, NO free-chat during signup."
+    #
+    # So once all mandatory fields are collected during the signup flow
+    # (is_onboarding_complete=False → actually_complete=False, but
+    # mandatory_done=True), we route DIRECTLY into the 360° quiz instead of
+    # falling through to the LLM free-chat branch (which was generating
+    # unwanted "are you a solo person? movie lover?" questions).
+    if mandatory_done and not actually_complete:
+        p360 = _get_360_state(session)
+        if p360["phase"] != "complete":
+            # Quiz not finished — start it or continue it
+            if p360["phase"] != "active":
+                await _begin_360_quiz(session, result, user_name)
+            else:
+                await _handle_360_turn(
+                    session,
+                    result,
+                    selected_360_option,
+                    user_message,
+                    user_id,
+                )
+
+            # If the quiz just finished (archetype_reveal set), append the
+            # closing line the user explicitly asked for. We keep the
+            # archetype card overlay AND add the goodbye text into the chat
+            # bubble so the user clearly understands the conversation is
+            # done. The frontend will show the "Continue" CTA on the
+            # archetype overlay → tapping it routes to home page.
+            if result.get("archetype_reveal"):
+                result["response"] = (
+                    f"{result['response']}\n\n"
+                    "Hey, I've got everything I need to set up your profile 💫 "
+                    "You can chat with me anytime — I'm always here."
+                )
+                # Flag so the frontend can lock further user input on this
+                # screen (the existing TinaChatScreen overlay already does
+                # this when archetype_reveal arrives).
+                result["signup_complete"] = True
+
+            result["completion_percentage"] = get_completion_percentage(session)
+            result["profile_data"] = session.get("collected_fields", {})
+            await save_tina_session(session)
+            return result
+        # else: quiz already complete during signup — fall through to the
+        # short closing acknowledgement path below.
+
     # POST-ONBOARDING: Free-form LLM chat. (Previously this branch also gated
     # a 360° persona quiz in front of free-chat, but the quiz uses scripted
     # questions like "what would you do on a first date?" — users finishing
@@ -1196,8 +1259,16 @@ Remember to end with [SHOW_OPTIONS:{next_field}] if this field has predefined op
         session["conversation_history"] = history[-20:]  # Keep last 20 messages
         
     else:
-        # All fields collected!
-        result["response"] = f"Wow, we covered a lot! 🎉 Your profile is looking great. I've saved everything - you're ready to start matching with people who share your movie taste!"
+        # All fields collected AND the 360° quiz is already complete (edge
+        # case — normal flow returns from the quiz branch above with the
+        # archetype reveal and the goodbye line baked into the response).
+        # Match the same closing line the user explicitly asked for so they
+        # never see a stray "Wow, we covered a lot!" message.
+        result["response"] = (
+            "Hey, I've got everything I need to set up your profile 💫 "
+            "You can chat with me anytime — I'm always here."
+        )
+        result["signup_complete"] = True
         result["completion_percentage"] = 100
     
     # Update result with latest data
@@ -1254,59 +1325,13 @@ async def clear_tina_session(user_id: str):
 # WELCOME BACK & RE-ENGAGEMENT
 # ============================================
 
-# Topics for post-onboarding engagement
-POST_ONBOARDING_TOPICS = [
-    {
-        "topic": "comfort_movies",
-        "question": "Quick question - what's your go-to comfort movie? The one you put on when nothing else sounds good 🛋️",
-        "follow_up": True
-    },
-    {
-        "topic": "movie_night_setup", 
-        "question": "Curious 🍿 What's your perfect movie night setup? Popcorn? Blankets? Snacks?",
-        "follow_up": True
-    },
-    {
-        "topic": "first_movie_date",
-        "question": "If you had to pick a movie for a first date, what would it be? 🎬",
-        "follow_up": True
-    },
-    {
-        "topic": "unpopular_opinion",
-        "question": "Time for a hot take 🔥 What's your most unpopular movie opinion?",
-        "follow_up": True
-    },
-    {
-        "topic": "favorite_actor",
-        "question": "Who's your ultimate movie crush? Actor or actress who you'd watch in anything 😏",
-        "follow_up": True
-    },
-    {
-        "topic": "rewatched_most",
-        "question": "What movie have you rewatched the most times? Be honest 😄",
-        "follow_up": True
-    },
-    {
-        "topic": "movie_character",
-        "question": "Here's a fun one - which movie character would you want to grab coffee with? ☕",
-        "follow_up": True
-    },
-    {
-        "topic": "hidden_gem",
-        "question": "Got a hidden gem movie that not enough people know about? Share your secret 🤫",
-        "follow_up": True
-    },
-    {
-        "topic": "theatre_vs_home",
-        "question": "Big debate time - is the theatre experience worth it, or is home better? 🎭",
-        "follow_up": True
-    },
-    {
-        "topic": "movie_partner_ideal",
-        "question": "What's your ideal movie buddy like? Someone who talks during movies or stays quiet? 🤔",
-        "follow_up": True
-    },
-]
+# NOTE: The hard-coded POST_ONBOARDING_TOPICS rotation that used to live here
+# was deleted on June 30 2026. Users reported Tina kept re-asking the same
+# scripted questions ("what's your comfort movie?" etc.) every session,
+# ignoring whatever they actually wanted to talk about. The post-onboarding
+# welcome-back path now generates a personal, contextual opener via the LLM
+# using the user's archetype + top movies + recent conversation tail.
+# See `generate_welcome_back_message` below.
 
 
 async def generate_welcome_back_message(
