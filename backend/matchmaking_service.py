@@ -29,6 +29,22 @@ EMERGENT_LLM_KEY = os.getenv("EMERGENT_LLM_KEY")
 # Cache expiry time (1 hour)
 CACHE_EXPIRY_HOURS = 1
 
+# ============================================================
+# DEMO / INVESTOR-DEMO MATCH FEED FLAG
+# ============================================================
+# When True, the candidate pool for /api/matches uses ONLY the curated
+# MOCK_USERS list (Priya, Ananya, Kavya, etc. — all with vetted photos &
+# rich profiles). All real users from MongoDB user_profiles are skipped
+# so the feed never surfaces test/audit-tester accounts during the
+# pre-launch testing phase or investor demos.
+#
+# Flip to False once the real user base is curated & moderation is in
+# place. (June 30 2026: user explicitly asked for this for the investor
+# pitch — "replace all of this audit tester user X user Y with the fake
+# profiles that we have generated, like Ananya … with the pictures
+# earlier that we were having".)
+DEMO_FEED_MOCKS_ONLY = True
+
 
 # ============== MOCK USER DATA ==============
 # 20 diverse mock profiles for testing the matchmaking algorithm
@@ -2307,8 +2323,16 @@ async def get_matches_for_user(
     # Get candidate pool — combine real users + bots so the user always sees
     # a healthy mix even when the user base is small. Real users get sorted
     # first (recency boost) and bots fill in behind them.
-    real_users = await get_all_real_users(exclude_user_id=user_id, limit=200)
-    bot_users = get_all_mock_users() if use_mock_data else []
+    #
+    # DEMO_FEED_MOCKS_ONLY override: during the pre-launch testing/investor-
+    # demo phase, skip the real-user fetch entirely so the feed never
+    # surfaces test/audit-tester accounts. Flip the constant at the top of
+    # this file off once we go live with curated real users.
+    if DEMO_FEED_MOCKS_ONLY:
+        real_users = []
+    else:
+        real_users = await get_all_real_users(exclude_user_id=user_id, limit=200)
+    bot_users = get_all_mock_users() if (use_mock_data or DEMO_FEED_MOCKS_ONLY) else []
     raw_candidates = real_users + bot_users
 
     # De-dup by user_id BEFORE we feed the AI scorer. Without this, a single
