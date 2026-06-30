@@ -140,9 +140,10 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   // Logo art inside the glow circle on the success/welcome screen
+  // (transparent-background variant, sized to feel light not heavy).
   successLogo: {
-    width: 96,
-    height: 96,
+    width: 72,
+    height: 72,
   },
   titleContainer: {
     alignItems: 'center',

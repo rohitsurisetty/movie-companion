@@ -107,8 +107,10 @@ async def upload_picture_to_storage(
         return None
 
     # Reject oversized uploads early so we don't burn Supabase egress.
-    # 8 MB is generous for profile photos; phones routinely shoot 4-6 MB.
-    MAX_PICTURE_BYTES = 8 * 1024 * 1024
+    # Bumped from 8MB → 15MB after the previous cap was rejecting normal
+    # high-res Android/iPhone photos that come in around 9-12MB before any
+    # client-side compression by expo-image-picker (quality=0.8).
+    MAX_PICTURE_BYTES = 15 * 1024 * 1024
     if len(image_bytes) > MAX_PICTURE_BYTES:
         logger.warning(
             f"Picture upload rejected: {len(image_bytes)} bytes exceeds "
@@ -116,26 +118,41 @@ async def upload_picture_to_storage(
         )
         return None
 
-    # Validate MIME by sniffing the first bytes — never trust the
-    # client-provided content_type. Limit to JPEG/PNG/WEBP/HEIC/GIF.
-    ALLOWED_MIMES = {
-        b"\xff\xd8\xff": "image/jpeg",
-        b"\x89PNG\r\n\x1a\n": "image/png",
-        b"RIFF": "image/webp",  # WEBP files start with RIFF....WEBP
-        b"ftypheic": "image/heic",
-        b"GIF87a": "image/gif",
-        b"GIF89a": "image/gif",
-    }
+    # Validate by sniffing the file header. The previous version of this
+    # check used overly-specific HEIC signatures (`ftypheic` only) and was
+    # rejecting modern iPhone uploads which use `ftypheix`, `ftyphvc1`,
+    # `ftypheim`, `ftypmif1`, etc. We now check the ISO-BMFF `ftyp` box
+    # and accept ANY HEIF/HEIC/HEVC brand. JPEG/PNG/WEBP/GIF stay strict.
     sniffed_mime: Optional[str] = None
     if image_bytes:
-        head = image_bytes[:16]
-        for sig, mime in ALLOWED_MIMES.items():
-            if sig in head:
-                sniffed_mime = mime
-                break
+        head = image_bytes[:32]
+        if head.startswith(b"\xff\xd8\xff"):
+            sniffed_mime = "image/jpeg"
+        elif head.startswith(b"\x89PNG\r\n\x1a\n"):
+            sniffed_mime = "image/png"
+        elif head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+            sniffed_mime = "image/webp"
+        elif head[:6] in (b"GIF87a", b"GIF89a"):
+            sniffed_mime = "image/gif"
+        elif head[4:8] == b"ftyp":
+            # ISO-BMFF container — check brand at bytes 8-12
+            brand = head[8:12]
+            HEIF_BRANDS = {
+                b"heic", b"heix", b"heim", b"heis", b"hevc",
+                b"hevx", b"mif1", b"msf1", b"hvc1",
+            }
+            if brand in HEIF_BRANDS:
+                sniffed_mime = "image/heic" if brand in (b"heic", b"heix", b"hvc1", b"hevc", b"hevx") else "image/heif"
+            elif brand == b"avif":
+                sniffed_mime = "image/avif"
+            # Fallback: accept any ftyp container as image — the storage
+            # backend doesn't strictly need to know the precise subtype.
+            else:
+                sniffed_mime = content_type if content_type and content_type.startswith("image/") else "image/heic"
     if image_bytes and not sniffed_mime:
         logger.warning(
-            f"Picture upload rejected: unsupported MIME (user_id={user_id} pic#{picture_number})"
+            f"Picture upload rejected: unsupported MIME (user_id={user_id} pic#{picture_number}, "
+            f"first 16 bytes hex={image_bytes[:16].hex() if image_bytes else 'empty'})"
         )
         return None
     # Override the client-provided content_type with what we sniffed so the

@@ -13,7 +13,9 @@
       "bundleIdentifier": "com.filmydating.app",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Find nearby movie companions",
-        "NSMicrophoneUsageDescription": "Talk to Tina, your AI movie matchmaker"
+        "NSMicrophoneUsageDescription": "Talk to Tina, your AI movie matchmaker",
+        "NSCameraUsageDescription": "Take a profile photo for your dating profile",
+        "NSPhotoLibraryUsageDescription": "Pick profile photos from your gallery"
       }
     },
     "android": {
@@ -25,7 +27,13 @@
       "edgeToEdgeEnabled": true,
       "permissions": [
         "ACCESS_FINE_LOCATION",
-        "ACCESS_COARSE_LOCATION"
+        "ACCESS_COARSE_LOCATION",
+        "CAMERA",
+        "READ_MEDIA_IMAGES",
+        "READ_MEDIA_VIDEO",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "RECORD_AUDIO"
       ]
     },
     "web": {
@@ -42,6 +50,13 @@
           "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#000"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Pick profile photos from your gallery",
+          "cameraPermission": "Take a profile photo for your dating profile"
         }
       ],
       "expo-web-browser",

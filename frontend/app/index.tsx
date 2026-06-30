@@ -678,12 +678,11 @@ const styles = StyleSheet.create({
   iconRow: {
     marginBottom: SPACING.m,
   },
-  // Brand logo on the auth screen — the artwork already includes the
-  // "filmydating" wordmark, so we render it large and standalone (replaces
-  // the old film-icon + text-title combo).
+  // Brand logo on the auth screen — smaller, transparent-background variant.
+  // Was 220x220; the bigger size felt heavy on the welcome screen.
   brandLogo: {
-    width: 220,
-    height: 220,
+    width: 140,
+    height: 140,
     marginBottom: SPACING.s,
   },
   title: {

@@ -142,10 +142,10 @@ const headerStyles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  // Brand logo image inside the header brandMark slot
+  // Brand logo image inside the header brandMark slot (transparent BG)
   brandLogoImg: {
-    width: 32,
-    height: 32,
+    width: 28,
+    height: 28,
   },
   headerCenter: {
     flexDirection: 'row',

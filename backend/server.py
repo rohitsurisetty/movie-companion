@@ -2646,45 +2646,54 @@ class PicturesUpdateRequest(BaseModel):
 
 
 @api_router.post("/user/pictures/upload")
-async def upload_picture(req: PictureUploadRequest):
+async def upload_picture(req: PictureUploadRequest, request: Request):
     """
     Upload a single profile picture.
     Stores image in Supabase storage and updates user_pictures table.
+
+    AUTH: req.user_id must match the authenticated user.
     """
+    require_owner(req.user_id, request.state.user_id)
     try:
         if req.picture_number < 1 or req.picture_number > 5:
             raise HTTPException(status_code=400, detail="picture_number must be between 1 and 5")
-        
-        # Upload to MongoDB storage
+        if not req.image_data or len(req.image_data) < 32:
+            raise HTTPException(status_code=400, detail="image_data is empty or too small")
+
         picture_url = await upload_picture_to_storage(
             user_id=req.user_id,
             picture_data=req.image_data,
             picture_number=req.picture_number,
             content_type=req.content_type
         )
-        
         if not picture_url:
-            raise HTTPException(status_code=500, detail="Failed to upload picture to storage")
-        
-        # Update database
+            # The service returns None for: invalid base64, oversized file
+            # (>15MB), or unsupported MIME. Return a 400 (client error) with
+            # a clearer message so the frontend can show something better
+            # than the generic "Upload Failed. Please try again."
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Could not process this image. Make sure it's a JPEG, PNG, "
+                    "HEIC, WEBP or GIF under 15 MB and try again."
+                ),
+            )
+
         success = await update_single_picture(
             user_id=req.user_id,
             session_id=req.session_id,
             picture_number=req.picture_number,
             picture_url=picture_url
         )
-        
         if not success:
             raise HTTPException(status_code=500, detail="Failed to save picture to database")
-        
+
         logger.info(f"Uploaded picture {req.picture_number} for user {req.user_id}")
-        
         return {
             "success": True,
             "picture_number": req.picture_number,
-            "picture_url": picture_url
+            "picture_url": picture_url,
         }
-        
     except HTTPException:
         raise
     except Exception as e:
@@ -2693,11 +2702,14 @@ async def upload_picture(req: PictureUploadRequest):
 
 
 @api_router.post("/user/pictures/upload-batch")
-async def upload_pictures_batch(req: PicturesUpdateRequest):
+async def upload_pictures_batch(req: PicturesUpdateRequest, request: Request):
     """
     Upload multiple pictures at once.
     Used during onboarding to upload all pictures in one request.
+
+    AUTH: req.user_id must match the authenticated user.
     """
+    require_owner(req.user_id, request.state.user_id)
     try:
         picture_urls = {}
         errors = []
