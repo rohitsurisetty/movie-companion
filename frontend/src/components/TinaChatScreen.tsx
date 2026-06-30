@@ -551,10 +551,12 @@ export default function TinaChatScreen({
         }, 300);
       }
 
-      // Check completion
-      if (data.completion_percentage >= 100) {
-        setTimeout(() => onComplete(data.profile_data || {}), 2000);
-      }
+      // NOTE: We intentionally do NOT auto-close Tina on completion_percentage>=100.
+      // The backend will send a 360° quiz transition (show_options with
+      // mode: 'personality_360') as soon as all mandatory fields are collected.
+      // Tina should remain open until either:
+      //   • archetype_reveal fires (end of 360° quiz) — handled in sendToTina, OR
+      //   • the user explicitly exits/skips (exit_intent path).
 
     } catch (error) {
       console.error('Chat error:', error);
@@ -654,10 +656,11 @@ export default function TinaChatScreen({
         }, 300);
       }
 
-      // Check completion (only after archetype reveal, which we already handle)
-      if (data.completion_percentage >= 100 && !data.show_options && !data.archetype_reveal) {
-        setTimeout(() => onComplete(data.profile_data || {}), 2000);
-      }
+      // NOTE: We intentionally do NOT auto-close Tina on completion_percentage>=100.
+      // The 360° persona quiz starts on the next backend turn (via show_options
+      // with mode 'personality_360') and must be completed to a real
+      // archetype_reveal before we exit. Without this guard, Tina would close
+      // abruptly the moment the last mandatory field is collected.
 
     } catch (error) {
       console.error('Chat error:', error);

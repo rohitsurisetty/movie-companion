@@ -165,16 +165,24 @@ export default function OnboardingScreen() {
     }
   }, [markFieldsAsCollected, updateUserProfile]);
 
-  // Merge Tina-collected data into profile
-  const mergeTinaData = (tinaData: Partial<ProfileData>) => {
+  // Merge Tina-collected data into profile. Returns the list of fields that
+  // were actually accepted so callers can compute the next step without
+  // waiting on async React state updates (avoids a stale-closure bug where
+  // handleTinaExit/handleTinaComplete would compute the next step using an
+  // empty tinaCollectedFields and re-show pages Tina had already collected).
+  const mergeTinaData = (tinaData: Partial<ProfileData>): string[] => {
     const collected: string[] = [];
 
     // Fields that MUST be arrays in profile state. If Tina ever returns a
     // string/object for any of these, we drop the value rather than poison
     // downstream renderers (preview screens .map over these).
+    // NOTE: partnerPreference is a STRING in ProfileData (single_select on the
+    // backend), so it must NOT be in this set — otherwise mergeTinaData
+    // silently drops the value and the 'Who do you want to meet?' page is
+    // shown again after Tina skip (Bug 2 regression).
     const ARRAY_FIELDS = new Set([
       'topMovies', 'genres', 'filmLanguages', 'languagesSpoken',
-      'relationshipIntent', 'partnerPreference', 'uploadedPictures', 'pictures',
+      'relationshipIntent', 'uploadedPictures', 'pictures',
     ]);
 
     Object.entries(tinaData).forEach(([key, value]) => {
@@ -198,6 +206,7 @@ export default function OnboardingScreen() {
     });
 
     setTinaCollectedFields(collected);
+    return collected;
   };
 
   // Check if a field was collected by Tina
@@ -205,27 +214,34 @@ export default function OnboardingScreen() {
     return tinaCollectedFields.includes(field);
   };
 
-  // Check if a selection step should be skipped (already collected by Tina)
-  const shouldSkipSelectionStep = (stepIdx: number): boolean => {
+  // Check if a selection step should be skipped (already collected by Tina).
+  // Accepts an optional explicit collected list — required by the exit/complete
+  // handlers because React's setTinaCollectedFields is async and the closure
+  // captures the stale empty array on the same tick.
+  const shouldSkipSelectionStep = (stepIdx: number, collectedOverride?: string[]): boolean => {
     const config = SELECTION_CONFIGS[stepIdx];
     if (!config) return false;
-    return isFieldCollectedByTina(config.field);
+    const list = collectedOverride ?? tinaCollectedFields;
+    return list.includes(config.field as string);
   };
 
-  // Find next step that needs to be shown (skip Tina-collected fields)
-  const findNextStep = (currentStep: number): number => {
+  // Find next step that needs to be shown (skip Tina-collected fields).
+  // collectedOverride is used by handleTinaExit/handleTinaComplete to avoid
+  // a stale-closure bug.
+  const findNextStep = (currentStep: number, collectedOverride?: string[]): number => {
     let next = currentStep + 1;
-    
+
     // Skip selection steps that were already collected by Tina
-    while (next >= STEP_LOOKING_FOR && next <= STEP_GENRES && shouldSkipSelectionStep(next)) {
+    while (next >= STEP_LOOKING_FOR && next <= STEP_GENRES && shouldSkipSelectionStep(next, collectedOverride)) {
       next++;
     }
-    
+
     // Skip TopMovies if already collected
-    if (next === STEP_TOP_MOVIES && isFieldCollectedByTina('topMovies')) {
+    const list = collectedOverride ?? tinaCollectedFields;
+    if (next === STEP_TOP_MOVIES && list.includes('topMovies')) {
       next++;
     }
-    
+
     return next;
   };
 
@@ -270,13 +286,14 @@ export default function OnboardingScreen() {
   };
 
   const handleTinaComplete = (tinaData: Partial<ProfileData>) => {
-    mergeTinaData(tinaData);
+    const collected = mergeTinaData(tinaData);
     setShowTinaChat(false);
     // User is exiting Tina, set stage to manual (enables floating button)
     setOnboardingStage('manual_onboarding');
-    
-    // Jump to first uncollected step or finish
-    const nextStep = findNextStep(STEP_TINA_AUTO);
+
+    // Jump to first uncollected step or finish. Use the freshly returned
+    // `collected` list to avoid React's async state update lag.
+    const nextStep = findNextStep(STEP_TINA_AUTO, collected);
     if (nextStep >= TOTAL_STEPS) {
       handleFinish();
     } else {
@@ -285,13 +302,14 @@ export default function OnboardingScreen() {
   };
 
   const handleTinaExit = (tinaData: Partial<ProfileData>) => {
-    mergeTinaData(tinaData);
+    const collected = mergeTinaData(tinaData);
     setShowTinaChat(false);
     // User is exiting Tina, set stage to manual (enables floating button)
     setOnboardingStage('manual_onboarding');
-    
-    // Check if there are remaining fields
-    const nextStep = findNextStep(STEP_TINA_AUTO);
+
+    // Check if there are remaining fields. Pass the freshly collected list
+    // explicitly so we don't re-show pages Tina already filled.
+    const nextStep = findNextStep(STEP_TINA_AUTO, collected);
     if (nextStep < TOTAL_STEPS) {
       // Show "Few more info required" - go to next uncollected step
       setStep(nextStep);

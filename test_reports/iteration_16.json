@@ -1,0 +1,43 @@
+{
+  "summary": "Frontend-only verification of the two Tina fixes. Code inspection confirmed Bug 1 fix in TinaChatScreen.tsx (auto-onComplete on completion_percentage>=100 removed in both handleMoviesReceived (lines 554-560 comment) and sendToTina (lines 659-664 comment); the only auto-close paths are archetype_reveal at line 626-630 and exit_intent at line 610-614). Code inspection confirmed Bug 2 fix in onboarding.tsx (mergeTinaData now RETURNS the freshly collected list at line 206; shouldSkipSelectionStep and findNextStep accept a collectedOverride; handleTinaComplete/handleTinaExit pass the fresh list to avoid the stale-closure). HOWEVER while validating Bug 2 I found a NEW related bug: mergeTinaData's ARRAY_FIELDS set incorrectly included 'partnerPreference', which is a STRING in ProfileData (single_select on backend, returns e.g. 'Women'). Because of this, when Tina collected partnerPreference and user skipped, mergeTinaData silently dropped the value -> the 'Who do you want to meet?' page would STILL render — exactly the user-reported bug. I confirmed this by hitting POST /api/tina/chat directly: after sending relationshipIntent + partnerPreference + languagesSpoken then 'skip', the backend returned profile_data: { relationshipIntent: ['Serious relationship'], partnerPreference: 'Women' (string), languagesSpoken: [...] } and 30% completion. With 'partnerPreference' in ARRAY_FIELDS, the string was being filtered out. FIXED by removing 'partnerPreference' from the ARRAY_FIELDS set in /app/frontend/app/onboarding.tsx (kept the array-only fields: topMovies, genres, filmLanguages, languagesSpoken, relationshipIntent, uploadedPictures, pictures). End-to-end UI walk-through was blocked because the BasicInfoStep DOB validation requires the React Native ScrollView onScroll callback to fire (sets ageConfirmed=true). On the Expo web build that ScrollView renders as a CSS overflow scroller but Playwright wheel/scroll dispatch does not trigger the React-Native-web onScroll handler — the Continue button stayed aria-disabled='true' across multiple wheel/scroll attempts. This is a tooling limitation, not a product bug. Backend /api/tina/chat returned 200 on every call throughout testing; no 500s or tracebacks in backend.err.log.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "onboarding.tsx mergeTinaData",
+        "issue": "'partnerPreference' was wrongly in ARRAY_FIELDS — backend returns it as a string (e.g. 'Women'), so it was being silently dropped. Result: Bug 2 fix did NOT work for partnerPreference — the 'Who do you want to meet?' page still appeared after Tina-skip. FIXED in this iteration (removed partnerPreference from the set). Reference: /app/frontend/app/onboarding.tsx:179-183",
+        "testID": "onboarding-screen",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/tmp/p1_onb_basic.png",
+    "/tmp/p_basic_filled.png",
+    "/tmp/p_after_basic.png"
+  ],
+  "action_items": [
+    "Manually (or via an actual device / Expo Go) walk through the full Tina flow with the partnerPreference fix in place to confirm the 'Who do you want to meet?' page is now skipped when Tina collected gender preference before the user typed 'skip'. Use a fresh tina_fix_<ts>@example.com signup; after answering Tina's first 3 questions (relationshipIntent + partnerPreference + languagesSpoken) type 'skip' and confirm the next screen is 'How often do you watch movies?' (movieFrequency) — not 'Who do you want to meet?'.",
+    "Manually verify Bug 1: continue all 10 mandatory Tina questions; after the 10th she should send the 360°-quiz transition message and 8 emoji-chip questions. The chat must stay open until the archetype reveal modal appears and ~3.5s later navigates to /success.",
+    "Optional: add testIDs to the DOB Day/Month/Year scrollers in BasicInfoStep (or expose a hidden onChange trigger) so end-to-end web Playwright tests can drive DOB without relying on RN-web's onScroll event. Right now the DOB column is un-driveable from Playwright wheel events, which made Tina untestable end-to-end on web.",
+    "Optional: align frontend ARRAY_FIELDS with the actual ProfileData type — consider deriving the set programmatically from initialProfileData (Array.isArray(initialProfileData[k])) to avoid future drift."
+  ],
+  "critical_code_review_comments": [
+    "/app/frontend/app/onboarding.tsx:179 — Hand-maintained ARRAY_FIELDS set is fragile. partnerPreference was already mis-classified despite being a string in /app/frontend/src/types.ts:18. Suggest replacing with a runtime derivation: `Object.keys(initialProfileData).filter(k => Array.isArray((initialProfileData as any)[k]))`. That eliminates an entire class of bug.",
+    "/app/frontend/src/components/TinaChatScreen.tsx:554-560 and 659-664 — Comments correctly explain why auto-close on completion% is removed; archetype_reveal (line 626) and exit_intent (line 610) are the only legitimate close paths. Confirmed clean.",
+    "/app/frontend/src/components/BasicInfoStep.tsx:215 — `isValid` depends on `ageConfirmed`, which is only flipped by validateAndSetDate when the scroll handler fires. Since default selectedDay/Month/Year are pre-populated (15/6/currentYear-25), consider calling validateAndSetDate once on mount unconditionally so the Continue button is enabled by default when the defaults already represent an adult. This would also remove the Playwright web-testing blocker."
+  ],
+  "updated_files": ["/app/frontend/app/onboarding.tsx"],
+  "success_rate": {"backend": "N/A (frontend-only per request)", "frontend": "Partial — code-review pass confirmed both fixes are in place and uncovered + fixed an additional partnerPreference array-type bug. End-to-end UI walkthrough blocked by DOB-scroll tooling limitation."},
+  "seed_data_creation": "Created fresh test users via POST /api/auth/send-email-otp + verify-otp (e.g. tina_fix_1782778069@example.com / user_4ba82f8831ba). For backend-API verification of Bug-2 partnerPreference behaviour, used test_tina2_1782778170 (3 Tina turns, then 'skip' -> profile_data {relationshipIntent:['Serious relationship'], partnerPreference:'Women', languagesSpoken:['English','Hindi']}, exit_intent:true).",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "The partnerPreference ARRAY_FIELDS bug has been FIXED in /app/frontend/app/onboarding.tsx (commit: removed 'partnerPreference' from the ARRAY_FIELDS set at line ~179-186). The user-reported repro is now: signup fresh email -> BasicInfo -> Photo -> Tina -> answer relationshipIntent + partnerPreference + languagesSpoken (3 turns) -> type 'skip' -> next page MUST be 'How often do you watch movies?' (STEP_MOVIE_FREQ=6) and NOT 'Who do you want to meet?' (STEP_PARTNER_PREF=4). To test from Playwright on web, you currently cannot drive the BasicInfo DOB picker (RN-web ScrollView onScroll does not fire from page.mouse.wheel) — easiest workaround is either (a) test on Expo Go on a real device, (b) temporarily call validateAndSetDate on mount in BasicInfoStep, or (c) inject dobDay/dobMonth/dobYear into AsyncStorage via a draft-profile store before navigating to /onboarding. Backend Tina /api/tina/chat verified working (200 on all calls). User_id formats accepted: any string. Skip phrase that triggers exit_intent: 'skip', 'bye', etc.",
+  "rca_of_issue": "ROOT CAUSE of the residual Bug-2: In /app/frontend/app/onboarding.tsx the developer authored a defensive ARRAY_FIELDS set inside mergeTinaData to drop any value Tina returns whose runtime type doesn't match the array-typed render path. But the set included 'partnerPreference', which in ProfileData (/app/frontend/src/types.ts:18) is declared `partnerPreference: string` and on the backend (tina_service.py:46-51) is a single_select returning a string like 'Women'. So when Tina collected gender preference and the user skipped, the merge step did `if (!Array.isArray(value)) { console.warn('Ignoring non-array partnerPreference from Tina:', value); return; }` and the field was dropped both from `data.partnerPreference` and from the `collected[]` list. handleTinaExit then called findNextStep with a collected list that did NOT include 'partnerPreference', so the next-step computation re-rendered STEP_PARTNER_PREF=4 ('Who do you want to meet?'). FIX: removed 'partnerPreference' from the ARRAY_FIELDS set (kept only fields that are actually arrays in ProfileData). MITIGATION going forward: derive ARRAY_FIELDS from `initialProfileData` at module init so the set can never drift from the type."
+}

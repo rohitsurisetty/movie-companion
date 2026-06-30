@@ -10090,6 +10090,72 @@ agent_communication:
           patterns (initializeChat, fetchProfileData, fetchRequestData).
           Zero errors. App boot screenshot verified clean.
 
+  - task: "Bug fix: Tina chat closing abruptly + skip showing pre-collected pages"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/components/TinaChatScreen.tsx, /app/frontend/app/onboarding.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          BUG REPORT (June 29, 2026): User reported two issues:
+          1. Tina chat closes abruptly after all signup details are collected;
+             it should only close when the user ends/skips OR the 360° quiz
+             completes.
+          2. Skipping Tina was still showing pages whose answers Tina already
+             collected (with values pre-selected).
+
+          ROOT CAUSES + FIXES:
+
+          Bug 1 — Auto-close on completion_percentage >= 100
+          - TinaChatScreen.tsx had three auto `onComplete` calls when
+            completion hit 100%:
+              • handleMoviesReceived line 555-557 (UNCONDITIONAL)
+              • sendToTina line 658-660 (only when no show_options)
+              • archetype_reveal line 627-628 (LEGITIMATE — end of 360 quiz)
+          - The first two would fire before the 360° persona quiz could
+            display or complete, closing Tina abruptly.
+          - FIX: Removed the first two auto-close branches. Tina now only
+            closes on (a) archetype_reveal (end of 360° quiz), (b) exit_intent
+            (user typed "skip"/"bye"/etc), or (c) the explicit close button.
+
+          Bug 2 — Stale closure in findNextStep
+          - handleTinaExit/handleTinaComplete called mergeTinaData which
+            queued setTinaCollectedFields(collected), THEN immediately called
+            findNextStep on the same tick.
+          - findNextStep → shouldSkipSelectionStep → isFieldCollectedByTina
+            all read the React state tinaCollectedFields, which was still the
+            stale empty array on that render tick.
+          - Result: every "skipped" selection page was still rendered (with
+            Tina-collected values pre-filled, since updateField had run via
+            its own setData).
+          - FIX:
+              • mergeTinaData now RETURNS the freshly built collected[]
+                while still calling setTinaCollectedFields for non-Tina
+                callers.
+              • shouldSkipSelectionStep & findNextStep accept an optional
+                collectedOverride list and use it when provided.
+              • handleTinaComplete & handleTinaExit pass the freshly returned
+                list to findNextStep, bypassing the async state update.
+
+          TESTING REQUIRED:
+          FRONTEND ONLY (no backend changes):
+          1. Onboarding → Basic Info → Photos → Tina auto-launches.
+          2. Walk through Tina until she has collected several fields (e.g.
+             relationshipIntent + partnerPreference + languages). Then type
+             "skip" or "bye". Tina should close cleanly and the next
+             onboarding screen should NOT be one of the fields Tina collected.
+          3. Walk through Tina ALL THE WAY (answer every question). After the
+             last mandatory field, Tina should NOT close — instead she should
+             transition with "Okay your profile's looking 🔥…" and start the
+             8-question 360° persona quiz with emoji chips.
+          4. Complete the 360° quiz. After Q8, archetype reveal modal appears,
+             then Tina closes naturally and onboarding completes.
+          5. Verify no regression on the existing free-text + chip handling.
+
 agent_communication:
     -agent: "main"
     -message: |
