@@ -376,11 +376,30 @@ class TestMatchFlowPersistence:
         )
 
     def test_b_init_mock_then_accept_NEW_HOOK(self, client, test_user):
-        """NEW HOOK: /chat/accept must log match_events 'request_accepted'."""
+        """NEW HOOK: /chat/accept must log match_events 'request_accepted'.
+
+        This test needs /chat/init-mock to actually seed mock conversations
+        (a dev-only behavior gated behind DEV_SEED_MOCK_CHATS=1 env var OR
+        the X-Dev-Seed-Mock: 1 request header in production). We use the
+        header so we don't have to flip the backend process's env var.
+        """
         uid = test_user["user_id"]
-        # Seed mock conversations
-        r = client.post(f"{API}/chat/init-mock/{uid}")
+        # Seed mock conversations via the dev-only header opt-in
+        r = client.post(
+            f"{API}/chat/init-mock/{uid}",
+            headers={"X-Dev-Seed-Mock": "1"},
+        )
         assert r.status_code == 200
+        # Make sure the seed actually ran (not gated off)
+        assert r.json().get("skipped") is not True, "seed gate not opened by header"
+
+        # Fetch conversations — also send the header so any latent
+        # match-history/conversation auto-seed runs to completion
+        r2 = client.get(
+            f"{API}/chat/conversations/{uid}",
+            headers={"X-Dev-Seed-Mock": "1"},
+        )
+        assert r2.status_code == 200
 
         # Fetch a real conversation_id
         r2 = client.get(f"{API}/chat/conversations/{uid}")

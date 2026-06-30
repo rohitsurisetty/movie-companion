@@ -1,0 +1,57 @@
+{
+  "summary": "X-Dev-Seed-Mock header opt-in VERIFIED. Both /api/chat/init-mock and /api/chat/conversations correctly honor request.headers.get('x-dev-seed-mock','')=='1' (FastAPI lowercase normalization works fine when sending 'X-Dev-Seed-Mock: 1'). New iter24 suite: 7/7 PASS — 2a init-mock without header is skipped, 2b with header seeds 3 mock convos, 2c re-GET without header preserves the 3 seeded and does NOT add Anjali Iyer / Priya Bhatia, 2d brand-new user with no header gets [], 2e brand-new user with header gets >=2 (Anjali Iyer + Priya Bhatia seeded). Regression #5 also PASS — fresh user no header => []. test_audit_iter20.py: ALL 20/20 PASS (previous 4 cascading failures in TestMatchFlowPersistence::test_b/test_c/test_f/test_g are RESOLVED — header pattern in the fixture works end-to-end through /chat/accept, /chat/decline, /chat/delete, meeting-report). test_supabase_audit.py: 13/13 PASS. test_launch_prep_iter22.py: 7/8 PASS — the one failure (test_matchmaking_mixed_pool) is PRE-EXISTING organic pool-size drift (real-user pool grew to 150+, bots get truncated below top-15 cut — same root cause as iter23's flaky test_real_user_appears_in_bobs_feed) and is UNRELATED to the header opt-in change. Backend startup clean, /api/ returns 200, no 500s in logs during the run.",
+
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "POST /api/matches (test_launch_prep_iter22.py::test_matchmaking_mixed_pool)",
+        "issue": "Pre-existing organic-pool flake (NOT caused by iter24). Backend log shows 'candidate pool = 150 real + 35 bots' but the post-preference filter / top-15 truncation drops all bots out — assertion `assert bots` fails. Same kind of pool-rank issue as iter23's test_real_user_appears_in_bobs_feed. Either raise candidate cap in test (force_refresh + larger limit, or scope to is_bot=True explicitly), or boost bot scoring so they survive the trim. No production regression — bots remain discoverable via direct fetch."
+      }
+    ]
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+
+  "test_report_links": [
+    "/app/backend/tests/test_iter24_header_optin.py",
+    "/app/test_reports/pytest/iter24_header_optin.xml",
+    "/app/test_reports/pytest/iter24_audit.xml",
+    "/app/test_reports/pytest/iter24_regression.xml"
+  ],
+
+  "action_items": [
+    "OPTIONAL (pre-existing, not caused by this iteration): test_launch_prep_iter22.py::test_matchmaking_mixed_pool is now flaky because the real-user pool has grown to ~150 and bots fall outside the top-15 cut after preference filtering. Either (a) bump the limit/take in /matches for that test, (b) filter the response by is_bot=True via a dedicated bot-discovery endpoint, or (c) raise mock bot match score so >=1 bot survives the trim.",
+    "OPTIONAL: keep /app/backend/tests/test_iter24_header_optin.py as a regression guard — covers all 5 header opt-in scenarios from the spec and confirms production-mode (no header) inbox stays clean."
+  ],
+
+  "critical_code_review_comments": [
+    "server.py:2858-2864 — /chat/conversations gate is correctly OR'd: env var DEV_SEED_MOCK_UNMATCHED=1 OR request header x-dev-seed-mock=1. Lowercase lookup matches Starlette's normalized header dict.",
+    "server.py:3163-3166 — /chat/init-mock applies the same pattern; returns the well-formed {success:true, skipped:true, reason:'production_mode'} when neither opt-in is present.",
+    "server.py:3180-3199 — /user/match-history still env-var-only (no header). Per spec note, this is intentional since no audit test currently needs the header for match-history; safe.",
+    "Three seed sites are now self-consistent and individually gated. The header path is per-request and stateless (no env mutation, no test-order coupling, no need for supervisor restart in CI)."
+  ],
+
+  "updated_files": [
+    "/app/backend/tests/test_iter24_header_optin.py (NEW — 7 tests for the header opt-in spec, kept as regression guard)"
+  ],
+
+  "success_rate": {
+    "backend": "iter24 header opt-in 7/7 (100%) + audit 20/20 (100%) + supabase 13/13 (100%) + launch-prep 7/8 (87.5%, 1 pre-existing pool-rank flake) = 47/48 overall (97.9%)",
+    "frontend": "not tested this iteration (backend-only per request)"
+  },
+
+  "seed_data_creation": "Per-test fresh real users via /api/auth/send-email-otp (OTP mocked, returned in response body) + /api/auth/verify-otp. Emails prefixed TEST_iter24_{slot}_{uuid8}@example.com so they are easy to grep/cleanup. No DB mutation beyond standard signup + 3 init-mock seeded convos + 2 unmatched seeded convos.",
+
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+
+  "context_for_next_testing_agent": "The 4 cascading failures from iter22/iter23 in test_audit_iter20.py::TestMatchFlowPersistence are FIXED via the X-Dev-Seed-Mock header (no env-var flipping needed). Header is lowercased by FastAPI/Starlette so the backend reads it as 'x-dev-seed-mock'. Both /chat/init-mock and /chat/conversations honor it; /user/match-history is intentionally env-var-only. Pre-existing flake test_launch_prep_iter22.py::test_matchmaking_mixed_pool is the only remaining failure and is unrelated — pool-rank drift, same family as iter23's test_real_user_appears_in_bobs_feed. Production behavior (no header, no env var) is verified clean: fresh user => [] conversations, no Anjali/Priya pollution.",
+
+  "rca_of_issue": "Root cause of the iter22/23 test cascade: /chat/init-mock had its DEV_SEED_MOCK_CHATS=1 env gate added in iter22, and /chat/conversations got its DEV_SEED_MOCK_UNMATCHED=1 gate added in iter23. Together these correctly removed mock pollution from production users but left the audit tests dependent on side-effect seeding with no way to opt-in per-call. Fix in iter24 adds an OR-clause header check (`request.headers.get('x-dev-seed-mock','')=='1'`) at both endpoints — gives the audit suite a per-request opt-in without mutating process env. Verified by running test_audit_iter20.py: all 20/20 pass; the previously-broken test_b_init_mock_then_accept_NEW_HOOK + downstream test_c_decline / test_f_delete / test_g_meeting_report are now GREEN."
+}
