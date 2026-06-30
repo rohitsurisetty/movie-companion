@@ -138,6 +138,9 @@ export default function TinaChatScreen({
     primary_love_language: string;
     intent: { serious: number; casual: number };
   } | null>(null);
+  // Profile data captured at archetype-reveal time so the user-initiated
+  // "Continue" button can finalize onboarding without re-querying.
+  const [archetypeProfileData, setArchetypeProfileData] = useState<Partial<ProfileData>>({});
   const [welcomeBackShown, setWelcomeBackShown] = useState(false);
   
   const flatListRef = useRef<FlatList>(null);
@@ -624,9 +627,11 @@ export default function TinaChatScreen({
 
       // Archetype reveal at the end of 360° quiz
       if (data.archetype_reveal) {
+        // Stash the profile data so the user-initiated "Continue" button can
+        // finalize onboarding. We intentionally DO NOT auto-close here — the
+        // user should get a chance to read their archetype and tap Continue.
         setArchetypeReveal(data.archetype_reveal);
-        // After a brief moment, navigate forward
-        setTimeout(() => onComplete(data.profile_data || {}), 3500);
+        setArchetypeProfileData(data.profile_data || {});
         return;
       }
 
@@ -988,7 +993,7 @@ export default function TinaChatScreen({
 
       {/* 360° Archetype Reveal Overlay */}
       {archetypeReveal && (
-        <View style={styles.archetypeOverlay} pointerEvents="none">
+        <View style={styles.archetypeOverlay}>
           <View style={styles.archetypeCard}>
             <Text style={styles.archetypeEmoji}>{archetypeReveal.emoji}</Text>
             <Text style={styles.archetypeLabel}>You are</Text>
@@ -1006,6 +1011,22 @@ export default function TinaChatScreen({
                 </Text>
               </View>
             </View>
+
+            <TouchableOpacity
+              style={styles.archetypeContinueBtn}
+              onPress={() => onComplete(archetypeProfileData)}
+              activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel="Continue to your matches"
+              testID="archetype-continue-btn"
+            >
+              <Text style={styles.archetypeContinueText}>Continue</Text>
+              <Ionicons name="arrow-forward" size={18} color="#FFFFFF" style={{ marginLeft: 6 }} />
+            </TouchableOpacity>
+
+            <Text style={styles.archetypeHint}>
+              {"Take your time — tap Continue when you're ready"}
+            </Text>
           </View>
         </View>
       )}
@@ -1351,6 +1372,35 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: '#FFFFFF',
+  },
+  archetypeContinueBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#E50914',
+    paddingHorizontal: 36,
+    paddingVertical: 14,
+    borderRadius: 28,
+    marginTop: 28,
+    minWidth: 200,
+    shadowColor: '#E50914',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  archetypeContinueText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    letterSpacing: 0.3,
+  },
+  archetypeHint: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.45)',
+    marginTop: 12,
+    textAlign: 'center',
+    fontStyle: 'italic',
   },
   checkbox: {
     width: 18,
