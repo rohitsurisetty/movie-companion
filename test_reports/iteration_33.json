@@ -1,0 +1,34 @@
+{
+  "summary": "Backend-only regression for deployment fixes (iter33): /api/tina/chat and /api/tina/welcome-back now silently override a stale/mismatched body.user_id with the session-derived user_id (verified via backend WARNING log and 200 response for user_stale123). Dynamic CORS preflight reflects the requesting Origin for foo.emergent.host, bar.preview.emergentagent.com and baz.emergent.sh at the backend (localhost:8001). BOLA protection on require_owner-guarded GET endpoints is preserved (cross-user access returns 404 as by-design in security_deps.py:129 to avoid user_id enumeration). Sanity endpoints (/auth/me, /tina/greeting, /tina/field-options) all 200. 11/11 tests PASSED.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_deployment_fixes_iter33.py",
+    "/app/test_reports/pytest/iter33.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is 3968 lines — well past the 700-line guideline. Recommend splitting Tina, matchmaking, and admin routers into modules.",
+    "Review request stated require_owner should return 403 for cross-user GET, but security_deps.py:129 intentionally returns 404 to avoid user_id enumeration. Behaviour is correct and preserved, but the review-request wording is slightly inaccurate. No code change needed."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_deployment_fixes_iter33.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "N/A (not tested per request)"
+  },
+  "seed_data_creation": "Test-only user created via OTP flow: testuser_iter33_<timestamp>@example.com. No cleanup needed (dev DB).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "CORS at the public URL (match-history-dev.preview.emergentagent.com) is fronted by Cloudflare, which rewrites Access-Control-Allow-Origin to '*' on OPTIONS. Test CORS against http://localhost:8001 to verify the FastAPI middleware behaviour. Universal OTP 123456 works when INSECURE_DEV_AUTH=true. require_owner returns 404 (not 403) by design.",
+  "rca_of_issue": "N/A — deployment fixes verified working. Backend WARNING logs at /var/log/supervisor/backend.err.log confirm both endpoints emit 'client body user_id=... != session user_id=... Using session identity.' when a stale user_id is sent, then process the request under the correct session identity."
+}
