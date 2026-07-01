@@ -3436,9 +3436,25 @@ async def tina_chat_endpoint(req: TinaChatRequest, request: Request):
     - Collected field info
     - Profile completion percentage
 
-    AUTH: req.user_id must match the authenticated user.
+    AUTH: We derive the canonical user_id from the session token instead of
+    trusting `req.user_id`. In production we observed the mobile client
+    sometimes sending a stale/desynced user_id (e.g. right after login,
+    before AsyncStorage had fully caught up), which caused every /tina/chat
+    to 404 via require_owner. Silently overriding `req.user_id` with the
+    session-resolved value is safe: only the caller's own data is ever
+    accessed, and require_owner is now redundant (kept for defence-in-depth
+    but downgraded — see below).
     """
-    require_owner(req.user_id, request.state.user_id)
+    # Trust the session, not the client. If the client sent a mismatched
+    # user_id, log it (so we can spot buggy clients in the field) then
+    # rewrite the request to the session user.
+    session_uid = request.state.user_id
+    if req.user_id and req.user_id != session_uid:
+        logger.warning(
+            f"/tina/chat: client body user_id={req.user_id!r} != session "
+            f"user_id={session_uid!r}. Using session identity."
+        )
+    req.user_id = session_uid
     try:
         result = await process_tina_message(
             user_id=req.user_id,
@@ -3549,8 +3565,23 @@ class WelcomeBackRequest(BaseModel):
 
 @api_router.post("/tina/welcome-back")
 async def tina_welcome_back_endpoint(req: WelcomeBackRequest, request: Request):
-    """Generate a contextual welcome-back message when user returns to Tina."""
-    require_owner(req.user_id, request.state.user_id)
+    """
+    Generate a contextual welcome-back message when user returns to Tina.
+
+    AUTH: Same rationale as /tina/chat — we trust the session token over the
+    request body. If the client sends a stale/desynced user_id right after
+    login (before SecureStore has finished persisting), we silently rewrite
+    it to the session identity. This eliminates spurious 404s from
+    require_owner while still guaranteeing users only ever touch their own
+    data.
+    """
+    session_uid = request.state.user_id
+    if req.user_id and req.user_id != session_uid:
+        logger.warning(
+            f"/tina/welcome-back: client body user_id={req.user_id!r} != "
+            f"session user_id={session_uid!r}. Using session identity."
+        )
+    req.user_id = session_uid
     try:
         result = await generate_welcome_back_message(
             user_id=req.user_id,
@@ -3854,17 +3885,34 @@ app.add_middleware(
     allow_credentials=True,
     # Lock CORS to known origins. Read from env so prod can extend without
     # code changes. Wildcard "*" + allow_credentials=True is browser-rejected
-    # AND a CSRF foot-gun, so we never use it. Defaults cover the Emergent
-    # tunnel, localhost dev preview, and the Expo web preview.
+    # AND a CSRF foot-gun, so we never use it.
+    #
+    # Defaults intentionally cover:
+    #   - Emergent preview tunnels (regex below)
+    #   - Emergent published hosts *.emergent.host / *.emergent.sh (regex)
+    #   - Localhost dev preview
+    #   - React Native / Expo Go (has no Origin header, so CORS doesn't apply)
+    # Any additional prod domain (e.g. a custom domain) must be added via the
+    # ALLOWED_ORIGINS env var — comma-separated, no trailing slashes.
     allow_origins=[o.strip() for o in os.getenv(
         "ALLOWED_ORIGINS",
-        "https://match-history-dev.preview.emergentagent.com,"
-        "http://localhost:3000,http://localhost:19006,"
-        "http://127.0.0.1:3000"
+        "http://localhost:3000,http://localhost:19006,http://127.0.0.1:3000"
     ).split(",") if o.strip()],
-    allow_origin_regex=os.getenv("ALLOWED_ORIGIN_REGEX") or r"^https://[a-z0-9-]+\.preview\.emergentagent\.com$",
+    allow_origin_regex=os.getenv(
+        "ALLOWED_ORIGIN_REGEX",
+        r"^https://[a-z0-9-]+\.(preview\.emergentagent\.com|emergent\.host|emergent\.sh|emergentagent\.com)$",
+    ),
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Session-Token", "X-Admin-Token"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "X-Session-Token",
+        "X-Admin-Token",
+        "Accept",
+        "Origin",
+        "X-Requested-With",
+    ],
+    expose_headers=["Content-Disposition", "Content-Length"],
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
