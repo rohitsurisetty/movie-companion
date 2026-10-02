@@ -10,7 +10,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "https://REPLACE-WITH-YOUR-BACKEND-URL",
+        "EXPO_PUBLIC_BACKEND_URL": "https://film-companion-api-production.up.railway.app",
         "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "REPLACE-WITH-WEB-CLIENT-ID.apps.googleusercontent.com"
       }
     },
@@ -20,7 +20,7 @@
         "buildType": "app-bundle"
       },
       "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "https://REPLACE-WITH-YOUR-BACKEND-URL",
+        "EXPO_PUBLIC_BACKEND_URL": "https://film-companion-api-production.up.railway.app",
         "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "REPLACE-WITH-WEB-CLIENT-ID.apps.googleusercontent.com"
       }
     }
