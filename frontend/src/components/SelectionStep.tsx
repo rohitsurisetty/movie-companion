@@ -44,14 +44,17 @@ export default function SelectionStep({
 }: Props) {
   const [customLanguage, setCustomLanguage] = useState(othersValue || '');
 
+  // Multi-select values can arrive missing/malformed (e.g. merged from Tina).
+  const selectedList: string[] = Array.isArray(selected) ? selected : [];
+
   const isSelected = (opt: string) => {
-    if (multiSelect) return (selected as string[]).includes(opt);
+    if (multiSelect) return selectedList.includes(opt);
     return selected === opt;
   };
 
   const toggle = (opt: string) => {
     if (multiSelect) {
-      const arr = selected as string[];
+      const arr = selectedList;
       onSelect(arr.includes(opt) ? arr.filter(o => o !== opt) : [...arr, opt]);
     } else {
       onSelect(opt);

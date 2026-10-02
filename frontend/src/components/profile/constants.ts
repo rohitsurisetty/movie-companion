@@ -14,6 +14,8 @@ export const AVATAR_OPTIONS = [
 ];
 
 export const GENDERS = ['Man', 'Woman', 'Non-binary', 'Prefer not to say', 'Other'];
+// Optional identity picker in onboarding (same values as BasicInfoStep's local list).
+export const GENDER_IDENTITIES = ['Bisexual', 'Gay', 'Lesbian', 'Pansexual', 'Asexual', 'Queer', 'Questioning', 'Prefer not to say'];
 export const RELATIONSHIP_INTENTS = ['Casual', 'Friendship', 'Serious relationship', 'Exploring'];
 export const PARTNER_PREFS = ['Men', 'Women', 'Anyone'];
 export const LANGUAGES = ['English', 'Hindi', 'Telugu', 'Tamil', 'Kannada', 'Malayalam', 'Bengali', 'Marathi', 'Gujarati', 'Punjabi', 'Urdu'];

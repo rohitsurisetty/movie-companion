@@ -1,0 +1,59 @@
+# Alternative to Railway: Render Blueprint (New + > Blueprint > pick this repo).
+services:
+  - type: web
+    name: film-companion-api
+    runtime: docker
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    healthCheckPath: /api/
+    autoDeploy: true
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: MONGO_URL
+        sync: false
+      - key: DB_NAME
+        sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: GOOGLE_OAUTH_CLIENT_IDS
+        sync: false
+      - key: SMS_PROVIDER
+        sync: false
+      - key: MSG91_AUTH_KEY
+        sync: false
+      - key: MSG91_TEMPLATE_ID
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_FROM_NUMBER
+        sync: false
+      - key: TEST_OTP_NUMBERS
+        sync: false
+      - key: ADMIN_USERNAME
+        sync: false
+      - key: ADMIN_PASSWORD_HASH
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: TMDB_ACCESS_TOKEN
+        sync: false
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false
+      - key: ELEVENLABS_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: MOCK_FEED_PROFILES
+        sync: false
+      - key: MOCK_FEED_ONLY
+        sync: false
+      - key: MOCK_SEED_CHATS
+        sync: false
+      - key: MOCK_BOT_REPLIES
+        sync: false

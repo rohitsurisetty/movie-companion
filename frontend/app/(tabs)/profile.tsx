@@ -1,395 +1,25 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, TextInput,
-  Modal, Image, Switch, ActivityIndicator, Alert, Platform,
+  Modal, Image, ActivityIndicator, Alert,
   ScrollView as RNScrollView, Animated,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, BORDER_RADIUS } from '../../src/theme';
 import { ProfileData, initialProfileData, MovieSelection } from '../../src/types';
-import { getProfile, saveProfile, clearAll } from '../../src/store';
+import { apiUrl, getUserId, getProfile, saveProfile, clearAll, logout } from '../../src/store';
 import { getPartialLocation, getSimplifiedLocation } from '../../src/utils/location';
-import { formatLocationForPrivacy } from '../../src/utils/locationFormatter';
-import { SharedHeader, ModeSwitcher, useAppMode } from '../../src/components/SharedHeader';
-import { PremiumProfileView } from '../../src/components/PremiumProfileView';
+import { SharedHeader, useAppMode } from '../../src/components/SharedHeader';
+import { PremiumProfileView, normalizePictures, getProfilePhotos } from '../../src/components/PremiumProfileView';
 import {
-  AVATAR_OPTIONS, GENDERS, RELATIONSHIP_INTENTS, PARTNER_PREFS, LANGUAGES,
+  AVATAR_OPTIONS, RELATIONSHIP_INTENTS, PARTNER_PREFS, LANGUAGES,
   MOVIE_FREQUENCIES, FILM_LANGUAGES, GENRES, RELIGIONS, MARITAL_STATUSES,
   OTT_OPTIONS, FOOD_PREFS, SMOKING_OPTS, DRINKING_OPTS, EXERCISE_OPTS,
-  ZODIAC_SIGNS, PETS_OPTS, FAMILY_OPTS, SIBLINGS_OPTS, EDUCATION_OPTS,
-  TRAVEL_OPTS, WORK_OPTS, type EditModalType,
+  ZODIAC_SIGNS, type EditModalType,
 } from '../../src/components/profile/constants';
 import ErrorBoundary from '../../src/components/ErrorBoundary';
-
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
-
-// Single Select Modal
-function SingleSelectModal({
-  visible, onClose, title, options, selected, onSelect,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  title: string;
-  options: string[];
-  selected: string;
-  onSelect: (val: string) => void;
-}) {
-  return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <TouchableOpacity style={modalStyles.overlay} activeOpacity={1} onPress={onClose}>
-        <View style={modalStyles.container}>
-          <Text style={modalStyles.title}>{title}</Text>
-          <RNScrollView style={modalStyles.scroll} showsVerticalScrollIndicator={false}>
-            {options.map(opt => (
-              <TouchableOpacity
-                key={opt}
-                style={[modalStyles.option, selected === opt && modalStyles.optionActive]}
-                onPress={() => { onSelect(opt); onClose(); }}
-              >
-                <Text style={[modalStyles.optionText, selected === opt && modalStyles.optionTextActive]}>
-                  {opt}
-                </Text>
-                {selected === opt && <Ionicons name="checkmark-circle" size={22} color={COLORS.primary} />}
-              </TouchableOpacity>
-            ))}
-          </RNScrollView>
-          <TouchableOpacity style={modalStyles.singleCancelBtn} onPress={onClose}>
-            <Text style={modalStyles.cancelText}>Cancel</Text>
-          </TouchableOpacity>
-        </View>
-      </TouchableOpacity>
-    </Modal>
-  );
-}
-
-// Multi Select Modal
-function MultiSelectModal({
-  visible, onClose, title, options, selected, onSelect,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  title: string;
-  options: string[];
-  selected: string[];
-  onSelect: (val: string[]) => void;
-}) {
-  const [tempSelected, setTempSelected] = useState<string[]>(selected);
-
-  useEffect(() => {
-    setTempSelected(selected);
-  }, [selected, visible]);
-
-  const toggle = (opt: string) => {
-    setTempSelected(prev => 
-      prev.includes(opt) ? prev.filter(o => o !== opt) : [...prev, opt]
-    );
-  };
-
-  const handleSave = () => {
-    onSelect(tempSelected);
-    onClose();
-  };
-
-  return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <TouchableOpacity style={modalStyles.overlay} activeOpacity={1} onPress={onClose}>
-        <View style={modalStyles.container}>
-          <Text style={modalStyles.title}>{title}</Text>
-          <Text style={modalStyles.subtitle}>Select all that apply</Text>
-          <RNScrollView style={modalStyles.scroll} showsVerticalScrollIndicator={false}>
-            <View style={modalStyles.chipsContainer}>
-              {options.map(opt => (
-                <TouchableOpacity
-                  key={opt}
-                  style={[modalStyles.chip, tempSelected.includes(opt) && modalStyles.chipActive]}
-                  onPress={() => toggle(opt)}
-                >
-                  <Text style={[modalStyles.chipText, tempSelected.includes(opt) && modalStyles.chipTextActive]}>
-                    {opt}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </RNScrollView>
-          <View style={modalStyles.buttonRow}>
-            <TouchableOpacity style={modalStyles.cancelBtn} onPress={onClose}>
-              <Text style={modalStyles.cancelText}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={modalStyles.saveBtn} onPress={handleSave}>
-              <Text style={modalStyles.saveText}>Save</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </TouchableOpacity>
-    </Modal>
-  );
-}
-
-// Text Input Modal
-function TextInputModal({
-  visible, onClose, title, value, onSave, placeholder, multiline = false, maxLength = 100,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  title: string;
-  value: string;
-  onSave: (val: string) => void;
-  placeholder?: string;
-  multiline?: boolean;
-  maxLength?: number;
-}) {
-  const [text, setText] = useState(value);
-
-  useEffect(() => {
-    setText(value);
-  }, [value, visible]);
-
-  const handleSave = () => {
-    onSave(text);
-    onClose();
-  };
-
-  return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <TouchableOpacity style={modalStyles.overlay} activeOpacity={1} onPress={onClose}>
-        <View style={modalStyles.container}>
-          <Text style={modalStyles.title}>{title}</Text>
-          <TextInput
-            style={[modalStyles.textInput, multiline && modalStyles.textInputMultiline]}
-            value={text}
-            onChangeText={(t) => setText(t.slice(0, maxLength))}
-            placeholder={placeholder}
-            placeholderTextColor={COLORS.textMuted}
-            multiline={multiline}
-            maxLength={maxLength}
-          />
-          <Text style={modalStyles.charCount}>{text.length}/{maxLength}</Text>
-          <View style={modalStyles.buttonRow}>
-            <TouchableOpacity style={modalStyles.cancelBtn} onPress={onClose}>
-              <Text style={modalStyles.cancelText}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={modalStyles.saveBtn} onPress={handleSave}>
-              <Text style={modalStyles.saveText}>Save</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </TouchableOpacity>
-    </Modal>
-  );
-}
-
-// Avatar Select Modal
-function AvatarSelectModal({
-  visible, onClose, selected, onSelect,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  selected: string;
-  onSelect: (id: string) => void;
-}) {
-  return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <TouchableOpacity style={modalStyles.overlay} activeOpacity={1} onPress={onClose}>
-        <View style={modalStyles.container}>
-          <Text style={modalStyles.title}>Choose Avatar</Text>
-          <View style={modalStyles.avatarGrid}>
-            {AVATAR_OPTIONS.map(av => (
-              <TouchableOpacity
-                key={av.id}
-                style={[modalStyles.avatarItem, selected === av.id && modalStyles.avatarItemActive]}
-                onPress={() => { onSelect(av.id); onClose(); }}
-              >
-                <View style={[modalStyles.avatarCircle, { backgroundColor: av.color }]}>
-                  <Ionicons name={av.icon} size={32} color={COLORS.white} />
-                </View>
-              </TouchableOpacity>
-            ))}
-          </View>
-          <TouchableOpacity style={modalStyles.cancelBtn} onPress={onClose}>
-            <Text style={modalStyles.cancelText}>Cancel</Text>
-          </TouchableOpacity>
-        </View>
-      </TouchableOpacity>
-    </Modal>
-  );
-}
-
-// Height Edit Modal
-function HeightEditModal({
-  visible, onClose, value, onSave,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  value: string;
-  onSave: (val: string) => void;
-}) {
-  const [unit, setUnit] = useState<'imperial' | 'metric'>('imperial');
-  const [feet, setFeet] = useState(5);
-  const [inches, setInches] = useState(6);
-  const [cm, setCm] = useState(168);
-
-  useEffect(() => {
-    if (value) {
-      if (value.includes("'")) {
-        const parts = value.match(/(\d+)'(\d+)/);
-        if (parts) {
-          setFeet(parseInt(parts[1]));
-          setInches(parseInt(parts[2]));
-          setUnit('imperial');
-        }
-      } else if (value.includes('cm')) {
-        const cmVal = parseInt(value);
-        if (cmVal) {
-          setCm(cmVal);
-          setUnit('metric');
-        }
-      }
-    }
-  }, [value, visible]);
-
-  const handleSave = () => {
-    const height = unit === 'imperial' ? `${feet}'${inches}"` : `${cm} cm`;
-    onSave(height);
-    onClose();
-  };
-
-  const feetOptions = [4, 5, 6, 7];
-  const inchOptions = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
-  const cmOptions = Array.from({ length: 101 }, (_, i) => 120 + i);
-
-  return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <TouchableOpacity style={modalStyles.overlay} activeOpacity={1} onPress={onClose}>
-        <View style={modalStyles.container}>
-          <Text style={modalStyles.title}>Edit Height</Text>
-          
-          <View style={modalStyles.unitToggle}>
-            <TouchableOpacity
-              style={[modalStyles.unitBtn, unit === 'imperial' && modalStyles.unitBtnActive]}
-              onPress={() => setUnit('imperial')}
-            >
-              <Text style={[modalStyles.unitText, unit === 'imperial' && modalStyles.unitTextActive]}>ft/in</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[modalStyles.unitBtn, unit === 'metric' && modalStyles.unitBtnActive]}
-              onPress={() => setUnit('metric')}
-            >
-              <Text style={[modalStyles.unitText, unit === 'metric' && modalStyles.unitTextActive]}>cm</Text>
-            </TouchableOpacity>
-          </View>
-
-          {unit === 'imperial' ? (
-            <View style={modalStyles.heightPickerRow}>
-              <View style={modalStyles.heightColumn}>
-                <Text style={modalStyles.heightLabel}>Feet</Text>
-                <RNScrollView style={modalStyles.heightScroll} showsVerticalScrollIndicator={false}>
-                  {feetOptions.map(f => (
-                    <TouchableOpacity
-                      key={f}
-                      style={[modalStyles.heightItem, feet === f && modalStyles.heightItemActive]}
-                      onPress={() => setFeet(f)}
-                    >
-                      <Text style={[modalStyles.heightItemText, feet === f && modalStyles.heightItemTextActive]}>{f}&apos;</Text>
-                    </TouchableOpacity>
-                  ))}
-                </RNScrollView>
-              </View>
-              <View style={modalStyles.heightColumn}>
-                <Text style={modalStyles.heightLabel}>Inches</Text>
-                <RNScrollView style={modalStyles.heightScroll} showsVerticalScrollIndicator={false}>
-                  {inchOptions.map(i => (
-                    <TouchableOpacity
-                      key={i}
-                      style={[modalStyles.heightItem, inches === i && modalStyles.heightItemActive]}
-                      onPress={() => setInches(i)}
-                    >
-                      <Text style={[modalStyles.heightItemText, inches === i && modalStyles.heightItemTextActive]}>{i}&quot;</Text>
-                    </TouchableOpacity>
-                  ))}
-                </RNScrollView>
-              </View>
-            </View>
-          ) : (
-            <RNScrollView style={modalStyles.cmScroll} showsVerticalScrollIndicator={false}>
-              {cmOptions.map(c => (
-                <TouchableOpacity
-                  key={c}
-                  style={[modalStyles.heightItem, cm === c && modalStyles.heightItemActive]}
-                  onPress={() => setCm(c)}
-                >
-                  <Text style={[modalStyles.heightItemText, cm === c && modalStyles.heightItemTextActive]}>{c} cm</Text>
-                </TouchableOpacity>
-              ))}
-            </RNScrollView>
-          )}
-
-          <View style={modalStyles.heightDisplay}>
-            <Text style={modalStyles.heightDisplayText}>
-              {unit === 'imperial' ? `${feet}'${inches}"` : `${cm} cm`}
-            </Text>
-          </View>
-
-          <View style={modalStyles.buttonRow}>
-            <TouchableOpacity style={modalStyles.cancelBtn} onPress={onClose}>
-              <Text style={modalStyles.cancelText}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={modalStyles.saveBtn} onPress={handleSave}>
-              <Text style={modalStyles.saveText}>Save</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </TouchableOpacity>
-    </Modal>
-  );
-}
-
-const modalStyles = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center', padding: SPACING.l },
-  container: { backgroundColor: COLORS.bgCard, borderRadius: BORDER_RADIUS.xl, padding: SPACING.l, width: '100%', maxWidth: 360, maxHeight: '80%' },
-  title: { fontSize: 20, fontWeight: 'bold', color: COLORS.text, marginBottom: SPACING.s, textAlign: 'center' },
-  subtitle: { fontSize: 14, color: COLORS.textSecondary, marginBottom: SPACING.m, textAlign: 'center' },
-  scroll: { maxHeight: 350 },
-  option: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 14, paddingHorizontal: SPACING.m, borderRadius: BORDER_RADIUS.m, marginBottom: SPACING.xs },
-  optionActive: { backgroundColor: 'rgba(229,9,20,0.1)' },
-  optionText: { fontSize: 16, color: COLORS.textSecondary },
-  optionTextActive: { color: COLORS.primary, fontWeight: '600' },
-  chipsContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.s },
-  chip: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: BORDER_RADIUS.full, borderWidth: 1.5, borderColor: COLORS.border, backgroundColor: COLORS.bgCard },
-  chipActive: { borderColor: COLORS.primary, backgroundColor: COLORS.primary },
-  chipText: { fontSize: 14, color: COLORS.textSecondary },
-  chipTextActive: { color: COLORS.white, fontWeight: '600' },
-  textInput: { backgroundColor: COLORS.bgInput, borderRadius: BORDER_RADIUS.m, paddingHorizontal: SPACING.m, paddingVertical: 14, color: COLORS.text, fontSize: 16, marginBottom: SPACING.xs },
-  textInputMultiline: { minHeight: 100, textAlignVertical: 'top' },
-  charCount: { fontSize: 11, color: COLORS.textMuted, textAlign: 'right', marginBottom: SPACING.m },
-  buttonRow: { flexDirection: 'row', gap: SPACING.m, marginTop: SPACING.m },
-  cancelBtn: { flex: 1, paddingVertical: 14, borderRadius: BORDER_RADIUS.full, borderWidth: 1.5, borderColor: COLORS.border, alignItems: 'center' },
-  singleCancelBtn: { paddingVertical: 14, borderRadius: BORDER_RADIUS.full, borderWidth: 1.5, borderColor: COLORS.border, alignItems: 'center', marginTop: SPACING.m },
-  cancelText: { fontSize: 16, fontWeight: '600', color: COLORS.textSecondary },
-  saveBtn: { flex: 1, paddingVertical: 14, borderRadius: BORDER_RADIUS.full, backgroundColor: COLORS.primary, alignItems: 'center' },
-  saveText: { fontSize: 16, fontWeight: 'bold', color: COLORS.white },
-  avatarGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.m, justifyContent: 'center', marginBottom: SPACING.l },
-  avatarItem: { borderRadius: BORDER_RADIUS.full, borderWidth: 3, borderColor: 'transparent', padding: 3 },
-  avatarItemActive: { borderColor: COLORS.gold },
-  avatarCircle: { width: 60, height: 60, borderRadius: 30, alignItems: 'center', justifyContent: 'center' },
-  unitToggle: { flexDirection: 'row', gap: SPACING.s, marginBottom: SPACING.m, justifyContent: 'center' },
-  unitBtn: { paddingHorizontal: 24, paddingVertical: 10, borderRadius: BORDER_RADIUS.full, borderWidth: 1.5, borderColor: COLORS.border },
-  unitBtnActive: { borderColor: COLORS.primary, backgroundColor: COLORS.primary },
-  unitText: { fontSize: 14, color: COLORS.textSecondary, fontWeight: '500' },
-  unitTextActive: { color: COLORS.white },
-  heightPickerRow: { flexDirection: 'row', gap: SPACING.m },
-  heightColumn: { flex: 1 },
-  heightLabel: { fontSize: 12, color: COLORS.textMuted, textAlign: 'center', marginBottom: SPACING.xs },
-  heightScroll: { height: 150, backgroundColor: COLORS.bgInput, borderRadius: BORDER_RADIUS.m },
-  cmScroll: { height: 200, backgroundColor: COLORS.bgInput, borderRadius: BORDER_RADIUS.m },
-  heightItem: { paddingVertical: 12, alignItems: 'center', borderRadius: BORDER_RADIUS.s, marginVertical: 2, marginHorizontal: 4 },
-  heightItemActive: { backgroundColor: COLORS.primary },
-  heightItemText: { fontSize: 16, color: COLORS.textSecondary },
-  heightItemTextActive: { color: COLORS.white, fontWeight: '600' },
-  heightDisplay: { alignItems: 'center', paddingVertical: SPACING.m, marginTop: SPACING.m, borderTopWidth: 1, borderTopColor: COLORS.border },
-  heightDisplayText: { fontSize: 24, fontWeight: 'bold', color: COLORS.gold },
-});
 
 // ============ ACCORDION SECTION COMPONENT ============
 function AccordionSection({
@@ -596,6 +226,8 @@ function EditProfileModalContent({
       case 'partnerPreference': return 'Want to Meet';
       case 'height': return 'Edit Height';
       case 'religion': return 'Religion';
+      case 'maritalStatus': return 'Marital Status';
+      case 'foodPreference': return 'Food Preference';
       case 'smoking': return 'Smoking';
       case 'drinking': return 'Drinking';
       case 'exercise': return 'Exercise';
@@ -737,6 +369,8 @@ function EditProfileModalContent({
             >
               <ProfileField icon="resize-outline" label="Height" value={profile.height} onPress={() => setEditModal('height')} isEmpty={!profile.height} />
               <ProfileField icon="moon-outline" label="Religion" value={profile.religion} onPress={() => setEditModal('religion')} isEmpty={!profile.religion} />
+              <ProfileField icon="ellipse-outline" label="Marital Status" value={profile.maritalStatus} onPress={() => setEditModal('maritalStatus')} isEmpty={!profile.maritalStatus} />
+              <ProfileField icon="restaurant-outline" label="Food Preference" value={profile.foodPreference} onPress={() => setEditModal('foodPreference')} isEmpty={!profile.foodPreference} />
               <ProfileField icon="flame-outline" label="Smoking" value={profile.smoking} onPress={() => setEditModal('smoking')} isEmpty={!profile.smoking} />
               <ProfileField icon="beer-outline" label="Drinking" value={profile.drinking} onPress={() => setEditModal('drinking')} isEmpty={!profile.drinking} />
               <ProfileField icon="fitness-outline" label="Exercise" value={profile.exercise} onPress={() => setEditModal('exercise')} isEmpty={!profile.exercise} />
@@ -792,6 +426,12 @@ function InlineEditForm({
         break;
       case 'religion':
         setSelectedValue(profile.religion || '');
+        break;
+      case 'maritalStatus':
+        setSelectedValue(profile.maritalStatus || '');
+        break;
+      case 'foodPreference':
+        setSelectedValue(profile.foodPreference || '');
         break;
       case 'smoking':
         setSelectedValue(profile.smoking || '');
@@ -857,6 +497,12 @@ function InlineEditForm({
         break;
       case 'religion':
         onSave('religion', selectedValue);
+        break;
+      case 'maritalStatus':
+        onSave('maritalStatus', selectedValue);
+        break;
+      case 'foodPreference':
+        onSave('foodPreference', selectedValue);
         break;
       case 'smoking':
         onSave('smoking', selectedValue);
@@ -927,12 +573,14 @@ function InlineEditForm({
   }
 
   // Single select fields
-  if (['movieFrequency', 'ottTheatre', 'partnerPreference', 'religion', 'smoking', 'drinking', 'exercise', 'zodiac'].includes(editModal || '')) {
+  if (['movieFrequency', 'ottTheatre', 'partnerPreference', 'religion', 'maritalStatus', 'foodPreference', 'smoking', 'drinking', 'exercise', 'zodiac'].includes(editModal || '')) {
     const optionsMap: Record<string, string[]> = {
       movieFrequency: MOVIE_FREQUENCIES,
       ottTheatre: OTT_OPTIONS,
       partnerPreference: PARTNER_PREFS,
       religion: RELIGIONS,
+      maritalStatus: MARITAL_STATUSES,
+      foodPreference: FOOD_PREFS,
       smoking: SMOKING_OPTS,
       drinking: DRINKING_OPTS,
       exercise: EXERCISE_OPTS,
@@ -1346,6 +994,104 @@ const editModalStyles = StyleSheet.create({
   },
 });
 
+// ============ PROFILE SYNC HELPERS ============
+const str = (v: unknown): string => (typeof v === 'string' ? v : '');
+const strList = (v: unknown): string[] =>
+  Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : typeof v === 'string' && v ? [v] : [];
+
+// Only well-formed movies (the backend requires a numeric id + title); the
+// optional TMDB fields may be missing or mistyped in older local profiles.
+const sanitizeTopMovies = (v: unknown): MovieSelection[] =>
+  (Array.isArray(v) ? v : [])
+    .filter((m): m is MovieSelection => !!m && typeof m === 'object' && typeof m.id === 'number' && !!m.title)
+    .map(m => ({
+      id: m.id,
+      title: String(m.title),
+      poster_path: str(m.poster_path),
+      release_date: str(m.release_date),
+      vote_average: Number(m.vote_average) || 0,
+      rating: Number(m.rating) || 0,
+      genres: strList(m.genres),
+      reasons: strList(m.reasons),
+    }));
+
+// POST /api/user/profile overwrites every profile field, so always send the
+// whole (sanitised) profile — never a partial body.
+const buildProfilePayload = (userId: string, p: Partial<ProfileData>) => ({
+  user_id: userId,
+  name: str(p.name),
+  age: Number(p.age) || 0,
+  gender: str(p.gender),
+  location: str(p.location),
+  ...(p.dobDay && p.dobMonth && p.dobYear
+    ? { dobDay: String(p.dobDay), dobMonth: String(p.dobMonth), dobYear: String(p.dobYear) }
+    : {}),
+  ...(typeof p.dob === 'string' && p.dob ? { dob: p.dob } : {}),
+  ...(typeof p.locationFull === 'string' && p.locationFull ? { locationFull: p.locationFull } : {}),
+  ...(typeof p.coordinates?.lat === 'number' && typeof p.coordinates?.lng === 'number'
+    ? { coordinates: { lat: p.coordinates.lat, lng: p.coordinates.lng } }
+    : {}),
+  partnerPreference: str(p.partnerPreference),
+  relationshipIntent: strList(p.relationshipIntent),
+  genres: strList(p.genres),
+  filmLanguages: strList(p.filmLanguages),
+  languagesSpoken: strList(p.languagesSpoken),
+  topMovies: sanitizeTopMovies(p.topMovies),
+  movieFrequency: str(p.movieFrequency),
+  ottTheatre: str(p.ottTheatre),
+  height: str(p.height),
+  religion: str(p.religion),
+  maritalStatus: str(p.maritalStatus),
+  foodPreference: str(p.foodPreference),
+  bio: str(p.bio),
+  smoking: str(p.smoking),
+  drinking: str(p.drinking),
+  exercise: str(p.exercise),
+  zodiac: str(p.zodiac),
+  pets: str(p.pets),
+  familyPlanning: str(p.familyPlanning),
+  siblings: str(p.siblings),
+  education: str(p.education),
+  workProfile: str(p.workProfile),
+  travel: str(p.travel),
+  movieBuddyMode: !!p.movieBuddyMode,
+  movieDateMode: !!p.movieDateMode,
+  // Omitted (server keeps its copy) rather than sent empty when never set.
+  ...(p.visibilityToggles && typeof p.visibilityToggles === 'object'
+    ? { visibilityToggles: p.visibilityToggles }
+    : {}),
+});
+
+// Profile fields worth caching locally from GET /api/user/profile/{id}.
+const SERVER_PROFILE_KEYS: string[] = [...Object.keys(initialProfileData), 'dob', 'locationFull', 'coordinates'];
+
+/**
+ * The locally stored profile, hydrated from the server when this device has
+ * none yet (e.g. a returning user on a fresh install). Callers must check
+ * `name` before syncing: a profile without it was never loaded, and POSTing
+ * it would wipe the server copy.
+ */
+async function loadBaseProfile(userId: string): Promise<Partial<ProfileData> | null> {
+  const local = await getProfile();
+  if (local?.name) return local;
+  try {
+    const res = await fetch(apiUrl(`/api/user/profile/${encodeURIComponent(userId)}`));
+    if (!res.ok) return local;
+    const server = (await res.json())?.profile;
+    if (!server || typeof server !== 'object' || !server.name) return local;
+    const fromServer: Record<string, unknown> = {};
+    SERVER_PROFILE_KEYS.forEach(key => {
+      if (server[key] !== undefined && server[key] !== null) fromServer[key] = server[key];
+    });
+    fromServer.topMovies = sanitizeTopMovies(server.topMovies);
+    const merged = { ...(local || {}), ...fromServer, userId };
+    await saveProfile(merged);
+    return merged;
+  } catch {
+    return local;
+  }
+}
+
 export default function ProfileScreen() {
   return (
     <ErrorBoundary
@@ -1361,106 +1107,87 @@ function ProfileScreenInner() {
   const router = useRouter();
   const [profile, setProfile] = useState<ProfileData>(initialProfileData);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [editModal, setEditModal] = useState<EditModalType>(null);
   const [showProfilePreview, setShowProfilePreview] = useState(false);
   const [showEditProfile, setShowEditProfile] = useState(false);
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
   const [userPhotos, setUserPhotos] = useState<string[]>([]);
-  
+  const hasLoadedRef = useRef(false);
+  // Local read-merge-writes run one at a time so quick edits can't clobber each other.
+  const writeQueueRef = useRef<Promise<void>>(Promise.resolve());
+  // At most one POST /api/user/profile in flight; edits made meanwhile are
+  // coalesced into one follow-up request carrying the newest profile.
+  const syncStateRef = useRef<{ inFlight: Promise<void> | null; pending: boolean }>({
+    inFlight: null,
+    pending: false,
+  });
+
   // Safe array extractions to prevent .map() errors
   const topMovies = Array.isArray(profile?.topMovies) ? profile.topMovies : [];
-  
+
   // Mode and theme hooks
-  const { mode, setMode, colors, showModeDrawer, setShowModeDrawer } = useAppMode();
+  const { mode, colors, setShowModeDrawer } = useAppMode();
 
-  useEffect(() => {
-    loadProfile();
-    loadPhotos();
-  }, []);
-
-  const loadProfile = async () => {
-    setLoading(true);
+  const loadProfile = useCallback(async () => {
+    // Spinner only on the first load; focus reloads refresh in place.
+    if (!hasLoadedRef.current) setLoading(true);
     try {
-      const data = await getProfile();
-      const auth = await import('../../src/store').then(m => m.getAuth());
-      
-      if (data) {
-        // Ensure userId is set from auth if not in profile
-        const profileWithUserId = {
-          ...data,
-          userId: data.userId || auth?.user_id,
-        };
-        setProfile(profileWithUserId);
-        console.log('[Profile] Loaded profile for userId:', profileWithUserId.userId);
-      } else if (auth?.user_id) {
-        // No profile data but we have auth - create minimal profile
-        setProfile({ ...initialProfileData, userId: auth.user_id });
+      const userId = await getUserId();
+      if (!userId) {
+        router.replace('/');
+        return;
       }
+      await writeQueueRef.current; // let pending edits land first
+      const data = await loadBaseProfile(userId);
+      setProfile({ ...initialProfileData, ...(data || {}), userId });
     } catch (error) {
       console.log('[Profile] Error loading profile:', error);
+    } finally {
+      hasLoadedRef.current = true;
+      setLoading(false);
     }
-    setLoading(false);
-  };
+  }, [router]);
 
-  const loadPhotos = async () => {
+  const loadPhotos = useCallback(async () => {
     try {
+      const userId = await getUserId();
+      if (!userId) return; // loadProfile redirects to login
       const storedProfile = await getProfile();
-      const auth = await import('../../src/store').then(m => m.getAuth());
-      const userId = storedProfile?.userId || auth?.user_id;
-      
-      console.log('[Profile] Loading photos for userId:', userId);
-      
-      let backendPhotos: string[] = [];
-      let localPhotos: string[] = [];
-      
-      // First, try to get photos from backend
-      if (userId) {
-        try {
-          const response = await fetch(`${BACKEND_URL}/api/user/pictures/${userId}`);
-          if (response.ok) {
-            const data = await response.json();
-            console.log('[Profile] Backend pictures response:', JSON.stringify(data));
-            
-            // Backend returns { success: true, pictures: { picture_1: url, picture_2: url } }
-            const picturesObj = data.pictures || {};
-            backendPhotos = [
-              picturesObj.picture_1,
-              picturesObj.picture_2,
-              picturesObj.picture_3,
-              picturesObj.picture_4,
-              picturesObj.picture_5,
-            ].filter((url): url is string => Boolean(url) && typeof url === 'string');
-            
-            console.log('[Profile] Valid backend photos:', backendPhotos.length);
-          }
-        } catch (apiError) {
-          console.log('[Profile] Backend API error:', apiError);
+
+      // The server is the source of truth for uploaded photos; the local copy
+      // (kept in sync by photos.tsx) is only a fallback when it's unreachable.
+      try {
+        const response = await fetch(apiUrl(`/api/user/pictures/${encodeURIComponent(userId)}`));
+        if (response.ok) {
+          const data = await response.json();
+          // string[] or the legacy { picture_1..picture_5 } object
+          setUserPhotos(normalizePictures(data?.pictures));
+          return;
         }
+      } catch (apiError) {
+        console.log('[Profile] Could not load pictures from the server:', apiError);
       }
-      
-      // Also check local storage
-      if (storedProfile?.profilePicture) {
-        localPhotos.push(storedProfile.profilePicture);
-      }
-      if (storedProfile?.pictures && Array.isArray(storedProfile.pictures)) {
-        const validLocalPics = storedProfile.pictures.filter(Boolean);
-        localPhotos = [...localPhotos, ...validLocalPics];
-      }
-      
-      console.log('[Profile] Local photos found:', localPhotos.length);
-      
-      // Merge and dedupe - prefer backend photos, then local
-      const allPhotos = [...new Set([...backendPhotos, ...localPhotos])];
-      
-      console.log('[Profile] Total unique photos:', allPhotos.length);
-      setUserPhotos(allPhotos);
-      
+
+      setUserPhotos(
+        Array.isArray(storedProfile?.pictures)
+          ? normalizePictures(storedProfile.pictures)
+          : getProfilePhotos(storedProfile)
+      );
     } catch (error) {
       console.log('[Profile] Error loading photos:', error);
       setUserPhotos([]);
     }
-  };
+  }, []);
+
+  // Reload on every focus (not only on mount): photos.tsx and visibility.tsx
+  // write pictures / visibilityToggles to the stored profile.
+  useFocusEffect(
+    useCallback(() => {
+      loadProfile();
+      loadPhotos();
+    }, [loadProfile, loadPhotos])
+  );
 
   // Calculate profile completion percentage with weighted scoring
   const calculateProfileCompletion = useCallback(() => {
@@ -1530,120 +1257,157 @@ function ProfileScreenInner() {
     });
   };
 
-  // Sync profile to backend recommendation engine
-  const syncProfileToBackend = async (profileData: ProfileData) => {
+  // Sends the WHOLE profile (matching, recommendations and what others see).
+  const syncProfileToBackend = async (profileData: Partial<ProfileData>) => {
+    const userId = await getUserId();
+    if (!userId) {
+      router.replace('/');
+      return;
+    }
     try {
-      const userId = profileData.userId || `user_${Date.now()}`;
-      
-      // Build the payload with ALL profile fields
-      const payload = {
-        user_id: userId,
-        name: profileData.name || '',
-        age: profileData.age || 0,
-        gender: profileData.gender || '',
-        location: profileData.location || '',
-        partnerPreference: profileData.partnerPreference || '',
-        relationshipIntent: profileData.relationshipIntent || [],
-        genres: profileData.genres || [],
-        filmLanguages: profileData.filmLanguages || [],
-        languagesSpoken: profileData.languagesSpoken || [],
-        topMovies: (Array.isArray(profileData.topMovies) ? profileData.topMovies : [])
-          .filter((m): m is MovieSelection => m && typeof m === 'object')
-          .map(m => ({
-            id: m.id,
-            title: m.title,
-            poster_path: m.poster_path || '',
-            release_date: m.release_date || '',
-            vote_average: m.vote_average || 0,
-            rating: m.rating || 0,
-            genres: m.genres || [],
-            reasons: m.reasons || [],
-          })),
-        movieFrequency: profileData.movieFrequency || '',
-        ottTheatre: profileData.ottTheatre || '',
-        height: profileData.height || '',
-        religion: profileData.religion || '',
-        maritalStatus: profileData.maritalStatus || '',
-        foodPreference: profileData.foodPreference || '',
-        bio: profileData.bio || '',
-        smoking: profileData.smoking || '',
-        drinking: profileData.drinking || '',
-        exercise: profileData.exercise || '',
-        zodiac: profileData.zodiac || '',
-        pets: profileData.pets || '',
-        familyPlanning: profileData.familyPlanning || '',
-        siblings: profileData.siblings || '',
-        education: profileData.education || '',
-        workProfile: profileData.workProfile || '',
-        travel: profileData.travel || '',
-        movieBuddyMode: profileData.movieBuddyMode || false,
-        movieDateMode: profileData.movieDateMode || false,
-      };
-      
-      const response = await fetch(`${BACKEND_URL}/api/user/profile`, {
+      const response = await fetch(apiUrl('/api/user/profile'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(buildProfilePayload(userId, profileData)),
       });
-      
-      if (response.ok) {
-        const result = await response.json();
-        console.log('Profile synced to backend:', result.signals_used);
+      // 401: the global fetch wrapper clears the session and routes to login.
+      if (response.ok || response.status === 401) return;
+      let detail = '';
+      if (response.status < 500) {
+        try {
+          const body = await response.json();
+          if (typeof body?.detail === 'string') detail = body.detail;
+        } catch {
+          // non-JSON error body
+        }
       }
-    } catch (error) {
-      console.log('Error syncing profile to backend:', error);
-      // Non-critical, don't show error to user
+      Alert.alert(
+        'Could not save',
+        response.status === 429
+          ? 'You are making changes too quickly. Please try again shortly.'
+          : detail || 'Your change is saved on this device but could not be sent to the server. Please try again.'
+      );
+    } catch {
+      Alert.alert(
+        'Could not save',
+        'Your change is saved on this device but could not reach the server. Check your connection and try again.'
+      );
     }
   };
 
-  const updateField = useCallback(async (field: string, value: any) => {
-    const updatedProfile = { ...profile, [field]: value };
-    setProfile(updatedProfile);
-    setSaving(true);
-    
-    // Save locally
-    await saveProfile(updatedProfile);
-    
-    // Sync to backend for recommendation engine (debounced for important fields)
-    const importantFields = [
-      'genres', 'filmLanguages', 'languagesSpoken', 'topMovies',
-      'movieFrequency', 'ottTheatre', 'relationshipIntent'
-    ];
-    if (importantFields.includes(field)) {
-      await syncProfileToBackend(updatedProfile);
+  const scheduleSync = (): Promise<void> => {
+    const state = syncStateRef.current;
+    if (state.inFlight) {
+      state.pending = true;
+      return state.inFlight;
     }
-    
-    setSaving(false);
-  }, [profile]);
+    const run = async () => {
+      try {
+        do {
+          state.pending = false;
+          const latest = await getProfile();
+          if (latest?.name) await syncProfileToBackend(latest);
+        } while (state.pending);
+      } finally {
+        state.inFlight = null;
+      }
+    };
+    state.inFlight = run();
+    return state.inFlight;
+  };
 
-  const handleLogout = async () => {
-    Alert.alert(
-      'Logout',
-      'Are you sure you want to logout and clear all data? This will delete your profile, preferences, and swipe history.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Logout & Delete Data', 
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              // Delete user data from backend first
-              if (profile.userId) {
-                await fetch(`${BACKEND_URL}/api/user/${profile.userId}/reset-all`, {
-                  method: 'DELETE',
-                });
-                console.log('Deleted user data from backend');
-              }
-            } catch (error) {
-              console.log('Error deleting backend data:', error);
-              // Continue with logout even if backend delete fails
-            }
-            
-            // Clear local storage
-            await clearAll();
+  const updateField = (field: string, value: any) => {
+    setProfile(prev => ({ ...prev, [field]: value })); // optimistic
+    const write = async () => {
+      try {
+        const userId = await getUserId();
+        if (!userId) {
+          router.replace('/');
+          return;
+        }
+        // Merge into the LATEST stored profile, not this screen's copy:
+        // photos.tsx / visibility.tsx write pictures, profilePicture and
+        // visibilityToggles there.
+        const base = await loadBaseProfile(userId);
+        if (!base?.name) {
+          // Never loaded from the server (offline fresh install): a partial
+          // profile must not be saved or sent, it would wipe the server copy.
+          setProfile({ ...initialProfileData, ...(base || {}), userId });
+          Alert.alert(
+            'Could not save',
+            'We could not load your profile yet. Check your connection and try again.'
+          );
+          return;
+        }
+        await saveProfile({ ...base, userId, [field]: value });
+        scheduleSync().catch(error => console.log('[Profile] Profile sync failed:', error));
+      } catch (error) {
+        console.log('[Profile] Error saving profile:', error);
+      }
+    };
+    writeQueueRef.current = writeQueueRef.current.then(write);
+  };
+
+  const handleLogout = () => {
+    Alert.alert('Log out', 'Are you sure you want to log out?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Log out',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await logout(); // revokes the server session + clears local data
+          } finally {
             router.replace('/');
           }
         },
+      },
+    ]);
+  };
+
+  // Google Play requires in-app account deletion.
+  const deleteAccount = async () => {
+    const userId = await getUserId();
+    if (!userId) {
+      router.replace('/');
+      return;
+    }
+    setDeleting(true);
+    try {
+      // Let queued edits and an in-flight profile save finish first, so they
+      // can't re-create server data after the delete.
+      await writeQueueRef.current;
+      await syncStateRef.current.inFlight?.catch(() => undefined);
+      const res = await fetch(apiUrl(`/api/user/${encodeURIComponent(userId)}/reset-all`), {
+        method: 'DELETE',
+      });
+      if (res.status === 401) return; // session expired: the fetch wrapper routes to login
+      if (!res.ok) {
+        Alert.alert(
+          'Could not delete account',
+          res.status === 429
+            ? 'Too many attempts. Please try again shortly.'
+            : 'Something went wrong on our side. Your account was not deleted — please try again.'
+        );
+        return;
+      }
+      await clearAll();
+      router.replace('/');
+    } catch {
+      Alert.alert('Could not delete account', 'Check your internet connection and try again.');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleDeleteAccount = () => {
+    if (deleting) return;
+    Alert.alert(
+      'Delete account?',
+      'This permanently deletes your profile, preferences and match history. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete account', style: 'destructive', onPress: deleteAccount },
       ]
     );
   };
@@ -1660,7 +1424,7 @@ function ProfileScreenInner() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={COLORS.primary} />
         </View>
@@ -1674,7 +1438,7 @@ function ProfileScreenInner() {
   const avatarIcon = getAvatarIcon();
 
   return (
-    <SafeAreaView style={styles.container} testID="profile-screen">
+    <SafeAreaView style={styles.container} edges={['top']} testID="profile-screen">
       {/* Shared Header with Mode Switcher */}
       <SharedHeader
         title="Profile"
@@ -1817,10 +1581,26 @@ function ProfileScreenInner() {
           </TouchableOpacity>
         </View>
 
-        {/* Logout Button */}
-        <TouchableOpacity style={styles.logoutBtnNew} onPress={handleLogout} activeOpacity={0.8}>
+        {/* Log out (keeps the account) */}
+        <TouchableOpacity style={styles.logoutBtnNew} onPress={handleLogout} activeOpacity={0.8} testID="logout-button">
           <Ionicons name="log-out-outline" size={20} color={COLORS.textSecondary} />
-          <Text style={styles.logoutTextNew}>Logout & Clear Data</Text>
+          <Text style={styles.logoutTextNew}>Log out</Text>
+        </TouchableOpacity>
+
+        {/* Delete account (permanent) */}
+        <TouchableOpacity
+          style={[styles.deleteAccountBtn, deleting && { opacity: 0.6 }]}
+          onPress={handleDeleteAccount}
+          disabled={deleting}
+          activeOpacity={0.8}
+          testID="delete-account-button"
+        >
+          {deleting ? (
+            <ActivityIndicator size="small" color={COLORS.error} />
+          ) : (
+            <Ionicons name="trash-outline" size={20} color={COLORS.error} />
+          )}
+          <Text style={styles.deleteAccountText}>{deleting ? 'Deleting account…' : 'Delete account'}</Text>
         </TouchableOpacity>
       </RNScrollView>
 
@@ -1859,12 +1639,12 @@ function ProfileScreenInner() {
               explanation: 'This is how others see your profile',
               shared_interests: [],
             }}
-            photos={userPhotos.length > 0 ? userPhotos : ['https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=800']}
+            // No photos → PremiumProfileView shows an initial placeholder
+            photos={userPhotos}
             mode={mode}
             onClose={() => setShowProfilePreview(false)}
             onSendMessage={async () => false}
-            hasAlreadySentRequest={true}
-            isSendingMessage={false}
+            isOwnProfile
           />
         </View>
       </Modal>
@@ -2029,6 +1809,19 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: COLORS.textSecondary,
   },
+  deleteAccountBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: SPACING.s,
+    marginHorizontal: SPACING.m,
+    paddingVertical: 14,
+  },
+  deleteAccountText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: COLORS.error,
+  },
   
   // ========== EDIT PROFILE MODAL ==========
   editModalContainer: {
@@ -2066,31 +1859,4 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingVertical: SPACING.m,
   },
-  
-  // ========== LEGACY STYLES ==========
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: SPACING.m, paddingVertical: SPACING.s, borderBottomWidth: 1, borderBottomColor: COLORS.border },
-  backBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  headerTitle: { flex: 1, fontSize: 18, fontWeight: 'bold', color: COLORS.text, textAlign: 'center' },
-  savingIndicator: { width: 44 },
-  profileHeader: { alignItems: 'center', paddingVertical: SPACING.xl, borderBottomWidth: 1, borderBottomColor: COLORS.border },
-  avatarLarge: { width: 100, height: 100, borderRadius: 50, alignItems: 'center', justifyContent: 'center', marginBottom: SPACING.m },
-  editAvatarBadge: { position: 'absolute', bottom: 0, right: 0, width: 28, height: 28, borderRadius: 14, backgroundColor: COLORS.primary, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: COLORS.bg },
-  profileName: { fontSize: 24, fontWeight: 'bold', color: COLORS.text, marginBottom: SPACING.xs },
-  profileAge: { fontSize: 16, color: COLORS.textSecondary },
-  profileLocation: { fontSize: 14, color: COLORS.textMuted, marginTop: SPACING.xs },
-  section: { paddingHorizontal: SPACING.l, paddingTop: SPACING.l },
-  sectionTitle: { fontSize: 13, fontWeight: '600', color: COLORS.primary, marginBottom: SPACING.s, textTransform: 'uppercase', letterSpacing: 1 },
-  moviesGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.s, paddingVertical: SPACING.s },
-  movieItem: { width: '18%', alignItems: 'center' },
-  moviePoster: { width: '100%', aspectRatio: 0.67, borderRadius: BORDER_RADIUS.s, marginBottom: 4 },
-  movieTitle: { fontSize: 10, textAlign: 'center', color: COLORS.text, marginBottom: 2 },
-  movieRating: { flexDirection: 'row', alignItems: 'center', gap: 2 },
-  ratingText: { fontSize: 10, fontWeight: '600', color: COLORS.gold },
-  logoutBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SPACING.s, marginHorizontal: SPACING.l, marginTop: SPACING.xl, paddingVertical: 16, borderRadius: BORDER_RADIUS.full, borderWidth: 2, borderColor: '#FF6B6B' },
-  logoutText: { fontSize: 16, fontWeight: '600', color: '#FF6B6B' },
-  settingsRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: SPACING.m, borderBottomWidth: 1, borderBottomColor: COLORS.border },
-  settingsIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(229, 9, 20, 0.1)', alignItems: 'center', justifyContent: 'center', marginRight: SPACING.m },
-  settingsInfo: { flex: 1 },
-  settingsLabel: { fontSize: 16, fontWeight: '600', color: COLORS.text, marginBottom: 2 },
-  settingsDesc: { fontSize: 13, color: COLORS.textMuted },
 });

@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Modal, Pressable, Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { API_BASE, COLORS } from './theme';
+import { apiUrl } from '../../store';
+import { COLORS } from './theme';
 
 interface Props {
   visible: boolean;
@@ -17,21 +18,20 @@ export const DidYouMeetModal: React.FC<Props> = ({
   visible, onClose, otherUserName, conversationId, userId,
 }) => {
   const [step, setStep] = useState<'initial' | 'verification'>('initial');
-  const [, setDidMeet] = useState<boolean | null>(null);
+  const savingRef = useRef(false);
 
   const handleInitialResponse = async (met: boolean) => {
-    setDidMeet(met);
     if (met) {
       setStep('verification');
     } else {
-      await saveMeetingResponse(false, null);
+      if (!(await saveMeetingResponse(false, null))) return;
       Alert.alert('Got it!', 'Thanks for letting us know. Hope you get to meet soon!');
       resetAndClose();
     }
   };
 
   const handleVerificationResponse = async (samePerson: 'yes' | 'no' | 'partially') => {
-    await saveMeetingResponse(true, samePerson);
+    if (!(await saveMeetingResponse(true, samePerson))) return;
     if (samePerson === 'yes') {
       Alert.alert('Great! 🎉', 'Glad you had a good experience meeting in person!');
     } else if (samePerson === 'no') {
@@ -42,9 +42,14 @@ export const DidYouMeetModal: React.FC<Props> = ({
     resetAndClose();
   };
 
-  const saveMeetingResponse = async (met: boolean, verification: string | null) => {
+  // True once saved. On failure the user is told and the modal stays open
+  // so they can retry (no "thanks" for an answer that was never stored).
+  const saveMeetingResponse = async (met: boolean, verification: string | null): Promise<boolean> => {
+    if (savingRef.current) return false;
+    savingRef.current = true;
+    let status: number | undefined;
     try {
-      await fetch(`${API_BASE}/api/chat/meeting-report`, {
+      const res = await fetch(apiUrl('/api/chat/meeting-report'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -55,14 +60,22 @@ export const DidYouMeetModal: React.FC<Props> = ({
           reported_at: new Date().toISOString(),
         }),
       });
-    } catch (error) {
-      console.error('Error saving meeting response:', error);
+      if (res.ok) return true;
+      status = res.status;
+    } catch {
+      status = undefined;
+    } finally {
+      savingRef.current = false;
     }
+    Alert.alert(
+      "Couldn't save your answer",
+      status === 429 ? 'Too many requests. Please try again shortly.' : 'Please check your connection and try again.',
+    );
+    return false;
   };
 
   const resetAndClose = () => {
     setStep('initial');
-    setDidMeet(null);
     onClose();
   };
 

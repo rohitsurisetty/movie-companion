@@ -1,27 +1,56 @@
 """
-Profile Pictures Service - Supabase Storage primary, MongoDB base64 fallback.
+Profile Pictures Service - Supabase Storage only.
 
 Storage of record (after SQL migration is applied):
   * Files: Supabase Storage bucket `profile-pictures` at `<user_id>/picture_<n>_<rand>.<ext>`
   * Latest URLs (per user, picture slot) cached in MongoDB `user_pictures` for fast read
   * Append-only audit log in Supabase `user_pictures` table (one row per upload/replace/delete)
 
-If Supabase Storage upload fails (e.g. bucket not yet created), we fall back to
-storing the image as a base64 data URL in MongoDB so the user flow never breaks.
+Uploads are JPEG / PNG / WEBP only (sniffed from the file header), max 5 MB
+decoded. There is NO base64-in-MongoDB fallback any more: if Supabase Storage
+is not configured, unreachable or rejects the upload, upload_picture_to_storage()
+raises PhotoStorageUnavailable (server.py -> 503) and nothing is stored.
+Oversized images raise PhotoTooLarge (an HTTPException -> 413).
 """
 
-import os
+import re
+import asyncio
 import base64
 import logging
 from datetime import datetime
 from typing import Optional, Dict, Any
 from dotenv import load_dotenv
+from fastapi import HTTPException
 
 load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# MongoDB client (cache + fallback) – set from server.py
+# Max DECODED image size. The app resizes to 1080 px JPEG (q=0.75) before
+# uploading (typically 150-600 KB), so 5 MB is generous.
+MAX_PICTURE_BYTES = 5 * 1024 * 1024
+ALLOWED_PICTURE_MIMES = ("image/jpeg", "image/png", "image/webp")
+# user ids go into the storage path - keep them to a safe charset
+# ("user_" + 12 hex, "mock_user_001", ...); never "/" or "..".
+_SAFE_USER_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+_STORAGE_URL_MARKER = "/storage/v1/object/public/profile-pictures/"
+_PICTURE_KEYS = {f"picture_{n}" for n in range(1, 6)}
+
+
+class PhotoStorageUnavailable(Exception):
+    """Supabase Storage is not configured / unreachable, or the upload
+    failed. server.py maps this to 503. Nothing is written to MongoDB."""
+
+
+class PhotoTooLarge(HTTPException):
+    """Decoded image exceeds MAX_PICTURE_BYTES. Being an HTTPException (413),
+    server.py's `except HTTPException: raise` passes it straight through."""
+
+    def __init__(self, detail: str = "Image is too large (max 5 MB).") -> None:
+        super().__init__(status_code=413, detail=detail)
+
+
+# MongoDB client (URL cache) – set from server.py
 _mongodb_db = None
 
 
@@ -35,8 +64,21 @@ def get_mongodb_db():
 
 
 def initialize_picture_service():
-    logger.info("Picture service initialized (Supabase Storage primary, Mongo fallback)")
+    logger.info("Picture service initialized (Supabase Storage only, Mongo URL cache)")
     return True
+
+
+def _sniff_image_mime(data: bytes) -> Optional[str]:
+    """MIME type from the file header: JPEG / PNG / WEBP only. GIF, AVIF,
+    HEIC/HEIF and anything else -> None (rejected)."""
+    head = data[:16]
+    if head.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return "image/webp"
+    return None
 
 
 # ============== INTERNAL: MONGODB CACHE ==============
@@ -44,6 +86,10 @@ def initialize_picture_service():
 async def _mongo_set_slot(user_id: str, picture_number: int, picture_url: Optional[str], session_id: Optional[str] = None) -> bool:
     db = get_mongodb_db()
     if db is None:
+        return False
+    if isinstance(picture_url, str) and picture_url.startswith("data:"):
+        # Images live in Supabase Storage only - never store base64 in Mongo.
+        logger.warning("Refusing to cache a data: URL as a picture slot")
         return False
     now = datetime.utcnow()
     await db.user_pictures.update_one(
@@ -89,107 +135,92 @@ async def upload_picture_to_storage(
     content_type: str = "image/jpeg",
     session_id: Optional[str] = None,
 ) -> Optional[str]:
-    """Upload one picture. Attempts Supabase Storage first, falls back to
-    storing as base64 data URL in MongoDB. Always writes an audit row to
-    Supabase `user_pictures` (best-effort)."""
-    # Lazy import to avoid circular imports
-    import supabase_service as supa
+    """Upload one picture to Supabase Storage and cache its public URL in the
+    Mongo slot; writes a best-effort audit row to Supabase `user_pictures`.
+
+    Returns the public URL, or None for invalid input (bad user id / slot,
+    bad or empty base64, not JPEG/PNG/WEBP). Raises PhotoTooLarge (413) when
+    the decoded image exceeds MAX_PICTURE_BYTES and PhotoStorageUnavailable
+    (503) when storage is not available or the upload fails - there is no
+    base64-in-Mongo fallback. `content_type` is ignored: the type is sniffed."""
+    # The user id becomes the storage folder: only ever "<user_id>/..." for
+    # the caller server.py already authorised (require_owner).
+    if not _SAFE_USER_ID.match(user_id or "") or picture_number not in (1, 2, 3, 4, 5):
+        logger.warning("Picture upload rejected: invalid user id or picture slot")
+        return None
 
     # Normalise input: accept either raw base64 string or data URL
-    raw_b64 = picture_data
-    if raw_b64 and "base64," in raw_b64:
-        raw_b64 = raw_b64.split("base64,")[1]
+    raw_b64 = picture_data or ""
+    if "base64," in raw_b64:
+        raw_b64 = raw_b64.split("base64,", 1)[1]
+
+    # Cheap pre-check on the encoded length (base64 is ~4/3 of the bytes) so
+    # a huge payload is refused before it is decoded into memory.
+    if len(raw_b64) > MAX_PICTURE_BYTES * 3 // 2:
+        logger.warning(f"Picture upload rejected: payload too large (user_id={user_id} pic#{picture_number})")
+        raise PhotoTooLarge()
 
     try:
         image_bytes = base64.b64decode(raw_b64) if raw_b64 else b""
     except Exception as e:
-        logger.error(f"Picture upload: invalid base64 ({e})")
+        logger.warning(f"Picture upload: invalid base64 ({type(e).__name__})")
+        return None
+    if not image_bytes:
+        logger.warning("Picture upload rejected: empty image")
         return None
 
-    # Reject oversized uploads early so we don't burn Supabase egress.
-    # Bumped from 8MB → 15MB after the previous cap was rejecting normal
-    # high-res Android/iPhone photos that come in around 9-12MB before any
-    # client-side compression by expo-image-picker (quality=0.8).
-    MAX_PICTURE_BYTES = 15 * 1024 * 1024
+    # Reject oversized uploads so we don't burn Supabase storage / egress.
     if len(image_bytes) > MAX_PICTURE_BYTES:
         logger.warning(
             f"Picture upload rejected: {len(image_bytes)} bytes exceeds "
             f"{MAX_PICTURE_BYTES} cap (user_id={user_id} pic#{picture_number})"
         )
-        return None
+        raise PhotoTooLarge()
 
-    # Validate by sniffing the file header. The previous version of this
-    # check used overly-specific HEIC signatures (`ftypheic` only) and was
-    # rejecting modern iPhone uploads which use `ftypheix`, `ftyphvc1`,
-    # `ftypheim`, `ftypmif1`, etc. We now check the ISO-BMFF `ftyp` box
-    # and accept ANY HEIF/HEIC/HEVC brand. JPEG/PNG/WEBP/GIF stay strict.
-    sniffed_mime: Optional[str] = None
-    if image_bytes:
-        head = image_bytes[:32]
-        if head.startswith(b"\xff\xd8\xff"):
-            sniffed_mime = "image/jpeg"
-        elif head.startswith(b"\x89PNG\r\n\x1a\n"):
-            sniffed_mime = "image/png"
-        elif head[:4] == b"RIFF" and head[8:12] == b"WEBP":
-            sniffed_mime = "image/webp"
-        elif head[:6] in (b"GIF87a", b"GIF89a"):
-            sniffed_mime = "image/gif"
-        elif head[4:8] == b"ftyp":
-            # ISO-BMFF container — check brand at bytes 8-12
-            brand = head[8:12]
-            HEIF_BRANDS = {
-                b"heic", b"heix", b"heim", b"heis", b"hevc",
-                b"hevx", b"mif1", b"msf1", b"hvc1",
-            }
-            if brand in HEIF_BRANDS:
-                sniffed_mime = "image/heic" if brand in (b"heic", b"heix", b"hvc1", b"hevc", b"hevx") else "image/heif"
-            elif brand == b"avif":
-                sniffed_mime = "image/avif"
-            # Fallback: accept any ftyp container as image — the storage
-            # backend doesn't strictly need to know the precise subtype.
-            else:
-                sniffed_mime = content_type if content_type and content_type.startswith("image/") else "image/heic"
-    if image_bytes and not sniffed_mime:
+    # Validate by sniffing the file header (JPEG / PNG / WEBP only). The
+    # sniffed type replaces the client-provided content_type so the CDN
+    # serves the correct header.
+    content_type = _sniff_image_mime(image_bytes)
+    if content_type not in ALLOWED_PICTURE_MIMES:
         logger.warning(
-            f"Picture upload rejected: unsupported MIME (user_id={user_id} pic#{picture_number}, "
-            f"first 16 bytes hex={image_bytes[:16].hex() if image_bytes else 'empty'})"
+            f"Picture upload rejected: unsupported image type "
+            f"(user_id={user_id} pic#{picture_number}, {len(image_bytes)} bytes)"
         )
         return None
-    # Override the client-provided content_type with what we sniffed so the
-    # CDN serves the correct header.
-    if sniffed_mime:
-        content_type = sniffed_mime
 
     size_bytes = len(image_bytes)
-    storage_path: Optional[str] = None
-    public_url: Optional[str] = None
-    source = "mongodb_base64"
 
-    # 1) Try Supabase Storage
-    if image_bytes:
-        try:
-            upload_res = supa.upload_image_to_supabase_storage(
-                user_id=user_id,
-                picture_number=picture_number,
-                image_bytes=image_bytes,
-                content_type=content_type or "image/jpeg",
-            )
-            if upload_res and upload_res.get("public_url"):
-                storage_path = upload_res["storage_path"]
-                public_url = upload_res["public_url"]
-                source = "supabase_storage"
-        except Exception as e:
-            logger.warning(f"Supabase Storage upload failed; falling back to base64: {e}")
+    # 1) Supabase Storage is the only store. Lazy import avoids circular
+    #    imports; the SDK call is blocking, so it runs in a worker thread.
+    try:
+        import supabase_service as supa
+    except Exception as e:
+        logger.error(f"Photo storage unavailable: supabase_service import failed ({type(e).__name__})")
+        raise PhotoStorageUnavailable("Photo storage is not available") from e
 
-    # 2) Fallback to data URL in Mongo if Supabase Storage unavailable
-    if not public_url:
-        public_url = f"data:{content_type or 'image/jpeg'};base64,{raw_b64}"
-        source = "mongodb_base64"
+    try:
+        upload_res = await asyncio.to_thread(
+            supa.upload_image_to_supabase_storage,
+            user_id=user_id,
+            picture_number=picture_number,
+            image_bytes=image_bytes,
+            content_type=content_type,
+        )
+    except Exception as e:
+        logger.warning(f"Supabase Storage upload failed: {type(e).__name__}")
+        raise PhotoStorageUnavailable("Photo upload failed") from e
+    if not upload_res or not upload_res.get("public_url"):
+        # The helper logs the cause and returns None (storage not
+        # configured, bucket missing, network error / timeout, ...).
+        raise PhotoStorageUnavailable("Photo upload failed")
 
-    # 3) Update Mongo cache (so reads stay fast)
+    storage_path = upload_res.get("storage_path")
+    public_url = upload_res["public_url"]
+
+    # 2) Update Mongo cache (so reads stay fast)
     await _mongo_set_slot(user_id, picture_number, public_url, session_id)
 
-    # 4) Append audit row in Supabase (non-blocking)
+    # 3) Append audit row in Supabase (non-blocking)
     try:
         await supa.log_picture_event(
             user_id=user_id,
@@ -199,14 +230,14 @@ async def upload_picture_to_storage(
             picture_url=public_url,
             content_type=content_type,
             size_bytes=size_bytes,
-            source=source,
+            source="supabase_storage",
             session_id=session_id,
         )
     except Exception as e:
-        logger.warning(f"Audit log (upload) failed: {e}")
+        logger.warning(f"Audit log (upload) failed: {type(e).__name__}")
 
     logger.info(
-        f"Picture {picture_number} stored for {user_id} via {source} "
+        f"Picture {picture_number} stored for {user_id} via supabase_storage "
         f"({size_bytes} bytes)"
     )
     return public_url
@@ -219,37 +250,55 @@ async def get_user_pictures(user_id: str) -> Optional[Dict[str, Any]]:
 
 async def delete_picture_from_storage(user_id: str, picture_number: int, session_id: Optional[str] = None) -> bool:
     """Delete one picture slot. Tries to remove the file from Supabase Storage
-    if we recognise its public URL; clears the Mongo slot; appends audit row."""
-    import supabase_service as supa
+    if we recognise its public URL; clears the Mongo slot; appends audit row.
+
+    Ownership: only objects inside this user's own "<user_id>/" storage
+    folder are ever removed, even if a foreign URL ended up in the slot."""
+    try:
+        import supabase_service as supa
+    except Exception as e:  # storage/audit unavailable - still clear the slot
+        logger.warning(f"supabase_service unavailable for picture delete: {type(e).__name__}")
+        supa = None
 
     existing = await _mongo_get_all(user_id) or {}
     current_url = existing.get(f"picture_{picture_number}")
     storage_path: Optional[str] = None
 
     # Extract storage path from public URL if it's a Supabase Storage URL
-    if current_url and "/storage/v1/object/public/profile-pictures/" in current_url:
-        try:
-            storage_path = current_url.split("/storage/v1/object/public/profile-pictures/", 1)[1]
-            supa.delete_image_from_supabase_storage(storage_path)
-        except Exception as e:
-            logger.warning(f"Supabase Storage delete failed (non-blocking): {e}")
+    if isinstance(current_url, str) and _STORAGE_URL_MARKER in current_url:
+        candidate = current_url.split(_STORAGE_URL_MARKER, 1)[1].split("?", 1)[0]
+        if user_id and candidate.startswith(f"{user_id}/") and ".." not in candidate:
+            storage_path = candidate
+            if supa is not None:
+                try:
+                    await asyncio.to_thread(supa.delete_image_from_supabase_storage, storage_path)
+                except Exception as e:
+                    logger.warning(f"Supabase Storage delete failed (non-blocking): {type(e).__name__}")
+        else:
+            logger.warning(
+                f"Picture delete: slot {picture_number} of {user_id} points outside the "
+                f"user's storage folder - file not deleted, slot cleared"
+            )
 
     # Clear Mongo slot
     await _mongo_set_slot(user_id, picture_number, None, session_id)
 
     # Audit
-    try:
-        await supa.log_picture_event(
-            user_id=user_id,
-            picture_number=picture_number,
-            action="delete",
-            storage_path=storage_path,
-            picture_url=None,
-            source="supabase_storage" if storage_path else "mongodb_base64",
-            session_id=session_id,
-        )
-    except Exception as e:
-        logger.warning(f"Audit log (delete) failed: {e}")
+    if supa is not None:
+        try:
+            await supa.log_picture_event(
+                user_id=user_id,
+                picture_number=picture_number,
+                action="delete",
+                storage_path=storage_path,
+                picture_url=None,
+                source="supabase_storage" if storage_path else (
+                    "mongodb_base64" if isinstance(current_url, str) and current_url.startswith("data:") else None
+                ),
+                session_id=session_id,
+            )
+        except Exception as e:
+            logger.warning(f"Audit log (delete) failed: {type(e).__name__}")
 
     return True
 
@@ -271,7 +320,13 @@ async def save_user_pictures(
         "last_modified_date": now.strftime("%Y-%m-%d"),
         "session_id": session_id or "auto",
     }
-    for key, value in picture_urls.items():
+    for key, value in (picture_urls or {}).items():
+        # Only the five slot fields (never user_id etc.) and never base64.
+        if key not in _PICTURE_KEYS:
+            continue
+        if isinstance(value, str) and value.startswith("data:"):
+            logger.warning(f"Refusing to cache a data: URL for {key}")
+            continue
         update_data[key] = value
     await db.user_pictures.update_one(
         {"user_id": user_id},

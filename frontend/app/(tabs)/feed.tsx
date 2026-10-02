@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Image, ScrollView,
-  Dimensions, ActivityIndicator, RefreshControl, FlatList, Pressable,
+  ActivityIndicator, RefreshControl,
   Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -9,17 +9,17 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useAppMode } from '../../src/components/SharedHeader';
-import { getUserId } from '../../src/store';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { apiUrl, getUserId } from '../../src/store';
 import { formatLocationForPrivacy } from '../../src/utils/locationFormatter';
-import { PremiumProfileView } from '../../src/components/PremiumProfileView';
-import { shadow } from '../../src/utils/shadow';
+import { PremiumProfileView, normalizePictures } from '../../src/components/PremiumProfileView';
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const TILE_GAP = 12;
-const TILE_WIDTH = (SCREEN_WIDTH - 32 - TILE_GAP) / 2; // 16 padding on each side + gap between
-const TILE_HEIGHT = TILE_WIDTH * 1.35; // Aspect ratio for profile tiles
-const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+
+// Friendly copy for a failed /api/matches call (429 = rate limited).
+const matchesErrorMessage = (status?: number) =>
+  status === 429
+    ? 'Too many requests. Please try again shortly.'
+    : "We couldn't load your matches. Check your connection and try again.";
 
 const COLORS = {
   primary: '#E50914',
@@ -65,13 +65,15 @@ interface MatchProfile {
   exercise?: string;
   education?: string;
   workProfile?: string;
-  pictures?: {
-    picture_1?: string;
-    picture_2?: string;
-    picture_3?: string;
-    picture_4?: string;
-    picture_5?: string;
-  };
+  height?: string;
+  religion?: string;
+  personality?: string;
+  /** Ordered photo URLs (backend contract: string[]). */
+  pictures: string[];
+  /** Primary photo on mock/legacy records. */
+  profile_picture?: string;
+  /** Seeded demo profile (backend MOCK_FEED_PROFILES). */
+  is_mock?: boolean;
   swipe_history?: {
     liked_genres?: string[];
     liked_actors?: string[];
@@ -119,9 +121,9 @@ const ProfileTile = ({
   const avatarColor = AVATAR_COLORS[index % AVATAR_COLORS.length];
 
   // Get profile picture from the profile data itself
-  // Fallback: profile_picture > pictures[0] > null (show initials)
-  const profilePicture = profile.profile_picture || 
-    (profile.pictures && profile.pictures.length > 0 ? profile.pictures[0] : null);
+  // Fallback: profile_picture > pictures[0] > null (show initials).
+  // normalizePictures also tolerates a missing list / legacy picture_N object.
+  const profilePicture = profile.profile_picture || normalizePictures(profile.pictures)[0] || null;
 
   return (
     <TouchableOpacity 
@@ -170,78 +172,6 @@ const ProfileTile = ({
   );
 };
 
-// ============ PHOTO CAROUSEL FOR BOTTOM SHEET ============
-const ExpandedPhotoCarousel = ({ 
-  photos, 
-  name, 
-  avatarColor 
-}: { 
-  photos: string[]; 
-  name: string; 
-  avatarColor: string;
-}) => {
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const scrollViewRef = useRef<ScrollView>(null);
-  const PHOTO_HEIGHT = SCREEN_HEIGHT * 0.4;
-
-  const handleScroll = (event: any) => {
-    const offsetX = event.nativeEvent.contentOffset.x;
-    const index = Math.round(offsetX / SCREEN_WIDTH);
-    setCurrentIndex(index);
-  };
-
-  // If no photos, show avatar placeholder
-  if (photos.length === 0) {
-    return (
-      <View style={[styles.expandedPhotoContainer, { height: PHOTO_HEIGHT }]}>
-        <LinearGradient
-          colors={[avatarColor, `${avatarColor}88`]}
-          style={styles.expandedAvatarPlaceholder}
-        >
-          <Text style={styles.expandedAvatarText}>{name.charAt(0).toUpperCase()}</Text>
-        </LinearGradient>
-      </View>
-    );
-  }
-
-  return (
-    <View style={[styles.expandedPhotoContainer, { height: PHOTO_HEIGHT }]}>
-      <ScrollView
-        ref={scrollViewRef}
-        horizontal
-        pagingEnabled
-        showsHorizontalScrollIndicator={false}
-        onScroll={handleScroll}
-        scrollEventThrottle={16}
-      >
-        {photos.map((photo, index) => (
-          <Image
-            key={index}
-            source={{ uri: photo }}
-            style={[styles.expandedPhoto, { width: SCREEN_WIDTH, height: PHOTO_HEIGHT }]}
-            resizeMode="cover"
-          />
-        ))}
-      </ScrollView>
-      
-      {/* Photo indicators */}
-      {photos.length > 1 && (
-        <View style={styles.photoIndicators}>
-          {photos.map((_, index) => (
-            <View
-              key={index}
-              style={[
-                styles.photoIndicator,
-                currentIndex === index && styles.photoIndicatorActive,
-              ]}
-            />
-          ))}
-        </View>
-      )}
-    </View>
-  );
-};
-
 // ============ LOADING STATE ============
 const LoadingState = ({ mode }: { mode: string }) => (
   <View style={styles.loadingContainer}>
@@ -253,24 +183,92 @@ const LoadingState = ({ mode }: { mode: string }) => (
 
 // ============ EMPTY STATE ============
 interface EmptyStateReason {
-  type: 'filters_restrictive' | 'insufficient_movies' | 'no_matches';
+  type: 'filters_restrictive' | 'insufficient_movies' | 'profile_incomplete' | 'no_matches';
 }
 
-const EmptyState = ({ 
-  mode, 
-  onRefresh, 
+// Pure: derived from the CURRENT matches / own profile / server reason on every
+// render, so it can never read a stale userProfile captured by an old closure.
+const determineEmptyReason = (
+  matchCount: number,
+  profile: any,
+  serverReason: string | null,
+): EmptyStateReason => {
+  if (matchCount > 0) return { type: 'no_matches' };
+  // Backend: POST /api/matches → { matches: [], reason: 'profile_incomplete' }
+  if (serverReason === 'profile_incomplete') return { type: 'profile_incomplete' };
+  // Own profile not loaded (yet / failed) → don't guess.
+  if (!profile) return { type: 'no_matches' };
+
+  // Check if user has enough movie data
+  const topMovies = profile?.topMovies || [];
+  const ratedMovies = profile?.library?.length || 0;
+
+  if (topMovies.length < 3 && ratedMovies < 5) {
+    return { type: 'insufficient_movies' };
+  }
+
+  // Check if filters might be too restrictive
+  const preferences = profile?.preferences || {};
+  const hasRestrictiveFilters =
+    (preferences.ageRange && (preferences.ageRange.max - preferences.ageRange.min) < 10) ||
+    (preferences.distance && preferences.distance < 50);
+
+  if (hasRestrictiveFilters) {
+    return { type: 'filters_restrictive' };
+  }
+
+  return { type: 'no_matches' };
+};
+
+// ============ ERROR STATE ============
+// /api/matches failed — shown instead of (never disguised as) "No matches yet".
+const ErrorState = ({ mode, message, onRetry }: {
+  mode: string;
+  message: string;
+  onRetry: () => void;
+}) => (
+  <View style={styles.emptyContainer}>
+    <View style={styles.emptyIconContainer}>
+      <Ionicons name="cloud-offline-outline" size={48} color={COLORS.textMuted} />
+    </View>
+    <Text style={styles.emptyTitle}>{"Couldn't load matches"}</Text>
+    <Text style={styles.emptySubtitle}>{message}</Text>
+    <TouchableOpacity
+      style={[styles.emptyCTAButton, { backgroundColor: mode === 'date' ? COLORS.primary : COLORS.buddy }]}
+      onPress={onRetry}
+    >
+      <Ionicons name="refresh-outline" size={20} color="#FFF" />
+      <Text style={styles.emptyCTAButtonText}>Try Again</Text>
+    </TouchableOpacity>
+  </View>
+);
+
+const EmptyState = ({
+  mode,
+  onRefresh,
   reason,
   onGoToFilters,
-  onGoToLibrary
-}: { 
-  mode: string; 
+  onGoToLibrary,
+  onCompleteProfile,
+}: {
+  mode: string;
   onRefresh: () => void;
   reason: EmptyStateReason;
   onGoToFilters: () => void;
   onGoToLibrary: () => void;
+  onCompleteProfile: () => void;
 }) => {
   const getEmptyStateContent = () => {
     switch (reason.type) {
+      case 'profile_incomplete':
+        return {
+          icon: 'person-circle-outline' as const,
+          title: 'Complete your profile',
+          subtitle: 'Finish your profile so we can match you with people who share your taste in movies.',
+          ctaText: 'Complete Profile',
+          ctaAction: onCompleteProfile,
+          ctaIcon: 'create-outline' as const,
+        };
       case 'filters_restrictive':
         return {
           icon: 'options-outline' as const,
@@ -337,62 +335,51 @@ const EmptyState = ({
 
 // ============ MAIN FEED SCREEN ============
 export default function FeedScreen() {
-  const { mode, setMode } = useAppMode();
+  const { mode } = useAppMode();
   const router = useRouter();
   const [matches, setMatches] = useState<MatchProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  // Failed /api/matches load — distinct from a genuine empty result.
+  const [matchesError, setMatchesError] = useState<string | null>(null);
+  // Empty-result reason sent by the backend (e.g. 'profile_incomplete').
+  const [serverReason, setServerReason] = useState<string | null>(null);
   const [selectedProfile, setSelectedProfile] = useState<MatchProfile | null>(null);
   const [selectedProfilePhotos, setSelectedProfilePhotos] = useState<string[]>([]);
-  const [selectedIndex, setSelectedIndex] = useState(0);
-  const [emptyReason, setEmptyReason] = useState<EmptyStateReason>({ type: 'no_matches' });
   const [userProfile, setUserProfile] = useState<any>(null);
   const [showProfileModal, setShowProfileModal] = useState(false);
 
   // Fetch user profile to determine empty state reason
-  const fetchUserProfile = async () => {
+  const fetchUserProfile = useCallback(async () => {
     try {
       const userId = await getUserId();
-      const response = await fetch(`${API_BASE}/api/user/profile/${userId}`);
+      if (!userId) return; // fetchMatches handles the logged-out redirect
+      const response = await fetch(apiUrl(`/api/user/profile/${userId}`));
       if (response.ok) {
         const data = await response.json();
         setUserProfile(data.profile);
       }
-    } catch (error) {
-      console.error('Error fetching user profile:', error);
+    } catch {
+      // Only used to pick a more helpful empty-state message.
     }
-  };
+  }, []);
 
-  // Determine the reason for empty state
-  const determineEmptyReason = (matchCount: number, profile: any): EmptyStateReason => {
-    if (matchCount > 0) return { type: 'no_matches' };
-    
-    // Check if user has enough movie data
-    const topMovies = profile?.topMovies || [];
-    const ratedMovies = profile?.library?.length || 0;
-    
-    if (topMovies.length < 3 && ratedMovies < 5) {
-      return { type: 'insufficient_movies' };
-    }
-    
-    // Check if filters might be too restrictive
-    const preferences = profile?.preferences || {};
-    const hasRestrictiveFilters = 
-      (preferences.ageRange && (preferences.ageRange.max - preferences.ageRange.min) < 10) ||
-      (preferences.distance && preferences.distance < 50);
-    
-    if (hasRestrictiveFilters) {
-      return { type: 'filters_restrictive' };
-    }
-    
-    return { type: 'no_matches' };
-  };
+  // Recomputed from current state (see determineEmptyReason).
+  const emptyReason = useMemo(
+    () => determineEmptyReason(matches.length, userProfile, serverReason),
+    [matches, userProfile, serverReason],
+  );
 
-  // Fetch matches from API
-  const fetchMatches = async (forceRefresh = false) => {
+  // Fetch matches from API. Keyed on `mode` so refresh/retry always use the
+  // current state instead of a closure captured on first render.
+  const fetchMatches = useCallback(async (forceRefresh = false) => {
     try {
       const userId = await getUserId();
-      const response = await fetch(`${API_BASE}/api/matches`, {
+      if (!userId) {
+        router.replace('/');
+        return;
+      }
+      const response = await fetch(apiUrl('/api/matches'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -403,7 +390,10 @@ export default function FeedScreen() {
         }),
       });
 
-      if (response.ok) {
+      if (!response.ok) {
+        // Keep whatever is already on screen; the error UI offers Retry.
+        setMatchesError(matchesErrorMessage(response.status));
+      } else {
         const data = await response.json();
         const rawMatches = data.matches || [];
 
@@ -433,89 +423,74 @@ export default function FeedScreen() {
           );
         }
         setMatches(matchList);
-
-        // Determine empty state reason if no matches
-        if (matchList.length === 0) {
-          setEmptyReason(determineEmptyReason(matchList.length, userProfile));
-        }
+        setServerReason(typeof data.reason === 'string' ? data.reason : null);
+        setMatchesError(null);
       }
-    } catch (error) {
-      console.error('Error fetching matches:', error);
+    } catch {
+      setMatchesError(matchesErrorMessage());
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [mode, router]);
 
   useEffect(() => {
     fetchUserProfile();
-  }, []);
+  }, [fetchUserProfile]);
 
   useEffect(() => {
     fetchMatches();
-  }, [mode]); // Re-fetch when mode changes
+  }, [fetchMatches]); // Re-fetch when mode changes (fetchMatches is keyed on mode)
 
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
+    fetchUserProfile(); // movies/profile may have changed → fresh empty-state reason
     fetchMatches(true); // Force refresh to bypass cache
-  }, []);
+  }, [fetchMatches, fetchUserProfile]);
 
+  // Full-screen Retry after a failed load.
+  const handleRetry = useCallback(() => {
+    setMatchesError(null);
+    setLoading(true);
+    fetchMatches();
+  }, [fetchMatches]);
+
+  // Same destination as the header's filters button.
   const handleGoToFilters = () => {
-    router.push('/(tabs)/profile');
+    router.push('/filters');
   };
 
   const handleGoToLibrary = () => {
     router.push('/(tabs)/library');
   };
 
+  const handleCompleteProfile = () => {
+    router.push('/(tabs)/profile');
+  };
+
   // Open profile in bottom sheet
-  const openProfile = async (profile: MatchProfile, index: number) => {
+  const openRequestRef = useRef(0);
+  const openProfile = async (profile: MatchProfile) => {
+    // A second tap while photos load must not show the first profile's photos.
+    const requestId = ++openRequestRef.current;
     setSelectedProfile(profile);
-    setSelectedIndex(index);
-    
-    // Fetch all photos for this profile
+
+    // Fetch all photos for this profile. No placeholder images: if none are
+    // found, [] makes PremiumProfileView fall back to the match's own
+    // `pictures`, then to initials.
+    let photos: string[] = [];
     try {
-      const response = await fetch(`${API_BASE}/api/user/pictures/${profile.user_id}`);
+      const response = await fetch(apiUrl(`/api/user/pictures/${profile.user_id}`));
       if (response.ok) {
         const data = await response.json();
-        const pics = data.pictures || {};
-        const photoArray = [pics.picture_1, pics.picture_2, pics.picture_3, pics.picture_4, pics.picture_5]
-          .filter(Boolean);
-        
-        // If no photos, add random test images for demo purposes
-        if (photoArray.length === 0) {
-          const randomSeed = profile.user_id.charCodeAt(profile.user_id.length - 1);
-          const testPhotos = [
-            `https://picsum.photos/seed/${randomSeed}/400/600`,
-            `https://picsum.photos/seed/${randomSeed + 1}/400/600`,
-            `https://picsum.photos/seed/${randomSeed + 2}/400/600`,
-            `https://picsum.photos/seed/${randomSeed + 3}/400/600`,
-          ];
-          setSelectedProfilePhotos(testPhotos);
-        } else {
-          setSelectedProfilePhotos(photoArray);
-        }
-      } else {
-        // Use random test images as fallback
-        const randomSeed = profile.user_id.charCodeAt(profile.user_id.length - 1);
-        const testPhotos = [
-          `https://picsum.photos/seed/${randomSeed}/400/600`,
-          `https://picsum.photos/seed/${randomSeed + 1}/400/600`,
-          `https://picsum.photos/seed/${randomSeed + 2}/400/600`,
-        ];
-        setSelectedProfilePhotos(testPhotos);
+        photos = normalizePictures(data.pictures);
       }
-    } catch (error) {
-      // Use random test images on error
-      const randomSeed = Math.floor(Math.random() * 100);
-      const testPhotos = [
-        `https://picsum.photos/seed/${randomSeed}/400/600`,
-        `https://picsum.photos/seed/${randomSeed + 1}/400/600`,
-        `https://picsum.photos/seed/${randomSeed + 2}/400/600`,
-      ];
-      setSelectedProfilePhotos(testPhotos);
+    } catch {
+      photos = [];
     }
-    
+    if (requestId !== openRequestRef.current) return;
+    setSelectedProfilePhotos(photos);
+
     setShowProfileModal(true);
   };
 
@@ -537,7 +512,11 @@ export default function FeedScreen() {
     setSendingMessage(true);
     try {
       const userId = await getUserId();
-      const response = await fetch(`${API_BASE}/api/chat/send`, {
+      if (!userId) {
+        router.replace('/');
+        return false;
+      }
+      const response = await fetch(apiUrl('/api/chat/send'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -549,8 +528,6 @@ export default function FeedScreen() {
       });
       
       if (response.ok) {
-        const data = await response.json();
-        
         // Track that we sent a request to this user
         setSentRequestUserIds(prev => new Set([...prev, selectedProfile.user_id]));
         
@@ -575,22 +552,17 @@ export default function FeedScreen() {
   // Loading state
   if (loading) {
     return (
-      <GestureHandlerRootView style={{ flex: 1 }}>
-        <SafeAreaView style={styles.container} edges={['top']}>
-          <View style={styles.header}>
-            <Text style={styles.headerTitle}>Matches</Text>
-            <Text style={styles.headerSubtitle}>Finding compatible profiles...</Text>
-          </View>
-          <LoadingState mode={mode} />
-        </SafeAreaView>
-      </GestureHandlerRootView>
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Matches</Text>
+          <Text style={styles.headerSubtitle}>Finding compatible profiles...</Text>
+        </View>
+        <LoadingState mode={mode} />
+      </SafeAreaView>
     );
   }
 
-  const avatarColor = selectedProfile ? AVATAR_COLORS[selectedIndex % AVATAR_COLORS.length] : COLORS.primary;
-
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaView style={styles.container} edges={['top']}>
         {/* Header */}
         <View style={styles.header}>
@@ -623,13 +595,16 @@ export default function FeedScreen() {
         </View>
 
         {/* Grid of profile tiles */}
-        {matches.length === 0 ? (
-          <EmptyState 
-            mode={mode} 
+        {matches.length === 0 && matchesError ? (
+          <ErrorState mode={mode} message={matchesError} onRetry={handleRetry} />
+        ) : matches.length === 0 ? (
+          <EmptyState
+            mode={mode}
             onRefresh={handleRefresh}
             reason={emptyReason}
             onGoToFilters={handleGoToFilters}
             onGoToLibrary={handleGoToLibrary}
+            onCompleteProfile={handleCompleteProfile}
           />
         ) : (
           <ScrollView
@@ -640,9 +615,18 @@ export default function FeedScreen() {
                 refreshing={refreshing}
                 onRefresh={handleRefresh}
                 tintColor={mode === 'date' ? COLORS.primary : COLORS.buddy}
+                colors={[mode === 'date' ? COLORS.primary : COLORS.buddy]}
               />
             }
           >
+            {/* Refresh failed: keep the stale grid, offer Retry */}
+            {matchesError ? (
+              <TouchableOpacity style={styles.errorBanner} onPress={handleRefresh}>
+                <Ionicons name="alert-circle-outline" size={18} color={COLORS.primary} />
+                <Text style={styles.errorBannerText} numberOfLines={2}>{matchesError}</Text>
+                <Text style={styles.errorBannerRetry}>Retry</Text>
+              </TouchableOpacity>
+            ) : null}
             <View style={styles.gridWrapper}>
               {matches.map((item, index) => (
                 <ProfileTile
@@ -650,7 +634,7 @@ export default function FeedScreen() {
                   profile={item}
                   index={index}
                   mode={mode}
-                  onPress={() => openProfile(item, index)}
+                  onPress={() => openProfile(item)}
                 />
               ))}
             </View>
@@ -696,6 +680,9 @@ export default function FeedScreen() {
                 height: selectedProfile.height,
                 religion: selectedProfile.religion,
                 personality: selectedProfile.personality,
+                // Fallback when `photos` is [] (pictures endpoint empty/failed);
+                // nothing at all → PremiumProfileView shows initials.
+                pictures: selectedProfile.pictures,
               }}
               photos={selectedProfilePhotos}
               mode={mode}
@@ -708,7 +695,6 @@ export default function FeedScreen() {
           </View>
         </Modal>
       </SafeAreaView>
-    </GestureHandlerRootView>
   );
 }
 
@@ -737,41 +723,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  headerModeToggle: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.bgCard,
-    borderRadius: 20,
-    padding: 4,
-    alignSelf: 'flex-start',
-    marginBottom: 12,
-  },
   brandMark: {
     width: 40,
     height: 40,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  headerModeButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 16,
-    gap: 6,
-  },
-  headerModeButtonActiveBuddy: {
-    backgroundColor: COLORS.buddy,
-  },
-  headerModeButtonActiveDate: {
-    backgroundColor: COLORS.primary,
-  },
-  headerModeText: {
-    fontSize: 13,
-    color: COLORS.textSecondary,
-    fontWeight: '600',
-  },
-  headerModeTextActive: {
-    color: '#FFF',
   },
   headerTitleSection: {
     marginTop: 4,
@@ -860,16 +816,29 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     fontSize: 14,
   },
-  refreshButton: {
-    marginTop: 24,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 24,
+
+  // Refresh-failed banner above a stale grid
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.bgCard,
   },
-  refreshButtonText: {
-    color: '#FFF',
+  errorBannerText: {
+    flex: 1,
+    fontSize: 13,
+    color: COLORS.textSecondary,
+  },
+  errorBannerRetry: {
+    fontSize: 13,
     fontWeight: '600',
-    fontSize: 16,
+    color: COLORS.primary,
   },
 
   // Grid Layout
@@ -882,10 +851,6 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     justifyContent: 'space-between',
     gap: TILE_GAP,
-  },
-  gridRow: {
-    justifyContent: 'space-between',
-    marginBottom: 16,
   },
 
   // Profile Tile
@@ -964,344 +929,5 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '600',
     color: '#FFF',
-  },
-
-  // Bottom Sheet
-  bottomSheetBackground: {
-    backgroundColor: COLORS.bgSheet,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-  },
-  bottomSheetHandle: {
-    backgroundColor: COLORS.textMuted,
-    width: 40,
-  },
-  sheetContent: {
-    flex: 1,
-  },
-  
-  // Sheet Header with Back Button
-  sheetHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-  },
-  modeToggleContainer: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.bgCard,
-    borderRadius: 20,
-    padding: 4,
-  },
-  modeToggleButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    gap: 4,
-  },
-  modeToggleButtonActive: {
-    backgroundColor: COLORS.buddy,
-  },
-  modeToggleButtonActiveDate: {
-    backgroundColor: COLORS.primary,
-  },
-  modeToggleText: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-    fontWeight: '500',
-  },
-  modeToggleTextActive: {
-    color: '#FFF',
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  sheetHeaderTitle: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: COLORS.text,
-  },
-  backButtonPlaceholder: {
-    width: 44,
-  },
-
-  // Expanded Photo Carousel
-  expandedPhotoContainer: {
-    width: SCREEN_WIDTH,
-    position: 'relative',
-  },
-  expandedPhoto: {
-    backgroundColor: COLORS.bgCard,
-  },
-  expandedAvatarPlaceholder: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  expandedAvatarText: {
-    fontSize: 80,
-    fontWeight: 'bold',
-    color: '#FFF',
-  },
-  photoIndicators: {
-    position: 'absolute',
-    bottom: 16,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 6,
-  },
-  photoIndicator: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: 'rgba(255,255,255,0.4)',
-  },
-  photoIndicatorActive: {
-    backgroundColor: '#FFF',
-    width: 24,
-  },
-
-  // Profile Info
-  profileInfo: {
-    padding: 20,
-  },
-  nameSection: {
-    marginBottom: 16,
-  },
-  nameRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-  },
-  profileName: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: COLORS.text,
-  },
-  profileAge: {
-    fontSize: 24,
-    color: COLORS.textSecondary,
-    fontWeight: '300',
-  },
-  locationRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 6,
-    gap: 4,
-  },
-  locationText: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-  },
-  dotSeparator: {
-    color: COLORS.textMuted,
-    marginHorizontal: 4,
-  },
-
-  // Match Section
-  matchSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-
-  // Sections
-  section: {
-    marginBottom: 20,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.text,
-    marginBottom: 10,
-  },
-  bioText: {
-    fontSize: 15,
-    color: COLORS.textSecondary,
-    lineHeight: 22,
-  },
-
-  // Explanation Card
-  explanationCard: {
-    backgroundColor: 'rgba(255, 215, 0, 0.1)',
-    borderRadius: 12,
-    padding: 14,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-  },
-  explanationText: {
-    flex: 1,
-    fontSize: 14,
-    color: COLORS.text,
-    lineHeight: 20,
-  },
-
-  // Tags
-  tagsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  tag: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(229, 9, 20, 0.15)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    gap: 6,
-  },
-  tagText: {
-    fontSize: 13,
-    color: COLORS.text,
-  },
-  genreTag: {
-    backgroundColor: COLORS.bgCard,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  genreTagText: {
-    fontSize: 13,
-    color: COLORS.textSecondary,
-  },
-
-  // Movie Item
-  movieItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    gap: 10,
-  },
-  movieTitle: {
-    fontSize: 14,
-    color: COLORS.text,
-  },
-
-  // Message Button
-  messageButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
-    borderRadius: 28,
-    marginTop: 20,
-    gap: 10,
-  },
-  messageButtonText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#FFF',
-  },
-
-  // Message Modal
-  messageModalContainer: {
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  messageModalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-  },
-  messageModalContent: {
-    backgroundColor: COLORS.bgCard,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
-    paddingBottom: 40,
-  },
-  messageModalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  messageModalTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: COLORS.text,
-  },
-  messageModalInput: {
-    backgroundColor: COLORS.bgInput,
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 16,
-    color: COLORS.text,
-    minHeight: 100,
-    maxHeight: 150,
-    textAlignVertical: 'top',
-  },
-  messageModalSendBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: COLORS.primary,
-    paddingVertical: 14,
-    borderRadius: 24,
-    marginTop: 16,
-    gap: 8,
-  },
-  messageModalSendBtnDisabled: {
-    opacity: 0.5,
-  },
-  messageModalSendBtnText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFF',
-  },
-
-  // Request Sent Button
-  requestSentButton: {
-    backgroundColor: 'rgba(0, 210, 106, 0.1)',
-    borderWidth: 1,
-    borderColor: COLORS.success,
-  },
-
-  // Toast notification
-  toastContainer: {
-    position: 'absolute',
-    bottom: 100,
-    left: 16,
-    right: 16,
-    alignItems: 'center',
-  },
-  toast: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.bgCard,
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderRadius: 16,
-    gap: 12,
-    ...shadow({ color: '#000', offsetY: 4, blur: 8, opacity: 0.3, elevation: 5 }),
-    borderWidth: 1,
-    borderColor: 'rgba(0, 210, 106, 0.3)',
-  },
-  toastTextContainer: {
-    flex: 1,
-  },
-  toastTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.text,
-  },
-  toastSubtitle: {
-    fontSize: 13,
-    color: COLORS.textSecondary,
-    marginTop: 2,
   },
 });

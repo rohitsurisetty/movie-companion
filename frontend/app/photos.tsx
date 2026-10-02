@@ -1,16 +1,26 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Image, Alert, ActivityIndicator,
-  ScrollView, Platform,
+  ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { COLORS, SPACING, BORDER_RADIUS } from '../src/theme';
-import { getAuth, saveProfile, getProfile } from '../src/store';
+import { apiUrl, getUserId, saveProfile, getProfile } from '../src/store';
 
-const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+// Uploads are always a downscaled JPEG re-encode — never the camera original.
+const UPLOAD_MAX_WIDTH = 1080;
+
+const uploadErrorText = (status: number, detail: unknown): [string, string] => {
+  const msg = typeof detail === 'string' ? detail : '';
+  if (status === 413) return ['Photo too large', msg || 'Please choose a smaller photo.'];
+  if (status === 503) return ['Upload unavailable', 'Photo storage is temporarily unavailable. Please try again in a few minutes.'];
+  if (status >= 400 && status < 500 && msg) return ['Upload Failed', msg];
+  return ['Upload Failed', 'Failed to upload picture. Please try again.'];
+};
 
 interface PictureSlot {
   index: number;
@@ -25,7 +35,6 @@ export default function PhotosScreen() {
   const isFromProfile = params.from === 'profile';
   
   const [userId, setUserId] = useState<string>('');
-  const [sessionId, setSessionId] = useState<string>('');
   const [pictures, setPictures] = useState<PictureSlot[]>([
     { index: 1, uri: null, uploading: false, uploaded: false },
     { index: 2, uri: null, uploading: false, uploaded: false },
@@ -37,37 +46,41 @@ export default function PhotosScreen() {
 
   const uploadedCount = pictures.filter(p => p.uri && p.uploaded).length;
   const canContinue = uploadedCount >= 1;
+  // Server URLs of the uploaded slots, in slot order (first = primary photo).
+  const uploadedUrls = pictures.filter(p => p.uri && p.uploaded).map(p => p.uri as string);
+  const uploadedKey = uploadedUrls.join('|');
 
   useEffect(() => {
     initializeScreen();
   }, []);
 
+  // Mirror the uploaded photos into the local profile whenever they change
+  // (derived from the latest state, so concurrent uploads can't clobber each other).
+  useEffect(() => {
+    if (loading || !userId) return;
+    (async () => {
+      const profile = await getProfile();
+      await saveProfile({
+        ...(profile || {}),
+        userId,
+        profilePicture: uploadedUrls[0] || null, // First photo is primary
+        pictures: uploadedUrls,
+      });
+    })().catch(error => console.error('Failed to save photos to profile:', error));
+  }, [uploadedKey]);
+
   const initializeScreen = async () => {
     try {
-      // Get user auth
-      const auth = await getAuth();
-      if (auth?.user_id) {
-        setUserId(auth.user_id);
-        setSessionId(auth.session_id || `session_${Date.now()}`);
-        
-        // Fetch existing pictures
-        await fetchExistingPictures(auth.user_id);
-      } else {
-        // Create a temporary user ID for guests
-        const tempId = `guest_${Date.now()}`;
-        setUserId(tempId);
-        setSessionId(`session_${Date.now()}`);
+      const uid = await getUserId();
+      if (!uid) {
+        // Not signed in — never upload under a made-up id.
+        router.replace('/');
+        return;
       }
-      
-      // Request permissions only on native (not web)
-      if (Platform.OS !== 'web') {
-        try {
-          await ImagePicker.requestCameraPermissionsAsync();
-          await ImagePicker.requestMediaLibraryPermissionsAsync();
-        } catch (permError) {
-          console.log('Permission request not available:', permError);
-        }
-      }
+      setUserId(uid);
+      await fetchExistingPictures(uid);
+      // No permission prompts here: the Android photo picker needs none, and
+      // camera permission is requested only when "Take Photo" is chosen.
     } catch (error) {
       console.error('Init error:', error);
     } finally {
@@ -77,7 +90,8 @@ export default function PhotosScreen() {
 
   const fetchExistingPictures = async (uid: string) => {
     try {
-      const response = await fetch(`${API_BASE}/api/user/pictures/${uid}`);
+      const response = await fetch(apiUrl(`/api/user/pictures/${uid}`));
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
       
       if (data.success && data.pictures) {
@@ -113,17 +127,34 @@ export default function PhotosScreen() {
     );
   };
 
+  const resetSlot = (slotIndex: number) => {
+    setPictures(prev => prev.map(p =>
+      p.index === slotIndex
+        ? { ...p, uri: null, uploading: false, uploaded: false }
+        : p
+    ));
+  };
+
   const pickImage = async (slotIndex: number, source: 'camera' | 'gallery') => {
+    let previewing = false;
     try {
       let result: ImagePicker.ImagePickerResult;
 
       if (source === 'camera') {
+        // Ask for the camera only when the user actually wants to use it.
+        const permission = await ImagePicker.requestCameraPermissionsAsync();
+        if (!permission.granted) {
+          Alert.alert(
+            'Camera access needed',
+            'Allow camera access in your phone settings to take a photo, or choose one from your gallery.'
+          );
+          return;
+        }
         result = await ImagePicker.launchCameraAsync({
           mediaTypes: ['images'],
           allowsEditing: true,
           aspect: [4, 5],
           quality: 0.8,
-          base64: true,
         });
       } else {
         result = await ImagePicker.launchImageLibraryAsync({
@@ -131,87 +162,70 @@ export default function PhotosScreen() {
           allowsEditing: true,
           aspect: [4, 5],
           quality: 0.8,
-          base64: true,
         });
       }
 
       if (!result.canceled && result.assets[0]) {
         const asset = result.assets[0];
-        
-        // Check file size (10MB max)
-        if (asset.fileSize && asset.fileSize > 10 * 1024 * 1024) {
-          Alert.alert('File Too Large', 'Please select an image under 10MB.');
-          return;
-        }
 
         // Update local state immediately for preview
-        setPictures(prev => prev.map(p => 
-          p.index === slotIndex 
+        setPictures(prev => prev.map(p =>
+          p.index === slotIndex
             ? { ...p, uri: asset.uri, uploading: true, uploaded: false }
             : p
         ));
+        previewing = true;
+
+        // Downscale + re-encode before upload (never send the original).
+        const resized = await manipulateAsync(
+          asset.uri,
+          asset.width && asset.width <= UPLOAD_MAX_WIDTH ? [] : [{ resize: { width: UPLOAD_MAX_WIDTH } }],
+          { compress: 0.75, format: SaveFormat.JPEG, base64: true }
+        );
+        if (!resized.base64) throw new Error('Image processing failed');
 
         // Upload to server
-        await uploadPicture(slotIndex, asset.base64!, asset.mimeType || 'image/jpeg');
+        await uploadPicture(slotIndex, resized.base64, 'image/jpeg');
       }
     } catch (error) {
       console.error('Error picking image:', error);
+      if (previewing) resetSlot(slotIndex);
       Alert.alert('Error', 'Failed to select image. Please try again.');
     }
   };
 
   const uploadPicture = async (slotIndex: number, base64Data: string, contentType: string) => {
     try {
-      const response = await fetch(`${API_BASE}/api/user/pictures/upload`, {
+      const response = await fetch(apiUrl('/api/user/pictures/upload'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user_id: userId,
-          session_id: sessionId,
           picture_number: slotIndex,
           image_data: base64Data,
           content_type: contentType,
         }),
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => null);
 
-      if (data.success) {
-        // Update state with the new picture
-        const newPictures = pictures.map(p => 
-          p.index === slotIndex 
+      if (response.ok && data?.success && data.picture_url) {
+        // Use the server URL (the local file uri was only a preview). The
+        // local profile is synced from state by the effect above.
+        setPictures(prev => prev.map(p =>
+          p.index === slotIndex
             ? { ...p, uri: data.picture_url, uploading: false, uploaded: true }
             : p
-        );
-        setPictures(newPictures);
-        
-        // Save ALL pictures to local profile storage for reliable sync
-        const profile = await getProfile();
-        const allPictureUrls = newPictures
-          .filter(p => p.uri && p.uploaded)
-          .map(p => p.uri as string);
-        
-        const updatedProfile = {
-          ...(profile || {}),
-          userId: userId,
-          profilePicture: allPictureUrls[0] || null, // First photo is primary
-          pictures: allPictureUrls, // Store all photos
-        };
-        
-        await saveProfile(updatedProfile);
-        console.log('[Photos] Saved', allPictureUrls.length, 'photos to local profile');
+        ));
       } else {
-        throw new Error(data.detail || 'Upload failed');
+        const [title, message] = uploadErrorText(response.status, data?.detail);
+        Alert.alert(title, message);
+        resetSlot(slotIndex);
       }
     } catch (error) {
       console.error('Upload error:', error);
-      Alert.alert('Upload Failed', 'Failed to upload picture. Please try again.');
-      
-      setPictures(prev => prev.map(p => 
-        p.index === slotIndex 
-          ? { ...p, uri: null, uploading: false, uploaded: false }
-          : p
-      ));
+      Alert.alert('Upload Failed', 'Failed to upload picture. Please check your connection and try again.');
+      resetSlot(slotIndex);
     }
   };
 
@@ -226,35 +240,16 @@ export default function PhotosScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              await fetch(`${API_BASE}/api/user/pictures/${userId}/${slotIndex}?session_id=${sessionId}`, {
+              const response = await fetch(apiUrl(`/api/user/pictures/${userId}/${slotIndex}`), {
                 method: 'DELETE',
               });
+              if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-              // Update state
-              const newPictures = pictures.map(p => 
-                p.index === slotIndex 
-                  ? { ...p, uri: null, uploading: false, uploaded: false }
-                  : p
-              );
-              setPictures(newPictures);
-              
-              // Sync to local profile storage
-              const profile = await getProfile();
-              const remainingPictureUrls = newPictures
-                .filter(p => p.uri && p.uploaded)
-                .map(p => p.uri as string);
-              
-              const updatedProfile = {
-                ...(profile || {}),
-                profilePicture: remainingPictureUrls[0] || null,
-                pictures: remainingPictureUrls,
-              };
-              
-              await saveProfile(updatedProfile);
-              console.log('[Photos] Updated local profile after delete, remaining:', remainingPictureUrls.length);
+              // Update state (the local profile is synced from state by the effect above)
+              resetSlot(slotIndex);
             } catch (error) {
               console.error('Delete error:', error);
-              Alert.alert('Error', 'Failed to remove picture.');
+              Alert.alert('Error', 'Failed to remove picture. Please try again.');
             }
           },
         },
@@ -262,9 +257,14 @@ export default function PhotosScreen() {
     );
   };
 
+  const backToProfile = () => {
+    if (router.canGoBack()) router.back();
+    else router.replace('/(tabs)/profile');
+  };
+
   const handleContinue = () => {
     if (isFromProfile) {
-      router.replace('/(tabs)/profile');
+      backToProfile();
     } else {
       // Continue to onboarding
       router.replace('/onboarding');
@@ -273,7 +273,7 @@ export default function PhotosScreen() {
 
   const handleSkip = () => {
     if (isFromProfile) {
-      router.replace('/(tabs)/profile');
+      backToProfile();
     } else {
       router.replace('/onboarding');
     }
@@ -431,7 +431,7 @@ export default function PhotosScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.bgDark },
+  container: { flex: 1, backgroundColor: COLORS.bg },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   
   header: {
@@ -559,7 +559,7 @@ const styles = StyleSheet.create({
     right: 0,
     padding: SPACING.m,
     paddingBottom: SPACING.xl,
-    backgroundColor: COLORS.bgDark,
+    backgroundColor: COLORS.bg,
     borderTopWidth: 1,
     borderTopColor: COLORS.border,
     flexDirection: 'row',

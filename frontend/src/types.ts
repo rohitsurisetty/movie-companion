@@ -1,9 +1,20 @@
+// Canonical option lists (single source of truth shared with the profile
+// editor). constants.ts has no imports, so this cannot create a cycle.
+import {
+  LANGUAGES, GENRES, SMOKING_OPTS, DRINKING_OPTS, EXERCISE_OPTS, PETS_OPTS,
+  FAMILY_OPTS, MARITAL_STATUSES, FOOD_PREFS, RELATIONSHIP_INTENTS, OTT_OPTIONS,
+  FILM_LANGUAGES, RELIGIONS, ZODIAC_SIGNS, SIBLINGS_OPTS, EDUCATION_OPTS, TRAVEL_OPTS,
+} from './components/profile/constants';
+
 export type MovieSelection = {
   id: number;
   title: string;
   poster_path: string;
   rating: number;
   reasons: string[];
+  release_date?: string;
+  vote_average?: number;
+  genres?: string[];
 };
 
 export type ProfileData = {
@@ -45,6 +56,11 @@ export type ProfileData = {
   userId?: string;
   profilePicture?: string;
   pictures?: string[];
+  // Persisted by POST /api/user/profile (dob drives the 18+ check server-side)
+  dob?: string;
+  genderIdentity?: string;
+  locationFull?: string;
+  coordinates?: { lat: number; lng: number };
 };
 
 export const initialProfileData: ProfileData = {
@@ -159,24 +175,26 @@ export const initialFiltersData: FiltersData = {
     minCm: 137, maxCm: 213, unit: 'imperial',
     exclusive: false, expandIfRunOut: true,
   },
-  languages: makeFilter(['English', 'Hindi', 'Telugu', 'Tamil', 'Kannada', 'Malayalam', 'Bengali', 'Marathi', 'Gujarati', 'Punjabi', 'Urdu']),
-  genres: makeFilter(['Action', 'Romance', 'Comedy', 'Thriller', 'Horror', 'Sci-Fi', 'Drama', 'Documentary']),
-  smoking: makeFilter(['Non-smoker', 'Occasional smoker', 'Regular smoker']),
-  drinking: makeFilter(['Non-drinker', 'Social drinker', 'Regular drinker']),
-  exercise: makeFilter(['Regularly', 'Occasionally', 'Rarely']),
-  pets: makeFilter(['Love pets', 'Okay with pets', 'Prefer no pets']),
-  familyPlanning: makeFilter(['Want kids', "Don't want kids", 'Open to kids', 'Not sure yet']),
-  maritalStatus: makeFilter(['Single', 'Divorced', 'Separated', 'Widowed']),
-  foodPreference: makeFilter(['Vegetarian', 'Non-vegetarian', 'Vegan', 'Eggetarian', 'Jain']),
-  intent: makeFilter(['Casual', 'Friendship', 'Serious relationship', 'Exploring']),
+  // Option values MUST match what the profile editor stores, otherwise the
+  // backend's set matching never finds anyone (e.g. 'Non-smoker' vs 'Never').
+  languages: makeFilter(LANGUAGES),
+  genres: makeFilter(GENRES),
+  smoking: makeFilter(SMOKING_OPTS),
+  drinking: makeFilter(DRINKING_OPTS),
+  exercise: makeFilter(EXERCISE_OPTS),
+  pets: makeFilter(PETS_OPTS),
+  familyPlanning: makeFilter(FAMILY_OPTS),
+  maritalStatus: makeFilter(MARITAL_STATUSES),
+  foodPreference: makeFilter(FOOD_PREFS),
+  intent: makeFilter(RELATIONSHIP_INTENTS),
   // New filters - all selected by default
-  ottTheatre: makeFilter(['OTT Lover', 'Theatre Enthusiast', 'Both']),
-  filmLanguages: makeFilter(['English', 'Hindi', 'Telugu', 'Tamil', 'Kannada', 'Malayalam', 'Korean', 'Japanese', 'Spanish', 'French']),
-  religion: makeFilter(['Hindu', 'Muslim', 'Christian', 'Sikh', 'Buddhist', 'Jain', 'Other', 'Prefer not to say']),
-  zodiac: makeFilter(['Aries', 'Taurus', 'Gemini', 'Cancer', 'Leo', 'Virgo', 'Libra', 'Scorpio', 'Sagittarius', 'Capricorn', 'Aquarius', 'Pisces']),
-  siblings: makeFilter(['Only child', 'Has siblings']),
-  education: makeFilter(['High School', 'Bachelor\'s', 'Master\'s', 'PhD', 'Other']),
-  travel: makeFilter(['Frequently', 'Occasionally', 'Rarely', 'Never']),
+  ottTheatre: makeFilter(OTT_OPTIONS),
+  filmLanguages: makeFilter(FILM_LANGUAGES),
+  religion: makeFilter(RELIGIONS),
+  zodiac: makeFilter(ZODIAC_SIGNS),
+  siblings: makeFilter(SIBLINGS_OPTS),
+  education: makeFilter(EDUCATION_OPTS),
+  travel: makeFilter(TRAVEL_OPTS),
 };
 
 export type SwipeRecord = {

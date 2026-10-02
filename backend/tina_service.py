@@ -3,15 +3,16 @@ Tina AI Service - Conversational Profile Builder
 Handles AI-powered profile creation through natural conversation.
 """
 
-import os
-import json
 import logging
 import random
 import re
-from typing import Dict, List, Any, Optional, Tuple
-from datetime import datetime
+from typing import Dict, List, Any, Optional
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 
+from enums import OPTIONS, normalize, normalize_list
+from llm_client import llm_chat, LLMError, LLMUnavailable
+from settings import settings
 from tina_personality import (
     QUESTIONS as PERSONALITY_QUESTIONS,
     finalize_profile as personality_finalize_profile,
@@ -36,46 +37,48 @@ def set_tina_db(db):
 # ============================================
 
 PROFILE_FIELDS = {
+    # Option lists come from enums.OPTIONS (identical to the frontend chips)
+    # so Tina only ever stores canonical values.
     # Mandatory fields Tina should collect
     "relationshipIntent": {
         "type": "multi_select",
-        "options": ["Casual", "Friendship", "Serious relationship", "Exploring"],
+        "options": list(OPTIONS["relationshipIntent"]),
         "question_hint": "what they're looking for in terms of relationships",
         "priority": 1,
     },
     "partnerPreference": {
         "type": "single_select",
-        "options": ["Men", "Women", "Anyone"],
+        "options": list(OPTIONS["partnerPreference"]),
         "question_hint": "who they want to meet (gender preference)",
         "priority": 2,
     },
     "languagesSpoken": {
         "type": "multi_select",
-        "options": ["English", "Hindi", "Telugu", "Tamil", "Kannada", "Malayalam", "Bengali", "Marathi", "Gujarati", "Punjabi", "Urdu"],
+        "options": list(OPTIONS["languagesSpoken"]),
         "question_hint": "languages they speak",
         "priority": 3,
     },
     "movieFrequency": {
         "type": "single_select",
-        "options": ["More than twice a week", "Twice a week", "Once a week", "Twice a month", "Once a month", "Rarely"],
+        "options": list(OPTIONS["movieFrequency"]),
         "question_hint": "how often they watch movies",
         "priority": 4,
     },
     "ottTheatre": {
         "type": "single_select",
-        "options": ["OTT Person", "Theatre Person", "Both", "None"],
+        "options": list(OPTIONS["ottTheatre"]),
         "question_hint": "whether they prefer OTT streaming or theatre",
         "priority": 5,
     },
     "filmLanguages": {
         "type": "multi_select",
-        "options": ["Hindi", "English", "Telugu", "Tamil", "Malayalam", "Kannada", "Korean", "Others"],
+        "options": list(OPTIONS["filmLanguages"]),
         "question_hint": "what language films they watch",
         "priority": 6,
     },
     "genres": {
         "type": "multi_select",
-        "options": ["Action", "Romance", "Comedy", "Thriller", "Horror", "Sci-Fi", "Drama", "Documentary"],
+        "options": list(OPTIONS["genres"]),
         "question_hint": "their favorite movie genres",
         "priority": 7,
     },
@@ -103,21 +106,21 @@ PROFILE_FIELDS = {
     },
     "religion": {
         "type": "single_select",
-        "options": ["Hindu", "Muslim", "Christian", "Sikh", "Buddhist", "Jain", "Other", "Prefer not to say"],
+        "options": list(OPTIONS["religion"]),
         "question_hint": "their religion",
         "priority": 12,
         "optional": True,
     },
     "maritalStatus": {
         "type": "single_select",
-        "options": ["Single", "Divorced", "Widowed", "Separated"],
+        "options": list(OPTIONS["maritalStatus"]),
         "question_hint": "their marital status",
         "priority": 13,
         "optional": True,
     },
     "foodPreference": {
         "type": "single_select",
-        "options": ["Vegetarian", "Non-vegetarian", "Vegan", "Eggetarian", "Jain"],
+        "options": list(OPTIONS["foodPreference"]),
         "question_hint": "their food preference",
         "priority": 14,
         "optional": True,
@@ -131,56 +134,56 @@ PROFILE_FIELDS = {
     },
     "smoking": {
         "type": "single_select",
-        "options": ["Never", "Socially", "Regularly", "Trying to quit"],
+        "options": list(OPTIONS["smoking"]),
         "question_hint": "their smoking habits",
         "priority": 16,
         "optional": True,
     },
     "drinking": {
         "type": "single_select",
-        "options": ["Never", "Socially", "Regularly", "Sober"],
+        "options": list(OPTIONS["drinking"]),
         "question_hint": "their drinking habits",
         "priority": 17,
         "optional": True,
     },
     "exercise": {
         "type": "single_select",
-        "options": ["Daily", "Often", "Sometimes", "Never"],
+        "options": list(OPTIONS["exercise"]),
         "question_hint": "their exercise routine",
         "priority": 18,
         "optional": True,
     },
     "zodiac": {
         "type": "single_select",
-        "options": ["Aries", "Taurus", "Gemini", "Cancer", "Leo", "Virgo", "Libra", "Scorpio", "Sagittarius", "Capricorn", "Aquarius", "Pisces"],
+        "options": list(OPTIONS["zodiac"]),
         "question_hint": "their zodiac sign",
         "priority": 19,
         "optional": True,
     },
     "pets": {
         "type": "single_select",
-        "options": ["Dog lover", "Cat lover", "Both", "No pets", "Other"],
+        "options": list(OPTIONS["pets"]),
         "question_hint": "their pet preferences",
         "priority": 20,
         "optional": True,
     },
     "familyPlanning": {
         "type": "single_select",
-        "options": ["Want kids", "Don't want kids", "Open to kids", "Have kids"],
+        "options": list(OPTIONS["familyPlanning"]),
         "question_hint": "their family planning views",
         "priority": 21,
         "optional": True,
     },
     "siblings": {
         "type": "single_select",
-        "options": ["Only child", "Have siblings"],
+        "options": list(OPTIONS["siblings"]),
         "question_hint": "if they have siblings",
         "priority": 22,
         "optional": True,
     },
     "education": {
         "type": "single_select",
-        "options": ["High School", "Bachelor's", "Master's", "PhD", "Other"],
+        "options": list(OPTIONS["education"]),
         "question_hint": "their education level",
         "priority": 23,
         "optional": True,
@@ -194,7 +197,7 @@ PROFILE_FIELDS = {
     },
     "travel": {
         "type": "single_select",
-        "options": ["Frequently", "Occasionally", "Rarely", "Never"],
+        "options": list(OPTIONS["travel"]),
         "question_hint": "how often they travel",
         "priority": 25,
         "optional": True,
@@ -319,59 +322,116 @@ FIELD_CONVERSATION_STARTERS = {
 # LLM INTEGRATION
 # ============================================
 
-async def get_llm_response(messages: List[Dict[str, str]], user_name: str = "", fast: bool = False) -> str:
-    """Get response from LLM (GPT-4o via Emergent).
+_LLM_ERROR_FALLBACK = "Hmm, I got a bit distracted there! Could you repeat that? 😅"
+# Post-onboarding reply when no OPENAI_API_KEY is configured.
+_LLM_OFFLINE_REPLY = "My chat brain is taking a quick break 😅 — try me again in a little while!"
+_LLM_HISTORY_TURNS = 10
+_LLM_TURN_MAX_CHARS = 1000
+# Tags the model may emit that must never reach the chat bubble.
+_INTERNAL_TAG_RE = re.compile(r"\[(?:COLLECTED:[^\]]*|EXIT_INTENT)\]")
+_SHOW_OPTIONS_TAG_RE = re.compile(r"\[SHOW_OPTIONS:\w+\]")
+
+
+def _clean_name(name: Optional[str]) -> str:
+    """Client-supplied display name, single-line and short — it is placed in
+    the system prompt."""
+    return " ".join(str(name or "").split())[:40]
+
+
+def _llm_history(
+    history: Optional[List[Dict[str, Any]]],
+    latest_user_message: str = "",
+    limit: int = _LLM_HISTORY_TURNS,
+) -> List[Dict[str, str]]:
+    """Last `limit` user/assistant turns as role/content for llm_chat().
+
+    Drops system/context entries (client-supplied conversation_context can
+    contain anything) and the trailing copy of the message being answered,
+    which is sent separately as the user turn.
+    """
+    turns: List[Dict[str, str]] = []
+    for m in history or []:
+        if not isinstance(m, dict) or m.get("role") not in ("user", "assistant"):
+            continue
+        content = m.get("content")
+        if not isinstance(content, str) or not content.strip():
+            continue
+        turns.append({"role": m["role"], "content": content.strip()[:_LLM_TURN_MAX_CHARS]})
+    latest = (latest_user_message or "").strip()[:_LLM_TURN_MAX_CHARS]
+    if latest and turns and turns[-1]["role"] == "user" and turns[-1]["content"] == latest:
+        turns.pop()
+    return turns[-limit:] if limit > 0 else []
+
+
+async def get_llm_response(
+    context: str,
+    user_message: str,
+    history: Optional[List[Dict[str, str]]] = None,
+    user_name: str = "",
+    fast: bool = False,
+    unavailable_fallback: Optional[str] = None,
+    error_fallback: str = _LLM_ERROR_FALLBACK,
+) -> str:
+    """One Tina completion via llm_client (OpenAI).
+
+    system  = TINA_SYSTEM_PROMPT + the caller's `context` (orchestrator state,
+              profile facts — never the raw user message)
+    history = prior user/assistant turns (see `_llm_history`)
+    user    = the user's latest message
 
     Args:
-        fast: if True, use gpt-4o-mini for ~2-3x lower latency. The
-            post-onboarding free-chat path passes fast=True (especially
-            critical for voice mode where the user perceives the gap
-            directly). Quality is still very high for short conversational
-            replies; full gpt-4o stays the default for any path where
-            reasoning quality dominates (system prompt expansion, etc.).
+        fast: tighter timeout + token budget for latency-sensitive paths
+            (voice calls, one-line openers). Model is always
+            settings.llm_model_default.
+        unavailable_fallback: deterministic reply when no API key is
+            configured (LLMUnavailable); defaults to `error_fallback`.
+        error_fallback: reply on any other LLM failure (LLMError) or an
+            empty completion.
     """
-    try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
-        
-        EMERGENT_LLM_KEY = os.getenv("EMERGENT_LLM_KEY")
-        
-        # Build system message
-        system_msg = TINA_SYSTEM_PROMPT
-        if user_name:
-            system_msg += f"\n\nThe user's name is {user_name}. Use it occasionally to make the conversation personal."
-        
-        # Build conversation context
-        context_parts = [system_msg, "\n\nConversation so far:"]
-        for msg in messages:
-            role = msg.get("role", "user")
-            content = msg.get("content", "")
-            if role == "system":
-                context_parts.append(f"\n[Context: {content}]")
-            elif role == "user":
-                context_parts.append(f"\nUser: {content}")
-            elif role == "assistant":
-                context_parts.append(f"\nTina: {content}")
-        
-        full_prompt = "".join(context_parts) + "\n\nGenerate Tina's next response:"
+    system_msg = TINA_SYSTEM_PROMPT
+    name = _clean_name(user_name)
+    if name:
+        system_msg += f"\n\nThe user's name is {name}. Use it occasionally to make the conversation personal."
+    if context:
+        system_msg += f"\n\n{context.strip()}"
 
-        # Initialize chat with correct syntax. Use gpt-4o-mini when the caller
-        # asked for low latency — it's 2-3x faster end-to-end which removes
-        # most of the perceived "Tina is silent" gap on voice calls.
-        model_name = "gpt-4o-mini" if fast else "gpt-4o"
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=f"tina_{user_name or 'user'}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}",
-            system_message="You are Tina, a friendly AI assistant."
-        ).with_model("openai", model_name)
-        
-        # Send message and get response (await the async call)
-        response = await chat.send_message(UserMessage(text=full_prompt))
-        return response
-        
-    except Exception as e:
-        logger.error(f"LLM error: {e}")
-        # Fallback response
-        return "Hmm, I got a bit distracted there! Could you repeat that? 😅"
+    try:
+        text = await llm_chat(
+            system=system_msg,
+            user=(user_message or "").strip()[:_LLM_TURN_MAX_CHARS] or "(no message)",
+            history=history or [],
+            model=settings.llm_model_default,
+            timeout=12 if fast else 25,
+            max_tokens=200 if fast else 400,
+        )
+    except LLMUnavailable:
+        logger.info("Tina LLM unavailable (no OPENAI_API_KEY); using deterministic reply")
+        return unavailable_fallback if unavailable_fallback is not None else error_fallback
+    except LLMError as exc:
+        logger.warning("Tina LLM call failed (%s)", type(exc.__cause__ or exc).__name__)
+        return error_fallback
+    return text or error_fallback
+
+
+def _describe_value(value: Any) -> str:
+    """Short text form of a collected value (chip / movie picks) for the LLM."""
+    if isinstance(value, bool):
+        return "Yes" if value else "No"
+    if isinstance(value, list):
+        return ", ".join(
+            str(v.get("title") or "") if isinstance(v, dict) else str(v) for v in value[:10]
+        )
+    return str(value)[:200]
+
+
+def _template_question(field: str, session: Dict[str, Any], just_collected: bool = False) -> str:
+    """Deterministic Tina line asking for `field` (used when no LLM is configured)."""
+    question = FIELD_CONVERSATION_STARTERS.get(field) or "Tell me a little more about you?"
+    if session.get("awaiting_clarification"):
+        return f"Hmm, I didn't quite catch that 😅\n\n{question}"
+    if just_collected:
+        return f"{random.choice(_P360_REACTIONS)}\n\n{question}"
+    return question
 
 
 # ============================================
@@ -504,6 +564,9 @@ def get_field_mappings(field: str) -> Dict[str, Any]:
             "rarely": "Rarely",
         },
         "ottTheatre": {
+            # Checked first so "both OTT and theatre" isn't read as theatre.
+            "both": "Both OTT & Theatre",
+            "neither": "Neither",
             "netflix": "OTT Person",
             "streaming": "OTT Person",
             "home": "OTT Person",
@@ -513,8 +576,6 @@ def get_field_mappings(field: str) -> Dict[str, Any]:
             "theater": "Theatre Person",
             "theatre": "Theatre Person",
             "imax": "Theatre Person",
-            "both": "Both",
-            "neither": "None",
         },
         "smoking": {
             "don't smoke": "Never",
@@ -762,19 +823,42 @@ async def _load_full_user_profile(user_id: str) -> Optional[Dict[str, Any]]:
     archetype, love language, etc.) so post-onboarding Tina can act like a
     real LLM who remembers everything she learned during signup.
 
+    The 360° results (archetype, primary_love_language, intent split) are
+    written to `tina_profiles` by tina_personality.save_tina_personality,
+    not to `user_profiles`, so they are merged in from there.
+
     Returns None if the DB isn't bound or the user isn't found yet.
     """
     if _db is None:
         return None
+    profile: Dict[str, Any] = {}
     try:
         profile = await _db.user_profiles.find_one(
             {"user_id": user_id},
             {"_id": 0},
-        )
-        return profile
+        ) or {}
     except Exception as exc:  # noqa: BLE001 - non-blocking
         logger.warning(f"[Tina] Failed to load full profile for {user_id}: {exc}")
-        return None
+    persona = await _load_tina_persona(user_id)
+    for key in ("archetype", "primary_love_language", "intent"):
+        if persona.get(key):
+            profile[key] = persona[key]
+    return profile or None
+
+
+async def _load_tina_persona(user_id: str) -> Dict[str, Any]:
+    """The user's 360° result from `tina_profiles` ({} if none / no DB)."""
+    if _db is None:
+        return {}
+    try:
+        doc = await _db.tina_profiles.find_one(
+            {"user_id": user_id},
+            {"_id": 0, "archetype": 1, "primary_love_language": 1, "intent": 1},
+        )
+        return doc or {}
+    except Exception as exc:  # noqa: BLE001 - non-blocking
+        logger.warning(f"[Tina] Failed to load 360 persona for {user_id}: {exc}")
+        return {}
 
 
 def create_empty_session(user_id: str) -> Dict[str, Any]:
@@ -857,7 +941,7 @@ def get_completion_percentage(session: Dict[str, Any]) -> int:
     if phase == "active":
         # Quiz fills 50-99 (we save the final 100 for after archetype_reveal)
         idx = int(p360.get("current_index", 0) or 0)
-        total_q = 8  # PERSONALITY_360_QUESTIONS length — see tina_personality.py
+        total_q = len(PERSONALITY_QUESTIONS) or 1
         quiz_ratio = min(1.0, idx / total_q)
         return min(99, int(50 + quiz_ratio * 49))
 
@@ -866,8 +950,102 @@ def get_completion_percentage(session: Dict[str, Any]) -> int:
 
 
 # ============================================
+# USER PROFILE SYNC (signup completion)
+# ============================================
+# Tina's answers live in tina_sessions.collected_fields while matchmaking
+# reads user_profiles. When signup completes they are mirrored there with
+# canonical spellings (enums.normalize) so matching sees Tina data without
+# the client re-posting the whole profile.
+
+# Only written while user_profiles has none yet: POST /api/user/profile also
+# stores the TMDB-enriched copy (topMoviesEnriched) that must stay in step.
+_FILL_ONLY_FIELDS = {"topMovies"}
+_MOVIE_KEYS = ("id", "title", "poster_path", "release_date", "vote_average", "rating", "genres", "reasons")
+
+
+def _is_empty(value: Any) -> bool:
+    return value is None or value == "" or value == [] or value == {}
+
+
+def _profile_value(field: str, cfg: Dict[str, Any], raw: Any) -> Any:
+    """A collected Tina value in the shape / spelling user_profiles stores."""
+    ftype = cfg.get("type")
+    if ftype == "multi_select":
+        if not isinstance(raw, (list, str)):
+            return None
+        return [v for v in normalize_list(field, raw) if isinstance(v, str) and v.strip()]
+    if ftype == "boolean":
+        if isinstance(raw, bool):
+            return raw
+        return normalize_response(field, raw) if isinstance(raw, str) else None
+    if ftype == "movie_picker":
+        if not isinstance(raw, list):
+            return None
+        return [
+            {k: m[k] for k in _MOVIE_KEYS if k in m}
+            for m in raw
+            if isinstance(m, dict) and m.get("title")
+        ]
+    if isinstance(raw, str):
+        raw = raw.strip()
+        return normalize(field, raw) if raw else None
+    return None
+
+
+async def _sync_collected_to_user_profile(
+    user_id: str, session: Dict[str, Any], overwrite: bool = True
+) -> bool:
+    """Upsert Tina's collected fields into user_profiles {user_id} and set
+    tina_onboarding_complete. Empty values never replace stored ones; with
+    overwrite=False only fields still empty in user_profiles are filled."""
+    if _db is None or not user_id:
+        return False
+    collected = session.get("collected_fields") or {}
+    try:
+        existing = await _db.user_profiles.find_one(
+            {"user_id": user_id},
+            {"_id": 0, **{f: 1 for f in PROFILE_FIELDS}},
+        ) or {}
+    except Exception as exc:  # noqa: BLE001 - non-blocking
+        logger.warning("[Tina] user_profiles read failed for %s (%s)", user_id, type(exc).__name__)
+        return False
+
+    updates: Dict[str, Any] = {}
+    for field, cfg in PROFILE_FIELDS.items():
+        if field not in collected:
+            continue
+        value = _profile_value(field, cfg, collected[field])
+        if _is_empty(value):
+            continue
+        if (not overwrite or field in _FILL_ONLY_FIELDS) and not _is_empty(existing.get(field)):
+            continue
+        updates[field] = value
+    updates["tina_onboarding_complete"] = True
+    updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    try:
+        await _db.user_profiles.update_one(
+            {"user_id": user_id},
+            {"$set": updates},
+            upsert=True,
+        )
+    except Exception as exc:  # noqa: BLE001 - non-blocking
+        logger.warning("[Tina] user_profiles sync failed for %s (%s)", user_id, type(exc).__name__)
+        return False
+    session["user_profile_synced"] = True
+    logger.info("[Tina] synced %d collected fields to user_profiles for %s", len(updates) - 2, user_id)
+    return True
+
+
+# ============================================
 # MAIN CONVERSATION HANDLER
 # ============================================
+
+# Whole words only, and only in short (<= 4 word) messages — "I'm done with
+# horror movies" or "closer to home" must not end the chat.
+_EXIT_INTENT_RE = re.compile(r"\b(later|done|close|skip|exit|bye|goodbye)\b", re.IGNORECASE)
+_SKIP_WORD_RE = re.compile(r"\bskip\b", re.IGNORECASE)
+
 
 async def process_tina_message(
     user_id: str,
@@ -898,7 +1076,9 @@ async def process_tina_message(
         }
     """
     session = await get_tina_session(user_id)
-    
+    user_message = user_message or ""
+    user_name = _clean_name(user_name)
+
     result = {
         "success": True,
         "response": "",
@@ -910,44 +1090,62 @@ async def process_tina_message(
         "completion_percentage": get_completion_percentage(session),
         "profile_data": session.get("collected_fields", {}),
     }
-    
-    # Check for exit intent
-    exit_phrases = ["bye", "goodbye", "see you", "later", "exit", "close", "skip", "done", "that's all", "continue later", "thanks bye"]
-    if any(phrase in user_message.lower() for phrase in exit_phrases):
+
+    current_field = session.get("current_field")
+    # Only a field Tina is still waiting on can be answered. Once collected
+    # (e.g. the last signup field while the 360° quiz / free chat runs),
+    # later chat text or stale chips must not overwrite or re-append it.
+    field_open = bool(current_field) and current_field not in session.get("completed_fields", [])
+
+    # Check for exit intent: a short message (<= 4 words) containing an exit
+    # word as a whole word. "skip" while an OPTIONAL field is being asked
+    # keeps its skip-this-field meaning instead.
+    short_message = 0 < len(user_message.split()) <= 4
+    skip_optional_field = bool(
+        short_message
+        and field_open
+        and PROFILE_FIELDS.get(current_field, {}).get("optional", False)
+        and _SKIP_WORD_RE.search(user_message)
+    )
+    if short_message and not skip_optional_field and _EXIT_INTENT_RE.search(user_message):
         result["exit_intent"] = True
         result["response"] = f"No worries! 😊 I've saved everything we've talked about. You're at {result['completion_percentage']}% complete. We can pick up right where we left off whenever you're ready!"
         await save_tina_session(session)
         return result
-    
-    current_field = session.get("current_field")
-    
+
+    if skip_optional_field:
+        # Skipped: mark done without storing a value so Tina moves on.
+        session["completed_fields"].append(current_field)
+        session["awaiting_clarification"] = False
+        field_open = False
+
     # Handle option selection
-    if selected_option and current_field:
+    if selected_option and field_open:
         field_config = PROFILE_FIELDS.get(current_field)
         if field_config and field_config["type"] in ["single_select", "boolean"]:
             session["collected_fields"][current_field] = selected_option
             session["completed_fields"].append(current_field)
             result["collected_field"] = current_field
             result["collected_value"] = selected_option
-    
+
     # Handle multi-select
-    if selected_options and current_field:
+    if selected_options and field_open:
         field_config = PROFILE_FIELDS.get(current_field)
         if field_config and field_config["type"] == "multi_select":
             session["collected_fields"][current_field] = selected_options
             session["completed_fields"].append(current_field)
             result["collected_field"] = current_field
             result["collected_value"] = selected_options
-    
+
     # Handle movie selection
-    if selected_movies and current_field == "topMovies":
+    if selected_movies and field_open and current_field == "topMovies":
         session["collected_fields"]["topMovies"] = selected_movies
         session["completed_fields"].append("topMovies")
         result["collected_field"] = "topMovies"
         result["collected_value"] = selected_movies
-    
+
     # Process free text response
-    if user_message and current_field and not selected_option and not selected_options:
+    if user_message and field_open and not result["collected_field"] and not selected_option and not selected_options:
         normalized = normalize_response(current_field, user_message)
         if normalized is not None:
             session["collected_fields"][current_field] = normalized
@@ -980,9 +1178,12 @@ async def process_tina_message(
     # Build conversation history for LLM
     history = session.get("conversation_history", [])
     
-    # Add conversation context from frontend if provided
+    # Add conversation context from frontend if provided (chat turns only —
+    # client-sent "system" entries would otherwise reach the LLM prompt)
     if conversation_context:
         for ctx in conversation_context:
+            if not isinstance(ctx, dict) or ctx.get("role") not in ("user", "assistant"):
+                continue
             if ctx not in history:
                 history.append(ctx)
     
@@ -1032,6 +1233,8 @@ async def process_tina_message(
                 # screen (the existing TinaChatScreen overlay already does
                 # this when archetype_reveal arrives).
                 result["signup_complete"] = True
+                # Signup done: mirror the collected fields into user_profiles.
+                await _sync_collected_to_user_profile(user_id, session)
 
             result["completion_percentage"] = get_completion_percentage(session)
             result["profile_data"] = session.get("collected_fields", {})
@@ -1054,10 +1257,26 @@ async def process_tina_message(
         result["completion_percentage"] = 100
         result["profile_data"] = session.get("collected_fields", {})
         # Echo the existing archetype on the result so the frontend overlay
-        # still has data to show even on this fallthrough path.
+        # still has data to show even on this fallthrough path. The reveal
+        # is persisted in tina_profiles (the session never stores it).
         archetype = session.get("archetype")
+        if not archetype:
+            persona = await _load_tina_persona(user_id)
+            arch = persona.get("archetype")
+            if isinstance(arch, dict) and arch.get("title"):
+                archetype = {
+                    "emoji": arch.get("emoji", ""),
+                    "title": arch["title"],
+                    "description": arch.get("description", ""),
+                    "primary_love_language": persona.get("primary_love_language"),
+                    "intent": persona.get("intent") or {},
+                }
         if archetype:
             result["archetype_reveal"] = archetype
+        # Sessions finished before the user_profiles sync existed: fill in
+        # whatever is still missing there, never clobbering later edits.
+        if not session.get("user_profile_synced"):
+            await _sync_collected_to_user_profile(user_id, session, overwrite=False)
         await save_tina_session(session)
         return result
 
@@ -1081,7 +1300,7 @@ async def process_tina_message(
                 session,
                 {
                     "phase": "complete",
-                    "current_index": 8,
+                    "current_index": len(PERSONALITY_QUESTIONS),
                     "answers": p360.get("answers", []),
                 },
             )
@@ -1128,7 +1347,7 @@ async def process_tina_message(
 
     # POST-ONBOARDING: Engage in free-form conversation
     if actually_complete and user_message:
-        logger.info(f"Post-onboarding chat for user {user_id}: {user_message[:50]}...")
+        logger.info("Post-onboarding Tina chat for user %s", user_id)
 
         # Fetch rich user profile from MongoDB so Tina behaves like an LLM
         # who actually KNOWS this user. Without this, post-signup Tina forgets
@@ -1182,18 +1401,13 @@ async def process_tina_message(
             profile_facts.append(f"- Lives in: {city}")
         profile_block = "\n".join(profile_facts) if profile_facts else "- (not much yet — keep learning)"
 
-        # Recent dialogue (last 6 turns) — gives the LLM context to follow up
-        recent_dialog_lines = []
-        for m in (history or [])[-6:]:
-            role = m.get("role")
-            content = (m.get("content") or "").strip()
-            if not content:
-                continue
-            speaker = "User" if role == "user" else "Tina"
-            recent_dialog_lines.append(f"{speaker}: {content}")
-        recent_dialog = "\n".join(recent_dialog_lines) if recent_dialog_lines else "(no prior turns yet)"
+        # Recent dialogue (last 6 turns) goes in as real chat history so the
+        # LLM can follow up; the latest message is the user turn.
+        recent_turns = _llm_history(history, user_message, limit=6)
 
-        system_prompt = f"""You are Tina — a warm, playful, slightly cheeky AI friend on a movie-based dating app. The user has already finished onboarding so you already know them well.
+        system_prompt = f"""MODE: post-onboarding free chat. Onboarding is finished — the question flow, chip options, archetype reveal and TECHNICAL TAGS described above no longer apply; the rules below win.
+
+You are Tina — a warm, playful, slightly cheeky AI friend on a movie-based dating app. The user has already finished onboarding so you already know them well.
 
 WHO YOU'RE TALKING TO ({user_name or 'friend'}):
 {profile_block}
@@ -1216,24 +1430,23 @@ DATING ADVICE:
 LENGTH:
 {'• KEEP REPLIES VERY SHORT (1 sentence, max 2). This is a VOICE call — long replies sound robotic and add latency. Be punchy.' if voice_mode else '• Keep replies SHORT (1-3 sentences). Match their energy and length.'}
 
-RECENT CONVERSATION:
-{recent_dialog}
-
-The user just said: "{user_message}"
+The earlier messages are your recent conversation; the last user message is what they just said.
 
 Reply directly as Tina. No prefix, no labels, just your message."""
 
-        # Voice path: gpt-4o-mini for low latency (~2-3x faster). Text path:
-        # full gpt-4o for richer reasoning + nuance. Quality difference is
-        # noticeable for movie recs and dating advice.
+        # Voice path: fast=True (tighter timeout/token budget) for low
+        # latency. No API key -> a fixed friendly line (nothing to collect).
         tina_response = await get_llm_response(
-            [{"role": "system", "content": system_prompt}],
-            user_name,
+            system_prompt,
+            user_message,
+            history=recent_turns,
+            user_name=user_name,
             fast=voice_mode,
+            unavailable_fallback=_LLM_OFFLINE_REPLY,
         )
 
         # Clean up response
-        tina_response = tina_response.replace("Tina:", "").strip()
+        tina_response = _SHOW_OPTIONS_TAG_RE.sub("", _INTERNAL_TAG_RE.sub("", tina_response.replace("Tina:", ""))).strip() or _LLM_ERROR_FALLBACK
 
         result["response"] = tina_response
         result["completion_percentage"] = 100
@@ -1253,7 +1466,8 @@ Reply directly as Tina. No prefix, no labels, just your message."""
         session["current_field"] = next_field
         field_config = PROFILE_FIELDS.get(next_field)
         
-        # Build context for LLM
+        # Build context for LLM (system role). The user's own words go in the
+        # user turn, never in here.
         context = f"""
 Current conversation state:
 - Fields collected so far: {list(session.get('collected_fields', {}).keys())}
@@ -1262,24 +1476,34 @@ Current conversation state:
 - Field type: {field_config.get('type', 'text')}
 - Options (if applicable): {field_config.get('options', [])}
 
-User's last message: {user_message or '(conversation starting)'}
-
+The final user turn is their latest message ("(conversation starting)" if there is none yet).
 Generate a natural, friendly response that transitions to asking about {next_field}.
 If the user just answered a question, acknowledge their answer briefly first.
 Remember to end with [SHOW_OPTIONS:{next_field}] if this field has predefined options.
 """
-        
+
         if session.get("awaiting_clarification"):
             context += "\nThe user's response didn't match expected options. Ask for clarification in a friendly way."
-        
-        history.append({"role": "system", "content": context})
-        
-        # Get LLM response
-        tina_response = await get_llm_response(history, user_name)
-        
+
+        # A chip tap arrives with an empty message — tell the model what was picked.
+        llm_user_message = user_message
+        if not llm_user_message and result.get("collected_field"):
+            llm_user_message = f"(picked: {_describe_value(result.get('collected_value'))})"
+
+        # Get LLM response (no API key -> deterministic template question)
+        tina_response = await get_llm_response(
+            context,
+            llm_user_message or "(conversation starting)",
+            history=_llm_history(history, user_message),
+            user_name=user_name,
+            unavailable_fallback=_template_question(
+                next_field, session, bool(result.get("collected_field"))
+            ),
+        )
+
         # Clean up response
-        tina_response = tina_response.replace("Tina:", "").strip()
-        
+        tina_response = _INTERNAL_TAG_RE.sub("", tina_response.replace("Tina:", "")).strip()
+
         # Check for show_options tag
         if f"[SHOW_OPTIONS:{next_field}]" in tina_response or field_config.get("type") in ["single_select", "multi_select"]:
             tina_response = re.sub(r'\[SHOW_OPTIONS:\w+\]', '', tina_response).strip()
@@ -1297,7 +1521,7 @@ Remember to end with [SHOW_OPTIONS:{next_field}] if this field has predefined op
         result["response"] = tina_response
         
         # Update history
-        history = [h for h in history if h["role"] != "system"]  # Remove system context
+        history = [h for h in history if isinstance(h, dict) and h.get("role") != "system"]  # Remove system context
         history.append({"role": "assistant", "content": tina_response})
         session["conversation_history"] = history[-20:]  # Keep last 20 messages
         
@@ -1313,7 +1537,9 @@ Remember to end with [SHOW_OPTIONS:{next_field}] if this field has predefined op
         )
         result["signup_complete"] = True
         result["completion_percentage"] = 100
-    
+        if not session.get("user_profile_synced"):
+            await _sync_collected_to_user_profile(user_id, session, overwrite=False)
+
     # Update result with latest data
     result["completion_percentage"] = get_completion_percentage(session)
     result["profile_data"] = session.get("collected_fields", {})
@@ -1426,6 +1652,7 @@ async def generate_welcome_back_message(
         "topic": None,
     }
     
+    user_name = _clean_name(user_name)
     name = user_name or session.get("collected_fields", {}).get("name", "there")
     
     # Check if we should consider onboarding complete based on collected fields
@@ -1513,23 +1740,19 @@ async def generate_welcome_back_message(
                     if t:
                         top_movie_titles.append(t)
 
-            # Recent dialogue tail so the opener can callback to last thread
-            recent_pair = []
-            for m in (session.get("conversation_history") or [])[-4:]:
-                role = "User" if m.get("role") == "user" else "Tina"
-                txt = (m.get("content") or "").strip()
-                if txt:
-                    recent_pair.append(f"{role}: {txt[:140]}")
-            recent_tail = "\n".join(recent_pair) if recent_pair else "(no prior turns)"
+            # Recent dialogue tail (as chat history) so the opener can
+            # callback to the last thread
+            recent_turns = _llm_history(session.get("conversation_history"), limit=4)
 
-            opener_prompt = f"""You are Tina — a warm, witty AI friend on a movie-based dating app reopening a chat with {name}.
+            opener_prompt = f"""MODE: reopening the chat after onboarding. The question flow, chip options and TECHNICAL TAGS described above no longer apply; the rules below win.
+
+You are Tina — a warm, witty AI friend on a movie-based dating app reopening a chat with {user_name or 'the user'}.
 What you know:
 - Archetype: {arche_emoji} {arche_title or '(none)'}
 - Love language: {love_lang or '(none)'}
 - Top movies: {', '.join(top_movie_titles) if top_movie_titles else '(none yet)'}
 
-Recent conversation tail:
-{recent_tail}
+The earlier messages (if any) are the tail of your last conversation.
 
 Write ONE short personal opener (max 1 sentence, ~15 words). Rules:
 • Sound like a friend texting, not a bot. Casual, warm.
@@ -1541,11 +1764,15 @@ Write ONE short personal opener (max 1 sentence, ~15 words). Rules:
 Output just the opener text. No labels, no quotes."""
 
             opener = await get_llm_response(
-                [{"role": "system", "content": opener_prompt}],
-                name,
-                fast=True,  # short single-line generation, mini is plenty
+                opener_prompt,
+                "(I just reopened the chat. Write your opener.)",
+                history=recent_turns,
+                user_name=user_name,
+                fast=True,  # short single-line generation
+                unavailable_fallback="",  # -> safe fallback below
+                error_fallback="",
             )
-            opener = (opener or "").strip().strip('"').strip("'")
+            opener = _SHOW_OPTIONS_TAG_RE.sub("", _INTERNAL_TAG_RE.sub("", (opener or "").replace("Tina:", ""))).strip().strip('"').strip("'")
             # Safety fallback if LLM returns empty or scripted-feeling
             if not opener or len(opener) < 4:
                 opener = f"Hey {name} — been thinking of a movie rec for you. Ask me anything."

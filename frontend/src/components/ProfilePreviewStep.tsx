@@ -1,9 +1,10 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Switch } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Switch, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, BORDER_RADIUS } from '../theme';
 import { ProfileData } from '../types';
 import { getPartialLocation } from '../utils/location';
+import { getProfilePhotos } from './PremiumProfileView';
 
 const AVATAR_COLORS: Record<string, string> = {
   av1: '#E50914', av2: '#FFD700', av3: '#4CAF50', av4: '#2196F3',
@@ -53,10 +54,16 @@ const FIELDS: FieldDef[] = [
 ];
 
 export default function ProfilePreviewStep({ data, onUpdate, onNext }: Props) {
+  // A missing key counts as visible (matches the Switch below and the backend),
+  // so the new value is "visible" only when the field is currently hidden.
+  const isFieldVisible = (key: string) => data.visibilityToggles?.[key] !== false;
   const toggleVisibility = (key: string) => {
-    const updated = { ...data.visibilityToggles, [key]: !data.visibilityToggles[key] };
+    const updated = { ...(data.visibilityToggles || {}), [key]: !isFieldVisible(key) };
     onUpdate('visibilityToggles', updated);
   };
+
+  // Real uploaded photo (this onboarding session first), icon avatar as fallback.
+  const primaryPhoto = getProfilePhotos(data, { preferUploads: true })[0];
 
   const getValue = (field: FieldDef): string => {
     const val = (data as any)[field.key];
@@ -87,13 +94,17 @@ export default function ProfilePreviewStep({ data, onUpdate, onNext }: Props) {
 
       {/* Avatar & Name Header */}
       <View style={styles.profileHeader}>
-        <View style={[styles.avatarLarge, { backgroundColor: AVATAR_COLORS[data.avatarId] || COLORS.primary }]}>
-          <Ionicons
-            name={(AVATAR_ICONS[data.avatarId] || 'person') as any}
-            size={40}
-            color={COLORS.white}
-          />
-        </View>
+        {primaryPhoto ? (
+          <Image source={{ uri: primaryPhoto }} style={[styles.avatarLarge, { backgroundColor: COLORS.bgCard }]} resizeMode="cover" />
+        ) : (
+          <View style={[styles.avatarLarge, { backgroundColor: AVATAR_COLORS[data.avatarId] || COLORS.primary }]}>
+            <Ionicons
+              name={(AVATAR_ICONS[data.avatarId] || 'person') as any}
+              size={40}
+              color={COLORS.white}
+            />
+          </View>
+        )}
         <Text style={styles.profileName}>{data.name || 'Your Name'}</Text>
         {data.age > 0 && <Text style={styles.profileAge}>{data.age} years old</Text>}
         {data.location ? <Text style={styles.profileLocation}>{getPartialLocation(data.location)}</Text> : null}
@@ -123,10 +134,10 @@ export default function ProfilePreviewStep({ data, onUpdate, onNext }: Props) {
           </View>
           {!field.mandatory && (
             <Switch
-              value={data.visibilityToggles[field.key] !== false}
+              value={isFieldVisible(field.key)}
               onValueChange={() => toggleVisibility(field.key)}
               trackColor={{ false: COLORS.border, true: COLORS.primaryDark }}
-              thumbColor={data.visibilityToggles[field.key] !== false ? COLORS.primary : COLORS.textMuted}
+              thumbColor={isFieldVisible(field.key) ? COLORS.primary : COLORS.textMuted}
               testID={`toggle-${field.key}`}
             />
           )}

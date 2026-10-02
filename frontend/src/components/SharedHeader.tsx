@@ -3,13 +3,11 @@ import {
   View, Text, StyleSheet, TouchableOpacity, Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useAppStore, AppMode, getAuth } from '../store';
 import { useRouter } from 'expo-router';
-import Constants from 'expo-constants';
 
-const BACKEND_URL = Constants.expoConfig?.extra?.EXPO_PUBLIC_BACKEND_URL || process.env.EXPO_PUBLIC_BACKEND_URL || '';
-
-export type { AppMode };
+// The buddy/date mode store was removed — the app has a single mode now.
+// The type is kept so legacy callers keep compiling.
+export type AppMode = 'buddy' | 'date';
 
 export interface ThemeColors {
   primary: string;
@@ -108,15 +106,13 @@ export function ModeSwitcher(_props: {
 
 // Hook kept for backwards compatibility. Mode is always 'date' now.
 export function useAppMode() {
-  const mode = useAppStore((state) => state.mode);
-  const setModeGlobal = useAppStore((state) => state.setMode);
+  const mode = 'date' as AppMode;
   const [showModeDrawer, setShowModeDrawer] = React.useState(false);
 
   const colors = getThemeColors(mode);
 
-  const setMode = (newMode: AppMode) => {
-    setModeGlobal(newMode);
-  };
+  // No-op: there is no mode to switch any more.
+  const setMode = (_newMode: AppMode) => {};
 
   return {
     mode,

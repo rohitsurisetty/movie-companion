@@ -8,8 +8,9 @@ Centralizes:
     `user_id` the client put in the body/path; always derive it server-side.
   • `require_owner` — extra guard for endpoints that take a `user_id` in the
     path/body. Confirms it matches the caller's identity.
-  • `get_current_admin` — verifies admin_token (Bearer header or query) against
-    the in-memory admin_tokens store; rejects expired tokens.
+  • `get_current_admin` — verifies admin_token (Bearer header, x-admin-token
+    header or cookie — never a query param) against the in-memory
+    admin_tokens store; rejects expired tokens.
   • `RateLimiter` — minimal in-memory sliding-window limiter for hot/expensive
     endpoints (OTP send, TTS). Per-key (per-user or per-IP).
   • `INSECURE_DEV_AUTH` — opt-in flag that, when set to "true", restores the
@@ -44,11 +45,18 @@ INSECURE_DEV_AUTH = os.getenv("INSECURE_DEV_AUTH", "false").strip().lower() == "
 # Session token extraction
 # ----------------------------------------------------------------------
 
+# The ONLY path allowed to carry the session token in the query string.
+# Native <audio src=...> / expo-av players cannot attach cookies or headers,
+# so the audio stream endpoint is the single sanctioned exception. Tokens in
+# URLs leak into access logs / proxies, so nothing else may use it.
+_QUERY_TOKEN_PATH_SUFFIX = "/tina/voice/speak-stream"
+
+
 def _extract_session_token(request: Request) -> Optional[str]:
     """Pull a session token from the standard places. Cookie first, then
     Authorization Bearer header, then `X-Session-Token` for transport
-    flexibility, then `?session_token=` query param (only for streaming
-    media endpoints like /tina/voice/speak-stream where browsers/native
+    flexibility. The `?session_token=` query param is accepted ONLY for the
+    streaming media endpoint /tina/voice/speak-stream (browsers/native
     <audio src> can't forward cookies or headers). Returns None if absent —
     caller decides how to handle.
     """
@@ -61,9 +69,10 @@ def _extract_session_token(request: Request) -> Optional[str]:
     xst = request.headers.get("x-session-token")
     if xst:
         return xst.strip() or None
-    qtok = request.query_params.get("session_token")
-    if qtok:
-        return qtok.strip() or None
+    if request.url.path.endswith(_QUERY_TOKEN_PATH_SUFFIX):
+        qtok = request.query_params.get("session_token")
+        if qtok:
+            return qtok.strip() or None
     return None
 
 
@@ -117,6 +126,12 @@ async def get_current_user_id(request: Request) -> str:
     uid = session.get("user_id")
     if not uid:
         raise HTTPException(status_code=401, detail="Session has no associated user")
+    # Banned accounts keep their (still valid) session rows, so the ban must
+    # be enforced here on every request. One indexed lookup; no caching so an
+    # admin ban takes effect immediately.
+    user = await _db.users.find_one({"user_id": uid}, {"_id": 0, "status": 1})
+    if user and user.get("status") == "banned":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account suspended")
     return uid
 
 
@@ -147,7 +162,8 @@ def set_admin_tokens_provider(provider) -> None:  # provider() -> dict
 async def get_current_admin(request: Request) -> Dict[str, Any]:
     """Verify the admin token. Tokens are stored in-memory in server.py via
     `admin_tokens`. We tolerate transport via Bearer header, `x-admin-token`,
-    `?admin_token=` query, or admin_token cookie (in that priority).
+    or admin_token cookie (in that priority). Query-string transport is NOT
+    accepted — admin tokens must never end up in URLs / access logs.
     """
     if _admin_tokens_provider is None:
         raise HTTPException(status_code=503, detail="Admin auth unavailable")
@@ -158,8 +174,6 @@ async def get_current_admin(request: Request) -> Dict[str, Any]:
         token = auth[7:].strip()
     if not token:
         token = request.headers.get("x-admin-token")
-    if not token:
-        token = request.query_params.get("admin_token")
     if not token:
         token = request.cookies.get("admin_token")
     if not token:
@@ -191,16 +205,28 @@ class RateLimiter:
     deployments. For multi-pod / horizontal scaling, swap to Redis later.
     """
 
+    # Once this many distinct keys are tracked, drop the buckets that have
+    # fully expired so a flood of one-off IPs can't grow memory unbounded.
+    _PRUNE_THRESHOLD = 10_000
+
     def __init__(self, max_calls: int, window_seconds: int) -> None:
         self.max_calls = max_calls
         self.window = window_seconds
         self._buckets: Dict[str, Deque[float]] = defaultdict(deque)
+
+    def _prune(self, now: float) -> None:
+        cutoff = now - self.window
+        stale = [k for k, b in self._buckets.items() if not b or b[-1] < cutoff]
+        for k in stale:
+            self._buckets.pop(k, None)
 
     def hit(self, key: str) -> Tuple[bool, int]:
         """Record a call for `key`. Returns (allowed, retry_after_seconds).
         retry_after is 0 when allowed.
         """
         now = time.monotonic()
+        if len(self._buckets) >= self._PRUNE_THRESHOLD:
+            self._prune(now)
         bucket = self._buckets[key]
         # Drop entries outside the window
         cutoff = now - self.window
@@ -225,7 +251,9 @@ class RateLimiter:
 # Module-level limiters used by endpoints. Tuned for the demo phase — feel
 # free to flex these later.
 OTP_LIMITER = RateLimiter(max_calls=5, window_seconds=60 * 10)          # 5 / 10 min per identifier
+OTP_VERIFY_LIMITER = RateLimiter(max_calls=8, window_seconds=600)       # 8 verify attempts / 10 min per identifier (brute-force guard)
 TTS_LIMITER = RateLimiter(max_calls=30, window_seconds=60)              # 30 / min per user
+LLM_LIMITER = RateLimiter(max_calls=30, window_seconds=60)              # 30 LLM-backed calls / min per user (ice-breakers, suggestions, Tina)
 LOGIN_ATTEMPT_LIMITER = RateLimiter(max_calls=10, window_seconds=60 * 5) # 10 admin login tries / 5 min per IP
 
 
@@ -233,7 +261,16 @@ def client_ip(request: Request) -> str:
     """Best-effort IP detection for rate-limit keys. Behind a proxy we honour
     X-Forwarded-For; otherwise fall back to the socket.
     """
-    fwd = request.headers.get("x-forwarded-for", "")
-    if fwd:
-        return fwd.split(",")[0].strip()
+    # X-Forwarded-For is "client, proxy1, proxy2…" and each proxy APPENDS the
+    # address it saw. Only the entries added by our own proxies can be
+    # trusted, so read the Nth hop from the right (TRUSTED_PROXY_HOPS, default
+    # 1 = Railway's edge). The leftmost entry is whatever the client sent.
+    hops = [h.strip() for h in request.headers.get("x-forwarded-for", "").split(",") if h.strip()]
+    if hops:
+        try:
+            from settings import settings as _settings
+            n = max(1, int(getattr(_settings, "trusted_proxy_hops", 1) or 1))
+        except Exception:  # pragma: no cover - settings import should never fail
+            n = 1
+        return hops[-n] if len(hops) >= n else hops[0]
     return request.client.host if request.client else "unknown"

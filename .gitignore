@@ -132,3 +132,15 @@ credentials.json
 *.pem
 *.key
 .credentials
+
+# Environment files
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Metro cache (was committed by the builder)
+.metro-cache/
+frontend/.metro-cache/

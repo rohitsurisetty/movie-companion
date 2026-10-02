@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Image, ScrollView,
   Modal, ActivityIndicator,
@@ -6,9 +6,17 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { API_BASE, COLORS, SCREEN_WIDTH, SCREEN_HEIGHT } from './theme';
+import { apiUrl } from '../../store';
+import { normalizePictures } from '../PremiumProfileView';
+import { COLORS, SCREEN_WIDTH, SCREEN_HEIGHT } from './theme';
 import { formatHourMinute, formatDateOrToday } from './utils';
 import type { MessageRequest, FullUserProfile, BackendMessage } from './types';
+
+const requestErrorMessage = (status?: number) => {
+  if (status === 404) return 'This request is no longer available.';
+  if (status === 429) return 'Too many requests. Please try again shortly.';
+  return "Couldn't load this request. Check your connection and try again.";
+};
 
 interface Props {
   visible: boolean;
@@ -25,8 +33,11 @@ export const MessageRequestDetailView: React.FC<Props> = ({
   const [pictures, setPictures] = useState<string[]>([]);
   const [messages, setMessages] = useState<BackendMessage[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [currentPicIndex, setCurrentPicIndex] = useState(0);
   const [activeView, setActiveView] = useState<'messages' | 'profile'>('messages');
+  // Ignore responses for a request that is no longer the one on screen.
+  const loadSeqRef = useRef(0);
 
   useEffect(() => {
     if (visible && request) {
@@ -38,30 +49,40 @@ export const MessageRequestDetailView: React.FC<Props> = ({
 
   const fetchRequestData = async () => {
     if (!request) return;
+    const seq = ++loadSeqRef.current;
     setLoading(true);
+    setLoadError(null);
+    // Never show the previous request's person while this one loads or fails.
+    setProfile(null);
+    setPictures([]);
+    setMessages([]);
     try {
-      const messagesRes = await fetch(`${API_BASE}/api/chat/messages/${request.conversation_id}`);
-      if (messagesRes.ok) {
-        const data = await messagesRes.json();
-        setMessages(data.messages || []);
+      const [messagesRes, profileRes, picsRes] = await Promise.all([
+        fetch(apiUrl(`/api/chat/messages/${encodeURIComponent(request.conversation_id)}`)),
+        fetch(apiUrl(`/api/user/profile/${encodeURIComponent(request.from_user_id)}`)),
+        // Photos are optional: a failure here just means no photos.
+        fetch(apiUrl(`/api/user/pictures/${encodeURIComponent(request.from_user_id)}`)).catch(() => null),
+      ]);
+      if (seq !== loadSeqRef.current) return;
+      const failed = [messagesRes, profileRes].find((res) => !res.ok);
+      if (failed) {
+        setLoadError(requestErrorMessage(failed.status));
+        return;
       }
-      const profileRes = await fetch(`${API_BASE}/api/user/profile/${request.from_user_id}`);
-      if (profileRes.ok) {
-        const data = await profileRes.json();
-        setProfile(data.profile);
-      }
-      const picsRes = await fetch(`${API_BASE}/api/user/pictures/${request.from_user_id}`);
-      if (picsRes.ok) {
-        const data = await picsRes.json();
-        const pics = data.pictures || {};
-        const photoArray = [pics.picture_1, pics.picture_2, pics.picture_3, pics.picture_4, pics.picture_5]
-          .filter(Boolean);
-        setPictures(photoArray);
-      }
-    } catch (error) {
-      console.error('Error fetching request data:', error);
+      const messagesData = await messagesRes.json();
+      const profileData = await profileRes.json();
+      const picsData = picsRes?.ok ? await picsRes.json().catch(() => null) : null;
+      if (seq !== loadSeqRef.current) return;
+      const fullProfile: FullUserProfile | null = profileData?.profile || null;
+      setMessages(Array.isArray(messagesData?.messages) ? messagesData.messages : []);
+      setProfile(fullProfile);
+      // Pictures may be string[] or the legacy { picture_1 … picture_5 } object.
+      const photos = normalizePictures(picsData?.pictures);
+      setPictures(photos.length > 0 ? photos : normalizePictures(fullProfile?.pictures));
+    } catch {
+      if (seq === loadSeqRef.current) setLoadError(requestErrorMessage());
     } finally {
-      setLoading(false);
+      if (seq === loadSeqRef.current) setLoading(false);
     }
   };
 
@@ -109,6 +130,14 @@ export const MessageRequestDetailView: React.FC<Props> = ({
           <View style={styles.loading}>
             <ActivityIndicator size="large" color={COLORS.primary} />
             <Text style={styles.loadingText}>Loading...</Text>
+          </View>
+        ) : loadError ? (
+          <View style={styles.loading}>
+            <Ionicons name="cloud-offline-outline" size={48} color={COLORS.textMuted} />
+            <Text style={styles.errorText}>{loadError}</Text>
+            <TouchableOpacity style={styles.retryBtn} onPress={fetchRequestData}>
+              <Text style={styles.retryBtnText}>Try again</Text>
+            </TouchableOpacity>
           </View>
         ) : (
           <>
@@ -319,6 +348,9 @@ const styles = StyleSheet.create({
   tabTextActive: { color: COLORS.primary, fontWeight: '600' },
   loading: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   loadingText: { color: COLORS.textSecondary, marginTop: 12 },
+  errorText: { fontSize: 15, color: COLORS.textSecondary, textAlign: 'center', marginTop: 12, paddingHorizontal: 32, lineHeight: 22 },
+  retryBtn: { marginTop: 20, paddingHorizontal: 28, paddingVertical: 12, borderRadius: 24, backgroundColor: COLORS.primary },
+  retryBtnText: { fontSize: 15, fontWeight: '600', color: '#FFF' },
   messagesContainer: { flex: 1 },
   messagesContent: { padding: 16, paddingBottom: 130 },
   senderCard: { backgroundColor: COLORS.bgCard, borderRadius: 20, padding: 24, alignItems: 'center', marginBottom: 24 },

@@ -4,6 +4,30 @@ import { Platform } from 'react-native';
 import { create } from 'zustand';
 import { FiltersData, SwipeState } from './types';
 
+// ============ API BASE (single source of truth) ============
+// Every backend call in the app must build its URL from API_BASE / apiUrl().
+// Set EXPO_PUBLIC_BACKEND_URL at build time (eas.json env or .env). The old
+// code read two different env vars in different files, which meant a build
+// with only one of them set sent half the requests unauthenticated.
+export const API_BASE: string = (
+  process.env.EXPO_PUBLIC_BACKEND_URL ||
+  process.env.EXPO_PUBLIC_API_URL ||
+  ''
+)
+  .trim()
+  .replace(/\/+$/, '');
+
+if (!API_BASE) {
+  // Loud but non-fatal: the app renders, every request fails with a clear error.
+  console.warn(
+    '[config] EXPO_PUBLIC_BACKEND_URL is not set — backend requests will fail. ' +
+      'Set it in eas.json (build profile env) or frontend/.env.'
+  );
+}
+
+export const apiUrl = (path: string): string =>
+  `${API_BASE}${path.startsWith('/') ? path : `/${path}`}`;
+
 // ============ USER / CHAT STORE ============
 // Used to hand off "selected conversation" between History screen and Chat tab.
 export interface SelectedConversation {
@@ -37,47 +61,19 @@ const PROFILE_KEY = '@film_companion_profile';
 const ONBOARDING_KEY = '@film_companion_onboarding_complete';
 const FILTERS_KEY = '@film_companion_filters';
 const SWIPES_KEY = '@film_companion_swipes';
-const MODE_KEY = '@film_companion_mode';
+const VISIBILITY_KEY = 'visibility_settings';
 
-export type AppMode = 'buddy' | 'date';
-
-// Zustand store for global app state (shared across all tabs)
-interface AppState {
-  mode: AppMode;
-  setMode: (mode: AppMode) => void;
-  initializeMode: () => Promise<void>;
-}
-
-// NOTE: "Buddy" / "Date" modes have been removed from the product.
-// We keep this store shape for backwards-compatibility with screens that
-// still reference `mode`, but the mode is always forced to 'date' and
-// `setMode` is a no-op. No persistence and no backend sync.
-export const useAppStore = create<AppState>((set) => ({
-  mode: 'date',
-  setMode: async (_mode: AppMode) => {
-    // No-op: mode selection is no longer exposed in the UI.
-    set({ mode: 'date' });
-  },
-  initializeMode: async () => {
-    set({ mode: 'date' });
-  },
-}));
-
-export const saveMode = async (_mode: AppMode) => {
-  // No-op (mode selection removed)
-};
-
-export const getMode = async (): Promise<AppMode> => {
-  return 'date';
-};
-
+// ============ SESSION TOKEN (SecureStore) ============
 // Session token MUST be stored in SecureStore (Keychain/Keystore-backed) not
 // AsyncStorage — an APK on a rooted/compromised device can read AsyncStorage
 // in plaintext. Web doesn't have SecureStore so we transparently fall back
-// to AsyncStorage there (web preview is dev-only). Same idiom used in expo
-// docs.
+// to AsyncStorage there (web preview is dev-only).
 const TOKEN_KEY = 'film_companion_session_token';
 const _useSecure = Platform.OS !== 'web';
+
+// In-memory cache so the global fetch wrapper doesn't hit the Keystore on
+// every single request. `undefined` = not loaded yet, `null` = no token.
+let _tokenCache: string | null | undefined = undefined;
 
 async function _saveSecret(key: string, value: string | null | undefined) {
   if (_useSecure) {
@@ -102,42 +98,70 @@ async function _loadSecret(key: string): Promise<string | null> {
   try { return await AsyncStorage.getItem(`@secure:${key}`); } catch { return null; }
 }
 
+async function _loadToken(): Promise<string | null> {
+  if (_tokenCache !== undefined) return _tokenCache;
+  _tokenCache = await _loadSecret(TOKEN_KEY);
+  return _tokenCache;
+}
+
+// ============ AUTH ============
+export interface AuthData {
+  user_id: string;
+  session_token?: string;
+  name?: string;
+  email?: string;
+  phone?: string;
+  picture?: string;
+  [key: string]: any;
+}
+
 export const saveAuth = async (data: any) => {
   // Split the auth payload: session_token (sensitive) → SecureStore,
-  // everything else (user_id/name/email — already revealed to the server
-  // and not directly exploitable) → AsyncStorage. Keeps existing callers
-  // working unchanged: they hand us {session_token, ...rest}, we read it
-  // back the same way via getAuth().
+  // everything else (user_id/name/email) → AsyncStorage.
   const { session_token, ...rest } = data || {};
   await _saveSecret(TOKEN_KEY, session_token);
+  _tokenCache = session_token || null;
   await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(rest));
 };
 
-export const getAuth = async () => {
-  const raw = await AsyncStorage.getItem(AUTH_KEY);
-  const rest = raw ? JSON.parse(raw) : null;
-  const session_token = await _loadSecret(TOKEN_KEY);
-  if (!rest && !session_token) return null;
-  return { ...(rest || {}), session_token: session_token || undefined };
+/**
+ * Returns the stored auth record, or null when the user is NOT usably logged
+ * in. A record without a session token (e.g. after an Android backup-restore
+ * wiped the Keystore) is treated as logged-out, because every backend call
+ * would 401 anyway.
+ */
+export const getAuth = async (): Promise<AuthData | null> => {
+  let rest: any = null;
+  try {
+    const raw = await AsyncStorage.getItem(AUTH_KEY);
+    rest = raw ? JSON.parse(raw) : null;
+  } catch {
+    rest = null;
+  }
+  const session_token = await _loadToken();
+  if (!rest?.user_id || !session_token) return null;
+  return { ...rest, session_token };
 };
 
 export const getUserId = async (): Promise<string> => {
-  // Returns the authenticated user_id from storage, or an empty string when
-  // unauthenticated. The previous "guest_${Date.now()}" fallback was
-  // dangerous now that the backend enforces require_owner — any made-up id
-  // 404s. Callers should treat empty string as "not signed in" and either
-  // redirect to login or refuse to send the request.
+  // Empty string = not signed in. Callers must redirect to login or refuse
+  // to send the request — never fabricate an id.
   const auth = await getAuth();
   return auth?.user_id || '';
 };
 
+// ============ PROFILE / ONBOARDING ============
 export const saveProfile = async (data: any) => {
   await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(data));
 };
 
 export const getProfile = async () => {
-  const data = await AsyncStorage.getItem(PROFILE_KEY);
-  return data ? JSON.parse(data) : null;
+  try {
+    const data = await AsyncStorage.getItem(PROFILE_KEY);
+    return data ? JSON.parse(data) : null;
+  } catch {
+    return null;
+  }
 };
 
 export const setOnboardingComplete = async () => {
@@ -149,149 +173,298 @@ export const isOnboardingComplete = async () => {
   return val === 'true';
 };
 
-export const saveFilters = async (data: FiltersData) => {
-  await AsyncStorage.setItem(FILTERS_KEY, JSON.stringify(data));
-  
-  // Also sync to backend for Supabase tracking
+// ============ FILTERS ============
+const heightLabel = (feet?: number, inches?: number): string | null =>
+  typeof feet === 'number' && feet > 0 ? `${feet}'${inches ?? 0}"` : null;
+
+/** Builds the exact payload POST /api/user/filters expects (all ints/strings/lists). */
+export const buildFiltersPayload = (data: FiltersData) => {
+  const sec = (s?: { selected?: string[]; exclusive?: boolean; expandIfRunOut?: boolean }) => ({
+    selected: s?.selected ?? [],
+    first: s?.selected?.[0] ?? null,
+    exclusive: !!s?.exclusive,
+    expand: s?.expandIfRunOut ?? true,
+  });
+  const f = {
+    languages: sec(data.languages),
+    genres: sec(data.genres),
+    ottTheatre: sec(data.ottTheatre),
+    filmLanguages: sec(data.filmLanguages),
+    religion: sec(data.religion),
+    zodiac: sec(data.zodiac),
+    siblings: sec(data.siblings),
+    education: sec(data.education),
+    travel: sec(data.travel),
+    smoking: sec(data.smoking),
+    drinking: sec(data.drinking),
+    exercise: sec(data.exercise),
+    pets: sec(data.pets),
+    familyPlanning: sec(data.familyPlanning),
+    maritalStatus: sec(data.maritalStatus),
+    foodPreference: sec(data.foodPreference),
+    intent: sec(data.intent),
+  };
+  const distance = data.distance?.radius;
+  return {
+    // -1 means "no limit" in the UI; send null so the backend applies no cap.
+    distance_radius:
+      typeof distance === 'number' && distance > 0 ? Math.round(distance) : null,
+    age_min: data.age?.min ?? null,
+    age_max: data.age?.max ?? null,
+    height_min: heightLabel(data.height?.minFeet, data.height?.minInches),
+    height_max: heightLabel(data.height?.maxFeet, data.height?.maxInches),
+    height_min_cm: data.height?.minCm ?? null,
+    height_max_cm: data.height?.maxCm ?? null,
+    languages: f.languages.selected,
+    genres: f.genres.selected,
+    ott_theatre: f.ottTheatre.first,
+    film_languages: f.filmLanguages.selected,
+    religion: f.religion.first,
+    zodiac: f.zodiac.first,
+    siblings: f.siblings.first,
+    education: f.education.first,
+    travel: f.travel.first,
+    smoking: f.smoking.first,
+    drinking: f.drinking.first,
+    exercise: f.exercise.first,
+    pets: f.pets.first,
+    family_planning: f.familyPlanning.first,
+    marital_status: f.maritalStatus.first,
+    food_preference: f.foodPreference.first,
+    intent: f.intent.first,
+    // Full multi-select lists so the backend can do proper set matching.
+    selected_lists: {
+      ottTheatre: f.ottTheatre.selected,
+      religion: f.religion.selected,
+      zodiac: f.zodiac.selected,
+      siblings: f.siblings.selected,
+      education: f.education.selected,
+      travel: f.travel.selected,
+      smoking: f.smoking.selected,
+      drinking: f.drinking.selected,
+      exercise: f.exercise.selected,
+      pets: f.pets.selected,
+      familyPlanning: f.familyPlanning.selected,
+      maritalStatus: f.maritalStatus.selected,
+      foodPreference: f.foodPreference.selected,
+      intent: f.intent.selected,
+    },
+    exclusive_toggles: {
+      distanceRadius: !!data.distance?.exclusive,
+      ageRange: !!data.age?.exclusive,
+      heightPreference: !!data.height?.exclusive,
+      languagesTheySpeak: f.languages.exclusive,
+      favouriteGenres: f.genres.exclusive,
+      ottOrTheatrePreference: f.ottTheatre.exclusive,
+      languagesTheyWatch: f.filmLanguages.exclusive,
+      religion: f.religion.exclusive,
+      zodiacSign: f.zodiac.exclusive,
+      siblings: f.siblings.exclusive,
+      education: f.education.exclusive,
+      travelFrequency: f.travel.exclusive,
+      smokingPreference: f.smoking.exclusive,
+      drinkingPreference: f.drinking.exclusive,
+      exercisePreference: f.exercise.exclusive,
+      petsPreference: f.pets.exclusive,
+      familyPlanning: f.familyPlanning.exclusive,
+      maritalStatus: f.maritalStatus.exclusive,
+      foodPreference: f.foodPreference.exclusive,
+      intentPreference: f.intent.exclusive,
+    },
+    expand_if_run_out_toggles: {
+      distanceRadius: data.distance?.expandIfRunOut ?? true,
+      ageRange: data.age?.expandIfRunOut ?? true,
+      heightPreference: data.height?.expandIfRunOut ?? true,
+      languagesTheySpeak: f.languages.expand,
+      favouriteGenres: f.genres.expand,
+      ottOrTheatrePreference: f.ottTheatre.expand,
+      languagesTheyWatch: f.filmLanguages.expand,
+      religion: f.religion.expand,
+      zodiacSign: f.zodiac.expand,
+      siblings: f.siblings.expand,
+      education: f.education.expand,
+      travelFrequency: f.travel.expand,
+      smokingPreference: f.smoking.expand,
+      drinkingPreference: f.drinking.expand,
+      exercisePreference: f.exercise.expand,
+      petsPreference: f.pets.expand,
+      familyPlanning: f.familyPlanning.expand,
+      maritalStatus: f.maritalStatus.expand,
+      foodPreference: f.foodPreference.expand,
+      intentPreference: f.intent.expand,
+    },
+  };
+};
+
+// Network sync is debounced: sliders fire onValueChange dozens of times per
+// drag. Local persistence is immediate so the UI never loses state.
+let _filtersSyncTimer: ReturnType<typeof setTimeout> | null = null;
+let _pendingFilters: FiltersData | null = null;
+
+const _flushFiltersSync = async () => {
+  const data = _pendingFilters;
+  _pendingFilters = null;
+  if (!data) return;
   try {
     const auth = await getAuth();
-    if (auth?.user_id) {
-      const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
-      await fetch(`${BACKEND_URL}/api/user/filters`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: auth.user_id,
-          session_id: auth.session_token,
-          distance_radius: data.distance,
-          age_min: data.ageRange?.min,
-          age_max: data.ageRange?.max,
-          height_min: data.heightRange?.minFeet ? `${data.heightRange.minFeet}'${data.heightRange.minInches}"` : null,
-          height_max: data.heightRange?.maxFeet ? `${data.heightRange.maxFeet}'${data.heightRange.maxInches}"` : null,
-          languages: data.languages?.selected,
-          genres: data.genres?.selected,
-          ott_theatre: data.ottTheatre?.selected?.[0],
-          film_languages: data.filmLanguages?.selected,
-          religion: data.religion?.selected?.[0],
-          zodiac: data.zodiac?.selected?.[0],
-          siblings: data.siblings?.selected?.[0],
-          education: data.education?.selected?.[0],
-          travel: data.travel?.selected?.[0],
-          smoking: data.smoking?.selected?.[0],
-          drinking: data.drinking?.selected?.[0],
-          exercise: data.exercise?.selected?.[0],
-          pets: data.pets?.selected?.[0],
-          family_planning: data.familyPlanning?.selected?.[0],
-          marital_status: data.maritalStatus?.selected?.[0],
-          food_preference: data.foodPreference?.selected?.[0],
-          intent: data.intent?.selected?.[0],
-          exclusive_toggles: {
-            distanceRadius: data.languages?.exclusive || false,
-            ageRange: data.ageRange ? true : false,
-            heightPreference: data.heightRange ? true : false,
-            languagesTheySpeak: data.languages?.exclusive || false,
-            favouriteGenres: data.genres?.exclusive || false,
-            ottOrTheatrePreference: data.ottTheatre?.exclusive || false,
-            languagesTheyWatch: data.filmLanguages?.exclusive || false,
-            religion: data.religion?.exclusive || false,
-            zodiacSign: data.zodiac?.exclusive || false,
-            siblings: data.siblings?.exclusive || false,
-            education: data.education?.exclusive || false,
-            travelFrequency: data.travel?.exclusive || false,
-            smokingPreference: data.smoking?.exclusive || false,
-            drinkingPreference: data.drinking?.exclusive || false,
-            exercisePreference: data.exercise?.exclusive || false,
-            petsPreference: data.pets?.exclusive || false,
-            familyPlanning: data.familyPlanning?.exclusive || false,
-            maritalStatus: data.maritalStatus?.exclusive || false,
-            foodPreference: data.foodPreference?.exclusive || false,
-            intentPreference: data.intent?.exclusive || false,
-          },
-          expand_if_run_out_toggles: {
-            distanceRadius: data.languages?.expandIfRunOut ?? true,
-            ageRange: true,
-            heightPreference: true,
-            languagesTheySpeak: data.languages?.expandIfRunOut ?? true,
-            favouriteGenres: data.genres?.expandIfRunOut ?? true,
-            ottOrTheatrePreference: data.ottTheatre?.expandIfRunOut ?? true,
-            languagesTheyWatch: data.filmLanguages?.expandIfRunOut ?? true,
-            religion: data.religion?.expandIfRunOut ?? true,
-            zodiacSign: data.zodiac?.expandIfRunOut ?? true,
-            siblings: data.siblings?.expandIfRunOut ?? true,
-            education: data.education?.expandIfRunOut ?? true,
-            travelFrequency: data.travel?.expandIfRunOut ?? true,
-            smokingPreference: data.smoking?.expandIfRunOut ?? true,
-            drinkingPreference: data.drinking?.expandIfRunOut ?? true,
-            exercisePreference: data.exercise?.expandIfRunOut ?? true,
-            petsPreference: data.pets?.expandIfRunOut ?? true,
-            familyPlanning: data.familyPlanning?.expandIfRunOut ?? true,
-            maritalStatus: data.maritalStatus?.expandIfRunOut ?? true,
-            foodPreference: data.foodPreference?.expandIfRunOut ?? true,
-            intentPreference: data.intent?.expandIfRunOut ?? true,
-          },
-        }),
-      });
+    if (!auth?.user_id || !API_BASE) return;
+    const res = await fetch(apiUrl('/api/user/filters'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: auth.user_id, ...buildFiltersPayload(data) }),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      console.warn('[filters] backend rejected filters', res.status, text.slice(0, 200));
     }
   } catch (error) {
-    console.log('Failed to sync filters to backend:', error);
+    console.warn('[filters] failed to sync filters to backend:', error);
   }
 };
 
-export const getFilters = async (): Promise<FiltersData | null> => {
-  const data = await AsyncStorage.getItem(FILTERS_KEY);
-  return data ? JSON.parse(data) : null;
+export const saveFilters = async (data: FiltersData, { immediate = false } = {}) => {
+  await AsyncStorage.setItem(FILTERS_KEY, JSON.stringify(data));
+  _pendingFilters = data;
+  if (_filtersSyncTimer) clearTimeout(_filtersSyncTimer);
+  if (immediate) {
+    _filtersSyncTimer = null;
+    await _flushFiltersSync();
+    return;
+  }
+  _filtersSyncTimer = setTimeout(() => {
+    _filtersSyncTimer = null;
+    void _flushFiltersSync();
+  }, 700);
 };
 
+export const getFilters = async (): Promise<FiltersData | null> => {
+  try {
+    const data = await AsyncStorage.getItem(FILTERS_KEY);
+    return data ? JSON.parse(data) : null;
+  } catch {
+    return null;
+  }
+};
+
+// ============ SWIPES ============
 export const saveSwipeState = async (data: SwipeState) => {
   await AsyncStorage.setItem(SWIPES_KEY, JSON.stringify(data));
 };
 
 export const getSwipeState = async (): Promise<SwipeState | null> => {
-  const data = await AsyncStorage.getItem(SWIPES_KEY);
-  return data ? JSON.parse(data) : null;
+  try {
+    const data = await AsyncStorage.getItem(SWIPES_KEY);
+    return data ? JSON.parse(data) : null;
+  } catch {
+    return null;
+  }
 };
 
+// ============ LOGOUT ============
+/** Clears every piece of local state for the current account. */
 export const clearAll = async () => {
-  await AsyncStorage.multiRemove([AUTH_KEY, PROFILE_KEY, ONBOARDING_KEY, FILTERS_KEY, SWIPES_KEY]);
-  // Also wipe the session token from SecureStore so logout truly clears auth.
+  await AsyncStorage.multiRemove([
+    AUTH_KEY,
+    PROFILE_KEY,
+    ONBOARDING_KEY,
+    FILTERS_KEY,
+    SWIPES_KEY,
+    VISIBILITY_KEY,
+  ]);
   await _saveSecret(TOKEN_KEY, null);
+  _tokenCache = null;
+  _pendingFilters = null;
+  useUserStore.getState().clearSelectedConversation();
 };
 
-// Install a global fetch monkey-patch that automatically attaches the
-// session token to any backend API request, so the 50+ existing fetch()
-// call sites keep working unchanged after we added the global auth
-// middleware. Must be called ONCE at app boot (root _layout.tsx).
+/**
+ * Sign out: tells the backend to revoke the session (best effort) and wipes
+ * local state. Does NOT delete the account — see the dedicated
+ * "Delete account" flow for that.
+ */
+export const logout = async () => {
+  try {
+    const token = await _loadToken();
+    if (token && API_BASE) {
+      await fetch(apiUrl('/api/auth/logout'), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      }).catch(() => undefined);
+    }
+  } finally {
+    await clearAll();
+  }
+};
+
+// ============ AUTHENTICATED FETCH ============
+// Global fetch monkey-patch that attaches the session token to backend API
+// requests and funnels 401s into a single "session expired" handler. Must be
+// called ONCE at app boot (root _layout.tsx).
+type UnauthorizedHandler = () => void;
 let _authFetchInstalled = false;
-export function installAuthenticatedFetch(apiBase: string) {
+let _onUnauthorized: UnauthorizedHandler | null = null;
+let _unauthorizedFired = false;
+
+export function setUnauthorizedHandler(handler: UnauthorizedHandler | null) {
+  _onUnauthorized = handler;
+  _unauthorizedFired = false;
+}
+
+export function installAuthenticatedFetch(
+  apiBase: string = API_BASE,
+  opts: { onUnauthorized?: UnauthorizedHandler } = {}
+) {
+  if (opts.onUnauthorized) setUnauthorizedHandler(opts.onUnauthorized);
   if (_authFetchInstalled) return;
   _authFetchInstalled = true;
   const originalFetch = (globalThis as any).fetch?.bind(globalThis);
   if (!originalFetch) return;
+
   (globalThis as any).fetch = async (input: any, init: any = {}) => {
+    let url: string = '';
     try {
-      let url: string = typeof input === 'string' ? input : (input?.url || '');
-      // Only inject for backend API calls — never for third-party or static URLs.
-      const isBackend = apiBase && url && url.startsWith(apiBase);
-      if (!isBackend) return originalFetch(input, init);
-      const token = await _loadSecret(TOKEN_KEY);
-      if (!token) return originalFetch(input, init);
-      const headers = new Headers(init?.headers || {});
-      if (!headers.has('Authorization')) {
-        headers.set('Authorization', `Bearer ${token}`);
-      }
-      // expo-audio AudioPlayer in native won't forward headers — let any
-      // helpers that build streaming URLs (e.g. tts speak-stream) read this
-      // value if needed. Not added globally because we only want it on the
-      // few endpoints that actually consume <audio src=URL>.
-      return originalFetch(input, { ...init, headers });
-    } catch (e) {
-      return originalFetch(input, init);
+      url = typeof input === 'string' ? input : input?.url || '';
+    } catch {
+      url = '';
     }
+    // Only inject for backend API calls — never for third-party or static URLs.
+    const isBackend = !!apiBase && !!url && url.startsWith(apiBase);
+    if (!isBackend) return originalFetch(input, init);
+
+    let request = init;
+    try {
+      const token = await _loadToken();
+      if (token) {
+        const headers = new Headers(init?.headers || {});
+        if (!headers.has('Authorization')) headers.set('Authorization', `Bearer ${token}`);
+        request = { ...init, headers };
+      }
+    } catch {
+      request = init;
+    }
+
+    const response: Response = await originalFetch(input, request);
+
+    // Session expired / revoked → wipe local auth once and bounce to login.
+    // Auth endpoints themselves are exempt (a wrong OTP is also a 401).
+    const isAuthEndpoint = url.includes('/api/auth/');
+    if (response.status === 401 && !isAuthEndpoint && !_unauthorizedFired) {
+      _unauthorizedFired = true;
+      try {
+        await clearAll();
+      } catch { /* ignore */ }
+      try {
+        _onUnauthorized?.();
+      } catch { /* ignore */ }
+      // Allow the handler to fire again for a future session.
+      setTimeout(() => { _unauthorizedFired = false; }, 3000);
+    }
+    return response;
   };
 }
 
-// Convenience: read the raw token for components that need to append it as
-// a query param on streaming-media URLs (audio src=). Returns '' if none.
+// Convenience: read the raw token for components that need to pass it
+// explicitly (e.g. expo-audio streaming headers). Returns '' if none.
 export async function getSessionToken(): Promise<string> {
-  return (await _loadSecret(TOKEN_KEY)) || '';
+  return (await _loadToken()) || '';
 }

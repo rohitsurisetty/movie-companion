@@ -1,25 +1,24 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity, Image,
-  ScrollView, Modal, ActivityIndicator, KeyboardAvoidingView, 
-  Platform, Pressable, Keyboard
+  ScrollView, Modal, ActivityIndicator,
+  Pressable, Keyboard
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+// keyboard-controller's KAV: RN's breaks in edge-to-edge APK builds
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { Ionicons } from '@expo/vector-icons';
-import Constants from 'expo-constants';
-import { getAuth } from '../../src/store';
+import { apiUrl, getAuth } from '../../src/store';
 import { LEFT_SWIPE_REASONS, RIGHT_SWIPE_REASONS } from '../../src/theme';
-import { SharedHeader, ModeSwitcher, useAppMode } from '../../src/components/SharedHeader';
-
-const BACKEND_URL = Constants.expoConfig?.extra?.EXPO_PUBLIC_BACKEND_URL 
-  || process.env.EXPO_PUBLIC_BACKEND_URL 
-  || '';
+import { SharedHeader, useAppMode } from '../../src/components/SharedHeader';
 
 const GRID_PADDING = 12;
-const GRID_GAP = 8;
-const NUM_COLUMNS = 3;
-// Calculate card width based on percentage to work across platforms
-const CARD_PERCENTAGE = (100 - ((GRID_GAP * (NUM_COLUMNS - 1)) / 3.9)) / NUM_COLUMNS;
+
+// User-facing copy for a failed request (429 = rate limited)
+const requestErrorMessage = (status?: number) =>
+  status === 429
+    ? 'Too many requests. Please try again shortly.'
+    : 'Check your connection and try again.';
 
 const COLORS = {
   primary: '#E50914',
@@ -119,7 +118,7 @@ function RatingModal({ visible, movie, onClose, onSubmit }: RatingModalProps) {
               {movie.release_date ? (
                 <Text style={modalStyles.movieYear}>{movie.release_date.slice(0, 4)}</Text>
               ) : null}
-              {movie.vote_average > 0 ? (
+              {typeof movie.vote_average === 'number' && movie.vote_average > 0 ? (
                 <View style={modalStyles.ratingBadge}>
                   <Ionicons name="star" size={12} color="#FFD700" />
                   <Text style={modalStyles.ratingText}>{movie.vote_average.toFixed(1)}</Text>
@@ -230,15 +229,23 @@ function RatingModal({ visible, movie, onClose, onSubmit }: RatingModalProps) {
 }
 
 export default function LibraryScreen() {
-  // Mode and theme hooks - must be at the top
-  const { mode, setMode, colors, showModeDrawer, setShowModeDrawer } = useAppMode();
-  
+  // Theme hook - must be at the top
+  const { colors } = useAppMode();
+
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Movie[]>([]);
+  // Non-null when the last search request failed
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [trendingMovies, setTrendingMovies] = useState<Movie[]>([]);
+  // Non-null when the trending request failed (shown with a Retry button)
+  const [trendingError, setTrendingError] = useState<string | null>(null);
+  const [trendingLoading, setTrendingLoading] = useState(false);
   const [ratedMovies, setRatedMovies] = useState<RatedMovie[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  // Bumped for every search (and when the query is cleared) so a slow response
+  // for an outdated query never overwrites newer results
+  const searchSeqRef = useRef(0);
   const [selectedMovie, setSelectedMovie] = useState<Movie | null>(null);
   const [showRatingModal, setShowRatingModal] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
@@ -265,7 +272,7 @@ export default function LibraryScreen() {
 
   const loadRatedMovies = async (uid: string) => {
     try {
-      const response = await fetch(`${BACKEND_URL}/api/user/library?user_id=${uid}`);
+      const response = await fetch(apiUrl(`/api/user/library?user_id=${encodeURIComponent(uid)}`));
       if (response.ok) {
         const data = await response.json();
         setRatedMovies(data.movies || []);
@@ -276,43 +283,64 @@ export default function LibraryScreen() {
   };
 
   const fetchTrendingMovies = async () => {
+    setTrendingLoading(true);
     try {
-      const response = await fetch(`${BACKEND_URL}/api/tmdb/trending`);
+      const response = await fetch(apiUrl('/api/tmdb/trending'));
       if (response.ok) {
         const data = await response.json();
         setTrendingMovies(data.results || []);
+        setTrendingError(null);
+      } else {
+        setTrendingError(requestErrorMessage(response.status));
       }
     } catch (error) {
-      console.error('Error fetching trending movies:', error);
+      console.warn('Error fetching trending movies:', error);
+      setTrendingError(requestErrorMessage());
+    } finally {
+      setTrendingLoading(false);
     }
   };
 
   const searchMovies = useCallback(async (query: string) => {
+    const seq = ++searchSeqRef.current;
     if (!query.trim()) {
       setSearchResults([]);
+      setSearchError(null);
+      setIsSearching(false);
       return;
     }
 
     setIsSearching(true);
     try {
-      const response = await fetch(`${BACKEND_URL}/api/tmdb/search?query=${encodeURIComponent(query)}`);
-      if (response.ok) {
-        const data = await response.json();
+      const response = await fetch(apiUrl(`/api/tmdb/search?query=${encodeURIComponent(query)}`));
+      const data = response.ok ? await response.json() : null;
+      if (seq !== searchSeqRef.current) return; // an outdated query - ignore
+      if (data) {
         setSearchResults(data.results || []);
+        setSearchError(null);
+      } else {
+        setSearchResults([]);
+        setSearchError(requestErrorMessage(response.status));
       }
     } catch (error) {
-      console.error('Error searching movies:', error);
+      if (seq !== searchSeqRef.current) return;
+      console.warn('Error searching movies:', error);
+      setSearchResults([]);
+      setSearchError(requestErrorMessage());
     } finally {
-      setIsSearching(false);
+      if (seq === searchSeqRef.current) setIsSearching(false);
     }
   }, []);
 
   useEffect(() => {
+    // The query changed: whatever is still in flight is for an outdated query
+    searchSeqRef.current++;
     const debounceTimer = setTimeout(() => {
       if (searchQuery.length >= 2) {
         searchMovies(searchQuery);
       } else {
-        setSearchResults([]);
+        // Invalidates any in-flight search and clears its results
+        searchMovies('');
       }
     }, 300);
 
@@ -326,7 +354,7 @@ export default function LibraryScreen() {
     
     // Record interaction for analytics catalog (non-blocking)
     try {
-      fetch(`${BACKEND_URL}/api/movie/interaction`, {
+      fetch(apiUrl('/api/movie/interaction'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -362,7 +390,7 @@ export default function LibraryScreen() {
 
     // Send to backend asynchronously (non-blocking)
     try {
-      const response = await fetch(`${BACKEND_URL}/api/user/library/add`, {
+      const response = await fetch(apiUrl('/api/user/library/add'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -396,7 +424,7 @@ export default function LibraryScreen() {
     const posterUri = item.poster_path ? `${TMDB_IMAGE_BASE}${item.poster_path}` : null;
     
     return (
-      <TouchableOpacity onPress={() => handleMoviePress(item)} activeOpacity={0.7}><View style={styles.posterContainer}>{posterUri ? (<Image source={{ uri: posterUri }} style={styles.moviePoster} resizeMode="cover" />) : (<View style={[styles.moviePoster, styles.noPoster]}><Ionicons name="film-outline" size={28} color={COLORS.textMuted} /></View>)}{isRated ? (<View style={[styles.ratedBadge, ratedInfo?.isLike ? styles.ratedBadgeLike : styles.ratedBadgeDislike]}><Ionicons name={ratedInfo?.isLike ? 'heart' : 'heart-dislike'} size={14} color="#FFF" /></View>) : null}{item.vote_average > 0 ? (<View style={styles.tmdbRating}><Ionicons name="star" size={10} color="#FFD700" /><Text style={styles.tmdbRatingText}>{item.vote_average.toFixed(1)}</Text></View>) : null}</View><Text style={styles.movieTitle} numberOfLines={2}>{item.title}</Text>{item.release_date ? (<Text style={styles.movieYear}>{item.release_date.slice(0, 4)}</Text>) : null}</TouchableOpacity>
+      <TouchableOpacity onPress={() => handleMoviePress(item)} activeOpacity={0.7}><View style={styles.posterContainer}>{posterUri ? (<Image source={{ uri: posterUri }} style={styles.moviePoster} resizeMode="cover" />) : (<View style={[styles.moviePoster, styles.noPoster]}><Ionicons name="film-outline" size={28} color={COLORS.textMuted} /></View>)}{isRated ? (<View style={[styles.ratedBadge, ratedInfo?.isLike ? styles.ratedBadgeLike : styles.ratedBadgeDislike]}><Ionicons name={ratedInfo?.isLike ? 'heart' : 'heart-dislike'} size={14} color="#FFF" /></View>) : null}{typeof item.vote_average === 'number' && item.vote_average > 0 ? (<View style={styles.tmdbRating}><Ionicons name="star" size={10} color="#FFD700" /><Text style={styles.tmdbRatingText}>{item.vote_average.toFixed(1)}</Text></View>) : null}</View><Text style={styles.movieTitle} numberOfLines={2}>{item.title}</Text>{item.release_date ? (<Text style={styles.movieYear}>{item.release_date.slice(0, 4)}</Text>) : null}</TouchableOpacity>
     );
   };
 
@@ -415,15 +443,13 @@ export default function LibraryScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <KeyboardAvoidingView 
-        style={styles.content} 
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      <KeyboardAvoidingView
+        style={styles.content}
+        behavior="padding"
       >
-        {/* Shared Header with Mode Switcher */}
+        {/* Shared Header */}
         <SharedHeader
           title="Movie Library"
-          showModeIcon={true}
-          onMenuPress={() => setShowModeDrawer(true)}
           colors={colors}
         />
 
@@ -465,15 +491,38 @@ export default function LibraryScreen() {
         >
           {displayMovies.length === 0 ? (
             <View style={styles.emptyContainer}>
-              <Ionicons name="film-outline" size={48} color={COLORS.textMuted} />
+              <Ionicons
+                name={(searchQuery.length >= 2 ? searchError : trendingError) ? 'cloud-offline-outline' : 'film-outline'}
+                size={48}
+                color={COLORS.textMuted}
+              />
               <Text style={styles.emptyText}>
-                {searchQuery.length >= 2 
-                  ? 'No movies found' 
-                  : 'No trending movies available'}
+                {searchQuery.length >= 2
+                  ? (searchError ? 'Search failed' : 'No movies found')
+                  : (trendingError ? "Couldn't load trending movies" : 'No trending movies available')}
               </Text>
               {searchQuery.length >= 2 && (
-                <Text style={styles.emptySubtext}>Try a different search term</Text>
+                <Text style={styles.emptySubtext}>
+                  {searchError || 'Try a different search term'}
+                </Text>
               )}
+              {searchQuery.length < 2 && trendingError ? (
+                <>
+                  <Text style={styles.emptySubtext}>{trendingError}</Text>
+                  <TouchableOpacity
+                    style={styles.retryButton}
+                    onPress={fetchTrendingMovies}
+                    disabled={trendingLoading}
+                    testID="library-trending-retry"
+                  >
+                    {trendingLoading ? (
+                      <ActivityIndicator size="small" color="#FFF" />
+                    ) : (
+                      <Text style={styles.retryButtonText}>Retry</Text>
+                    )}
+                  </TouchableOpacity>
+                </>
+              ) : null}
             </View>
           ) : (
             <View style={{flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-start', paddingHorizontal: 0}}>
@@ -517,21 +566,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: COLORS.textMuted,
   },
-  header: {
-    paddingHorizontal: GRID_PADDING,
-    paddingTop: 8,
-    paddingBottom: 16,
-  },
-  headerTitle: {
-    fontSize: 26,
-    fontWeight: 'bold',
-    color: COLORS.text,
-  },
-  headerSubtitle: {
-    fontSize: 13,
-    color: COLORS.textMuted,
-    marginTop: 2,
-  },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -572,23 +606,6 @@ const styles = StyleSheet.create({
   },
   scrollView: {
     flex: 1,
-  },
-  gridWrapper: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-  },
-  cardWrapper: {
-    width: '31%',
-    marginBottom: 12,
-  },
-  gridRow: {
-    justifyContent: 'flex-start',
-    gap: GRID_GAP,
-    marginBottom: GRID_GAP,
-  },
-  movieCard: {
-    width: '31%',
   },
   posterContainer: {
     width: '100%',
@@ -667,6 +684,20 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     textAlign: 'center',
     paddingHorizontal: 40,
+  },
+  retryButton: {
+    marginTop: 6,
+    minWidth: 110,
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 28,
+    borderRadius: 22,
+    backgroundColor: COLORS.primary,
+  },
+  retryButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFF',
   },
 });
 

@@ -6,8 +6,10 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from '../Avatar';
+import { normalizePictures } from '../PremiumProfileView';
 import { formatLocationForPrivacy } from '../../utils/locationFormatter';
-import { API_BASE, COLORS, SCREEN_WIDTH, SCREEN_HEIGHT } from './theme';
+import { apiUrl } from '../../store';
+import { COLORS, SCREEN_WIDTH, SCREEN_HEIGHT } from './theme';
 
 interface Props {
   visible: boolean;
@@ -16,10 +18,17 @@ interface Props {
   userName: string;
 }
 
+const profileErrorMessage = (status?: number) => {
+  if (status === 404) return 'This profile is no longer available.';
+  if (status === 429) return 'Too many requests. Please try again shortly.';
+  return "Couldn't load this profile. Check your connection and try again.";
+};
+
 export const ProfileBottomSheet: React.FC<Props> = ({ visible, onClose, userId, userName }) => {
   const [profile, setProfile] = useState<any>(null);
   const [pictures, setPictures] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [currentPicIndex, setCurrentPicIndex] = useState(0);
 
   useEffect(() => {
@@ -30,22 +39,28 @@ export const ProfileBottomSheet: React.FC<Props> = ({ visible, onClose, userId, 
 
   const fetchProfileData = async () => {
     setLoading(true);
+    setLoadError(null);
     try {
-      const profileRes = await fetch(`${API_BASE}/api/user/profile/${userId}`);
-      if (profileRes.ok) {
-        const data = await profileRes.json();
-        setProfile(data.profile);
+      const [profileRes, picsRes] = await Promise.all([
+        fetch(apiUrl(`/api/user/profile/${encodeURIComponent(userId)}`)),
+        // Photos are optional: a failure here just means no photos.
+        fetch(apiUrl(`/api/user/pictures/${encodeURIComponent(userId)}`)).catch(() => null),
+      ]);
+      if (!profileRes.ok) {
+        setProfile(null);
+        setPictures([]);
+        setLoadError(profileErrorMessage(profileRes.status));
+        return;
       }
-      const picsRes = await fetch(`${API_BASE}/api/user/pictures/${userId}`);
-      if (picsRes.ok) {
-        const data = await picsRes.json();
-        const pics = data.pictures || {};
-        const photoArray = [pics.picture_1, pics.picture_2, pics.picture_3, pics.picture_4, pics.picture_5]
-          .filter(Boolean);
-        setPictures(photoArray);
-      }
-    } catch (error) {
-      console.error('Error fetching profile:', error);
+      const data = await profileRes.json();
+      const picsData = picsRes?.ok ? await picsRes.json().catch(() => null) : null;
+      setProfile(data?.profile || null);
+      // Pictures may be string[] or the legacy { picture_1 … picture_5 } object.
+      const photos = normalizePictures(picsData?.pictures);
+      setPictures(photos.length > 0 ? photos : normalizePictures(data?.profile?.pictures));
+      setCurrentPicIndex(0);
+    } catch {
+      setLoadError(profileErrorMessage());
     } finally {
       setLoading(false);
     }
@@ -67,6 +82,14 @@ export const ProfileBottomSheet: React.FC<Props> = ({ visible, onClose, userId, 
         {loading ? (
           <View style={styles.profileLoading}>
             <ActivityIndicator size="large" color={COLORS.primary} />
+          </View>
+        ) : loadError ? (
+          <View style={styles.profileLoading}>
+            <Ionicons name="cloud-offline-outline" size={48} color={COLORS.textMuted} />
+            <Text style={styles.errorText}>{loadError}</Text>
+            <TouchableOpacity style={styles.retryBtn} onPress={fetchProfileData}>
+              <Text style={styles.retryBtnText}>Try again</Text>
+            </TouchableOpacity>
           </View>
         ) : (
           <ScrollView style={styles.profileContent} showsVerticalScrollIndicator={false}>
@@ -166,6 +189,9 @@ const styles = StyleSheet.create({
   profileCloseBtn: { padding: 8 },
   profileHeaderTitle: { fontSize: 18, fontWeight: '600', color: COLORS.text },
   profileLoading: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  errorText: { fontSize: 15, color: COLORS.textSecondary, textAlign: 'center', marginTop: 12, paddingHorizontal: 32, lineHeight: 22 },
+  retryBtn: { marginTop: 20, paddingHorizontal: 28, paddingVertical: 12, borderRadius: 24, backgroundColor: COLORS.primary },
+  retryBtnText: { fontSize: 15, fontWeight: '600', color: '#FFF' },
   profileContent: { flex: 1 },
   photoCarousel: { width: SCREEN_WIDTH, height: SCREEN_HEIGHT * 0.45 },
   profilePhoto: { width: SCREEN_WIDTH, height: SCREEN_HEIGHT * 0.45 },

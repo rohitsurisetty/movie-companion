@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   View, Text, StyleSheet, Dimensions, Image, TouchableOpacity,
-  ActivityIndicator, Modal, Pressable, ScrollView,
+  ActivityIndicator, Modal, Pressable, BackHandler,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -13,16 +13,14 @@ import Animated, {
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import BottomSheet, { BottomSheetScrollView, BottomSheetBackdrop } from '@gorhom/bottom-sheet';
 import {
-  SPACING, BORDER_RADIUS, getThemeColors,
+  SPACING, BORDER_RADIUS,
   LEFT_SWIPE_REASONS, RIGHT_SWIPE_REASONS,
 } from '../../src/theme';
 import {
-  FeedMovie, SwipeState, SwipeRecord, initialSwipeState, TMDB_GENRE_MAP, ProfileData, MovieDetail, initialProfileData,
+  FeedMovie, SwipeState, SwipeRecord, initialSwipeState, TMDB_GENRE_MAP, MovieDetail as BaseMovieDetail,
 } from '../../src/types';
-import { saveSwipeState, getSwipeState, getFilters, getProfile, clearAll } from '../../src/store';
-import { useAppMode, ModeSwitcher } from '../../src/components/SharedHeader';
-import InAppProfilePreview from '../../src/components/InAppProfilePreview';
-import { formatLocationForPrivacy } from '../../src/utils/locationFormatter';
+import { apiUrl, getUserId, saveSwipeState, getSwipeState, getFilters, getProfile } from '../../src/store';
+import { useAppMode, type ThemeColors } from '../../src/components/SharedHeader';
 import { shadow } from '../../src/utils/shadow';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -33,7 +31,22 @@ const SWIPE_THRESHOLD = SCREEN_WIDTH * 0.25;
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
 const REQUIRED_SWIPES = 20;
 
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+// /api/tmdb/movie/{id} also returns vote_count (not on the shared type).
+type MovieDetail = BaseMovieDetail & { vote_count?: number };
+
+// Why auto-fetching stopped; cleared by the Retry button.
+type FeedLoadError = 'failed' | 'rate_limited';
+
+// fetch() with an abort timeout so a hung request can't block the deck.
+async function fetchWithTimeout(url: string, init: RequestInit = {}, ms = 15000): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 // Movie Details Bottom Sheet - Uses @gorhom/bottom-sheet for proper scroll + swipe handling
 function MovieDetailsBottomSheet({
@@ -42,7 +55,7 @@ function MovieDetailsBottomSheet({
   visible: boolean;
   onClose: () => void;
   movieId: number;
-  colors: ReturnType<typeof getThemeColors>;
+  colors: ThemeColors;
 }) {
   const [details, setDetails] = useState<MovieDetail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -62,16 +75,27 @@ function MovieDetailsBottomSheet({
     }
   }, [visible, movieId]);
 
+  // Android back closes the sheet instead of leaving the tab.
+  useEffect(() => {
+    if (!visible) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      onClose();
+      return true;
+    });
+    return () => sub.remove();
+  }, [visible, onClose]);
+
   const fetchDetails = async () => {
     setLoading(true);
+    setDetails(null); // never show the previous movie's details
     try {
-      const resp = await fetch(`${BACKEND_URL}/api/tmdb/movie/${movieId}`);
+      const resp = await fetchWithTimeout(apiUrl(`/api/tmdb/movie/${movieId}`));
       if (resp.ok) {
         const data = await resp.json();
         setDetails(data);
       }
-    } catch (e) {
-      console.error('Error fetching movie details:', e);
+    } catch {
+      // falls through to the "Could not load movie details" state
     } finally {
       setLoading(false);
     }
@@ -159,9 +183,9 @@ function MovieDetailsBottomSheet({
                   <Text style={[detailStyles.rating, { color: colors.gold }]}>
                     {details.vote_average.toFixed(1)}/10
                   </Text>
-                  {details.vote_count && (
+                  {(details.vote_count ?? 0) > 0 && (
                     <Text style={[detailStyles.voteCount, { color: colors.textMuted }]}>
-                      ({details.vote_count.toLocaleString()} votes)
+                      ({(details.vote_count ?? 0).toLocaleString()} votes)
                     </Text>
                   )}
                 </View>
@@ -209,7 +233,7 @@ function MovieDetailsBottomSheet({
               <View style={detailStyles.castList}>
                 {details.cast.slice(0, 10).map((member, i) => (
                   <View key={i} style={detailStyles.castItem}>
-                    <View style={[detailStyles.castAvatar, { backgroundColor: colors.bgInput }]}>
+                    <View style={[detailStyles.castAvatar, { backgroundColor: '#2C2C2C' }]}>
                       <Ionicons name="person" size={18} color={colors.textMuted} />
                     </View>
                     <View style={detailStyles.castInfo}>
@@ -262,7 +286,6 @@ const detailStyles = StyleSheet.create({
     paddingBottom: SPACING.s,
     paddingHorizontal: SPACING.l,
   },
-  handle: { width: 48, height: 5, backgroundColor: '#555', borderRadius: 3, marginBottom: SPACING.xs },
   swipeHint: { fontSize: 11, fontStyle: 'italic' },
   loadingContainer: { alignItems: 'center', justifyContent: 'center', paddingVertical: SPACING.xxl },
   loadingText: { marginTop: SPACING.m, fontSize: 14 },
@@ -305,16 +328,16 @@ const detailStyles = StyleSheet.create({
   closeBtnText: { fontSize: 16, fontWeight: '600', color: '#FFF' },
 });
 
-// Left Swipe Reason Modal
+// Left Swipe Reason Modal. Reasons are optional, so dismissing it (Android
+// back / backdrop) records the skip with whatever was selected.
 function LeftSwipeModal({
-  visible, onClose, onSubmit, onUndo, movieTitle, colors,
+  visible, onSubmit, onUndo, movieTitle, colors,
 }: {
   visible: boolean;
-  onClose: () => void;
   onSubmit: (reasons: string[], didntWatch: boolean) => void;
   onUndo: () => void;
   movieTitle: string;
-  colors: ReturnType<typeof getThemeColors>;
+  colors: ThemeColors;
 }) {
   const [selectedReasons, setSelectedReasons] = useState<string[]>([]);
   const didntWatch = selectedReasons.includes('not_watched');
@@ -348,8 +371,8 @@ function LeftSwipeModal({
   };
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={modalStyles.overlay} onPress={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={handleSubmit}>
+      <Pressable style={modalStyles.overlay} onPress={handleSubmit}>
         <Pressable style={[modalStyles.container, { backgroundColor: colors.bgCard }]} onPress={(e) => e.stopPropagation()}>
           {/* Undo button at top */}
           <TouchableOpacity
@@ -419,16 +442,16 @@ function LeftSwipeModal({
   );
 }
 
-// Right Swipe Rating Modal with Reasons
+// Right Swipe Rating Modal with Reasons. A like needs a confirmed rating, so
+// dismissing it (Android back / backdrop) restores the card like Undo.
 function RatingModal({
-  visible, onClose, onSubmit, onUndo, movieTitle, colors,
+  visible, onSubmit, onUndo, movieTitle, colors,
 }: {
   visible: boolean;
-  onClose: () => void;
   onSubmit: (rating: number, reasons: string[]) => void;
   onUndo: () => void;
   movieTitle: string;
-  colors: ReturnType<typeof getThemeColors>;
+  colors: ThemeColors;
 }) {
   const [rating, setRating] = useState(3);
   const [selectedReasons, setSelectedReasons] = useState<string[]>([]);
@@ -452,8 +475,8 @@ function RatingModal({
   };
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={modalStyles.overlay} onPress={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={handleUndo}>
+      <Pressable style={modalStyles.overlay} onPress={handleUndo}>
         <Pressable style={[modalStyles.container, { backgroundColor: colors.bgCard }]} onPress={(e) => e.stopPropagation()}>
           {/* Undo button at top */}
           <TouchableOpacity
@@ -538,261 +561,6 @@ function RatingModal({
   );
 }
 
-// Profile Drawer Component - Fully Scrollable with Swipe Dismiss
-function ProfileDrawer({
-  visible, onClose, onLogout, colors, onFilters, onViewProfile, onProfilePreview,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  onLogout: () => void;
-  colors: ReturnType<typeof getThemeColors>;
-  onFilters: () => void;
-  onViewProfile: () => void;
-  onProfilePreview: () => void;
-}) {
-  const [profile, setProfile] = useState<ProfileData | null>(null);
-  const bottomSheetRef = useRef<BottomSheet>(null);
-  const snapPoints = useMemo(() => ['90%'], []);
-
-  useEffect(() => {
-    if (visible) {
-      getProfile().then(setProfile);
-      bottomSheetRef.current?.expand();
-    } else {
-      bottomSheetRef.current?.close();
-    }
-  }, [visible]);
-
-  const handleSheetChanges = useCallback((index: number) => {
-    if (index === -1) {
-      onClose();
-    }
-  }, [onClose]);
-
-  const renderBackdrop = useCallback(
-    (props: any) => (
-      <BottomSheetBackdrop
-        {...props}
-        disappearsOnIndex={-1}
-        appearsOnIndex={0}
-        opacity={0.6}
-        pressBehavior="close"
-      />
-    ),
-    []
-  );
-
-  const topMovies = profile?.topMovies || [];
-
-  if (!visible) return null;
-
-  return (
-    <BottomSheet
-      ref={bottomSheetRef}
-      index={0}
-      snapPoints={snapPoints}
-      onChange={handleSheetChanges}
-      enablePanDownToClose={true}
-      backdropComponent={renderBackdrop}
-      backgroundStyle={{ backgroundColor: colors.bgCard }}
-      handleIndicatorStyle={{ backgroundColor: '#555', width: 48, height: 5 }}
-    >
-      <BottomSheetScrollView 
-        style={profileStyles.scroll}
-        contentContainerStyle={profileStyles.scrollContent}
-        showsVerticalScrollIndicator={true}
-      >
-        {/* Header - Clickable to view full profile */}
-        <TouchableOpacity style={profileStyles.header} onPress={onViewProfile} activeOpacity={0.8}>
-          <View style={[profileStyles.avatarCircle, { backgroundColor: colors.primary }]}>
-            <Ionicons name="person" size={32} color="#FFF" />
-          </View>
-          <View style={profileStyles.headerInfo}>
-            <Text style={[profileStyles.name, { color: colors.text }]}>
-              {profile?.name || 'User'}{profile?.age ? `, ${profile.age}` : ''}
-            </Text>
-            {profile?.gender && (
-              <Text style={[profileStyles.genderText, { color: colors.textSecondary }]}>{profile.gender}</Text>
-            )}
-            {profile?.location && (
-              <Text style={[profileStyles.locationText, { color: colors.textMuted }]}>
-                {formatLocationForPrivacy(profile.location)}
-              </Text>
-            )}
-            <Text style={[profileStyles.viewProfileText, { color: colors.primary }]}>View & Edit Profile →</Text>
-          </View>
-        </TouchableOpacity>
-
-        {/* Favourite Genres */}
-        {profile?.genres && profile.genres.length > 0 && (
-          <View style={profileStyles.section}>
-            <Text style={[profileStyles.sectionTitle, { color: colors.textSecondary }]}>Favourite Genres</Text>
-            <View style={profileStyles.tagsRow}>
-              {profile.genres.slice(0, 5).map((genre, i) => (
-                <View key={i} style={[profileStyles.tag, { borderColor: colors.border }]}>
-                  <Text style={[profileStyles.tagText, { color: colors.text }]}>{genre}</Text>
-                </View>
-              ))}
-            </View>
-          </View>
-        )}
-
-        {/* Languages I Watch */}
-        {profile?.filmLanguages && profile.filmLanguages.length > 0 && (
-          <View style={profileStyles.section}>
-            <Text style={[profileStyles.sectionTitle, { color: colors.textSecondary }]}>Languages I Watch</Text>
-            <View style={profileStyles.tagsRow}>
-              {profile.filmLanguages.map((lang, i) => (
-                <View key={i} style={[profileStyles.tag, { borderColor: colors.border }]}>
-                  <Text style={[profileStyles.tagText, { color: colors.text }]}>{lang}</Text>
-                </View>
-              ))}
-            </View>
-          </View>
-        )}
-
-        {/* Top 5 Movies */}
-        {topMovies.length > 0 && (
-          <View style={profileStyles.section}>
-            <Text style={[profileStyles.sectionTitle, { color: colors.textSecondary }]}>Your Top 5 Movies</Text>
-            <View style={profileStyles.moviesGrid}>
-              {topMovies.map((movie, i) => (
-                <View key={i} style={profileStyles.movieItem}>
-                  <Image 
-                    source={{ uri: `https://image.tmdb.org/t/p/w200${movie.poster_path}` }}
-                    style={profileStyles.moviePoster}
-                    resizeMode="cover"
-                  />
-                  <Text style={[profileStyles.movieTitle, { color: colors.text }]} numberOfLines={2}>{movie.title}</Text>
-                  <View style={profileStyles.movieRating}>
-                    <Ionicons name="star" size={12} color={colors.gold} />
-                    <Text style={[profileStyles.ratingText, { color: colors.gold }]}>{movie.rating}</Text>
-                  </View>
-                </View>
-              ))}
-            </View>
-          </View>
-        )}
-
-        {/* Other Profile Info - Preferences */}
-        {(profile?.ottTheatre || profile?.movieFrequency) && (
-          <View style={profileStyles.section}>
-            <Text style={[profileStyles.sectionTitle, { color: colors.textSecondary }]}>Preferences</Text>
-            {profile?.ottTheatre && (
-              <View style={profileStyles.infoRow}>
-                <Ionicons name="tv-outline" size={18} color={colors.textMuted} />
-                <Text style={[profileStyles.infoText, { color: colors.text }]}>{profile.ottTheatre}</Text>
-              </View>
-            )}
-            {profile?.movieFrequency && (
-              <View style={profileStyles.infoRow}>
-                <Ionicons name="time-outline" size={18} color={colors.textMuted} />
-                <Text style={[profileStyles.infoText, { color: colors.text }]}>{profile.movieFrequency}</Text>
-              </View>
-            )}
-          </View>
-        )}
-
-        {/* Action Buttons */}
-        <View style={profileStyles.buttonsContainer}>
-          {/* Profile Preview Button - NEW */}
-          <TouchableOpacity
-            style={[profileStyles.previewBtn, { backgroundColor: colors.gold }]}
-            onPress={onProfilePreview}
-            testID="profile-preview-btn"
-            activeOpacity={0.8}
-          >
-            <Ionicons name="eye-outline" size={20} color="#000" />
-            <Text style={profileStyles.previewBtnText}>Profile Preview</Text>
-          </TouchableOpacity>
-
-          {/* View Full Profile Button */}
-          <TouchableOpacity
-            style={[profileStyles.viewProfileBtn, { backgroundColor: colors.primary }]}
-            onPress={onViewProfile}
-            testID="view-profile-btn"
-            activeOpacity={0.8}
-          >
-            <Ionicons name="person-circle-outline" size={20} color="#FFF" />
-            <Text style={profileStyles.viewProfileBtnText}>View & Edit Full Profile</Text>
-          </TouchableOpacity>
-
-          {/* Preferences & Filters Button */}
-          <TouchableOpacity
-            style={[profileStyles.filtersBtn, { borderColor: colors.primary }]}
-            onPress={onFilters}
-            testID="filters-btn"
-            activeOpacity={0.7}
-          >
-            <Ionicons name="options-outline" size={20} color={colors.primary} />
-            <Text style={[profileStyles.filtersBtnText, { color: colors.primary }]}>Preferences & Filters</Text>
-          </TouchableOpacity>
-
-          {/* Logout Button */}
-          <TouchableOpacity
-            style={[profileStyles.logoutBtn, { borderColor: '#FF6B6B' }]}
-            onPress={onLogout}
-            testID="logout-btn"
-            activeOpacity={0.7}
-          >
-            <Ionicons name="log-out-outline" size={20} color="#FF6B6B" />
-            <Text style={profileStyles.logoutText}>Logout & Start Over</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Bottom padding */}
-        <View style={{ height: 40 }} />
-      </BottomSheetScrollView>
-    </BottomSheet>
-  );
-}
-
-const profileStyles = StyleSheet.create({
-  scroll: { flex: 1, paddingHorizontal: SPACING.l },
-  scrollContent: { paddingBottom: SPACING.l },
-  header: { flexDirection: 'row', alignItems: 'center', marginBottom: SPACING.l, paddingTop: SPACING.s },
-  avatarCircle: { width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center', marginRight: SPACING.m },
-  headerInfo: { flex: 1 },
-  name: { fontSize: 22, fontWeight: 'bold', marginBottom: 2 },
-  genderText: { fontSize: 14, marginBottom: 2 },
-  locationText: { fontSize: 13, marginBottom: SPACING.xs },
-  viewProfileText: { fontSize: 12, fontWeight: '600', marginTop: SPACING.xs },
-  section: { marginBottom: SPACING.l },
-  sectionTitle: { fontSize: 13, fontWeight: '600', marginBottom: SPACING.s, textTransform: 'uppercase', letterSpacing: 1 },
-  tagsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.s },
-  tag: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: BORDER_RADIUS.full, borderWidth: 1 },
-  tagText: { fontSize: 13 },
-  moviesGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.s },
-  movieItem: { width: 80, alignItems: 'center' },
-  moviePoster: { width: 70, height: 100, borderRadius: BORDER_RADIUS.s, marginBottom: 4 },
-  movieTitle: { fontSize: 10, textAlign: 'center', marginBottom: 2 },
-  movieRating: { flexDirection: 'row', alignItems: 'center', gap: 2 },
-  ratingText: { fontSize: 11, fontWeight: '600' },
-  infoRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.s, marginBottom: SPACING.s },
-  infoText: { fontSize: 14 },
-  buttonsContainer: { marginTop: SPACING.m },
-  previewBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SPACING.s,
-    paddingVertical: 14, borderRadius: BORDER_RADIUS.full, marginBottom: SPACING.m,
-  },
-  previewBtnText: { fontSize: 16, fontWeight: '600', color: '#000' },
-  viewProfileBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SPACING.s,
-    paddingVertical: 14, borderRadius: BORDER_RADIUS.full, marginBottom: SPACING.m,
-  },
-  viewProfileBtnText: { fontSize: 16, fontWeight: '600', color: '#FFF' },
-  filtersBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SPACING.s,
-    paddingVertical: 14, borderRadius: BORDER_RADIUS.full, borderWidth: 2, marginBottom: SPACING.m,
-  },
-  filtersBtnText: { fontSize: 16, fontWeight: '600' },
-  logoutBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SPACING.s,
-    paddingVertical: 14, borderRadius: BORDER_RADIUS.full, borderWidth: 2,
-  },
-  logoutText: { fontSize: 16, fontWeight: '600', color: '#FF6B6B' },
-});
-
 const modalStyles = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center', padding: SPACING.l },
   container: { borderRadius: BORDER_RADIUS.xl, padding: SPACING.l, width: '100%', maxWidth: 360, maxHeight: '85%' },
@@ -828,7 +596,7 @@ function SwipeCard({
   isTop: boolean;
   onSwipe: (direction: 'left' | 'right') => void;
   onInfo: () => void;
-  colors: ReturnType<typeof getThemeColors>;
+  colors: ThemeColors;
 }) {
   const translateX = useSharedValue(0);
   const translateY = useSharedValue(0);
@@ -849,8 +617,10 @@ function SwipeCard({
       if (Math.abs(translateX.value) > SWIPE_THRESHOLD) {
         const direction = translateX.value > 0 ? 'right' : 'left';
         const toValue = direction === 'right' ? SCREEN_WIDTH * 1.5 : -SCREEN_WIDTH * 1.5;
-        translateX.value = withTiming(toValue, { duration: 250 }, () => {
-          runOnJS(onSwipe)(direction);
+        translateX.value = withTiming(toValue, { duration: 250 }, (finished) => {
+          // Not when cancelled (card removed by a button tap mid-flight) —
+          // that would fire a second swipe for the same movie.
+          if (finished) runOnJS(onSwipe)(direction);
         });
         translateY.value = withTiming(event.velocityY * 0.1, { duration: 250 });
       } else {
@@ -934,175 +704,124 @@ function SwipeCard({
 
 export default function SwipeScreen() {
   const router = useRouter();
-  // Use global Zustand store for mode (synced across all tabs)
-  const { mode, setMode, colors, showModeDrawer, setShowModeDrawer } = useAppMode();
+  const { colors } = useAppMode();
   
   const [movies, setMovies] = useState<FeedMovie[]>([]);
   const [swipeState, setSwipeState] = useState<SwipeState>(initialSwipeState);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [showRatingModal, setShowRatingModal] = useState(false);
   const [showLeftModal, setShowLeftModal] = useState(false);
-  const [showProfileDrawer, setShowProfileDrawer] = useState(false);
-  const [showProfilePreview, setShowProfilePreview] = useState(false);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [selectedMovieId, setSelectedMovieId] = useState(0);
   const [pendingMovie, setPendingMovie] = useState<FeedMovie | null>(null);
-  const [page, setPage] = useState(0);  // Start at 0, will be set to 1 when userId is ready
   const fetchingRef = useRef(false);
 
   const remainingSwipes = Math.max(0, REQUIRED_SWIPES - swipeState.totalSwipes);
-  // Track last swiped movie for undo functionality
-  const [lastSwipedMovie, setLastSwipedMovie] = useState<FeedMovie | null>(null);
   const [showUndoToast, setShowUndoToast] = useState(false);
   const [showSkippedToast, setShowSkippedToast] = useState(false);
-  const undoTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const isProfileComplete = swipeState.totalSwipes >= REQUIRED_SWIPES;
-
-  // Load saved swipe state on mount
-  useEffect(() => {
-    (async () => {
-      const savedSwipes = await getSwipeState();
-      if (savedSwipes) setSwipeState(savedSwipes);
-    })();
-  }, []);
-
-  const handleLogout = async () => {
-    await clearAll();
-    setShowProfileDrawer(false);
-    router.replace('/');
-  };
-
-  // Handle opening profile preview from profile drawer
-  const handleOpenProfilePreview = () => {
-    setShowProfileDrawer(false);
-    setShowProfilePreview(true);
-  };
-
-  // Handle closing profile preview - returns to profile drawer
-  const handleCloseProfilePreview = () => {
-    setShowProfilePreview(false);
-    setShowProfileDrawer(true);
-  };
 
   const handleShowDetails = (movieId: number) => {
     setSelectedMovieId(movieId);
     setShowDetailsModal(true);
   };
+  const handleCloseDetails = useCallback(() => setShowDetailsModal(false), []);
 
-  // Generate a user ID for the recommendation engine
+  // Signed-in user id. The backend takes the identity from the session; the
+  // id is only sent because the request models require the field.
   const [userId, setUserId] = useState<string>('');
-  
-  useEffect(() => {
-    const initUserId = async () => {
-      try {
-        const profile = await getProfile();
-        // Use email or generate a unique ID based on timestamp
-        const id = profile?.email || `user_${Date.now()}`;
-        setUserId(id);
-        
-        // Sync profile to backend recommendation engine (only if profile has meaningful data)
-        if (profile && profile.genres && profile.genres.length > 0) {
-          await syncProfileToBackend(id, profile);
-        } else {
-          console.log('No profile data found, using cold start recommendations');
-        }
-        
-        // Start fetching movies now that userId is ready
-        setPage(1);
-      } catch (e) {
-        console.error('Error initializing user ID:', e);
-        // Set a fallback ID immediately so movies can load
-        setUserId(`user_${Date.now()}`);
-        setPage(1);
-      }
-    };
-    initUserId();
-  }, []);
 
-  // Sync profile to backend recommendation engine (with ALL signals)
-  const syncProfileToBackend = async (id: string, profile: ProfileData) => {
-    try {
-      const response = await fetch(`${BACKEND_URL}/api/user/profile`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: id,
-          name: profile.name || '',
-          age: profile.age || 0,
-          gender: profile.gender || '',
-          genres: Array.isArray(profile.genres) ? profile.genres : [],
-          filmLanguages: Array.isArray(profile.filmLanguages) ? profile.filmLanguages : [],
-          languagesSpoken: Array.isArray(profile.languagesSpoken) ? profile.languagesSpoken : [],
-          topMovies: (Array.isArray(profile.topMovies) ? profile.topMovies : []).map(m => ({
-            id: m.id,
-            title: m.title,
-            poster_path: m.poster_path || '',
-            release_date: m.release_date || '',
-            vote_average: m.vote_average || 0,
-            rating: m.rating || 0,
-            genres: Array.isArray(m.genres) ? m.genres : [],
-          })),
-          movieFrequency: profile.movieFrequency || '',
-          ottTheatre: profile.ottTheatre || '',
-          relationshipIntent: Array.isArray(profile.relationshipIntent) ? profile.relationshipIntent : [],
-        }),
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        console.log('Profile synced to recommendation engine:', {
-          dimensions: data.taste_dimensions,
-          languages: data.preferred_languages,
-          signals: data.signals_used,
-        });
+  // Pagination. Auto-fetching stops after any error or 2 consecutive pages
+  // that added nothing (loadError → "Couldn't load more — Retry").
+  const nextPageRef = useRef(1);
+  const emptyFetchCount = useRef(0);
+  const [loadError, setLoadError] = useState<FeedLoadError | null>(null);
+  // Mirrors of state read inside async fetches (avoids stale closures).
+  const moviesRef = useRef<FeedMovie[]>([]);
+  const swipedIdsRef = useRef<number[]>([]);
+  useEffect(() => { moviesRef.current = movies; }, [movies]);
+  useEffect(() => { swipedIdsRef.current = swipeState.swipedMovieIds; }, [swipeState.swipedMovieIds]);
+
+  // Resolve the signed-in user and the saved swipe state. Onboarding posts
+  // the profile, so Discover only reads recommendations.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      let id = '';
+      let savedSwipes: SwipeState | null = null;
+      try {
+        [id, savedSwipes] = await Promise.all([getUserId(), getSwipeState()]);
+      } catch {
+        id = '';
       }
-    } catch (e) {
-      console.error('Error syncing profile to backend:', e);
+      if (cancelled) return;
+      if (!id) {
+        router.replace('/');
+        return;
+      }
+      if (savedSwipes) {
+        swipedIdsRef.current = savedSwipes.swipedMovieIds || [];
+        setSwipeState(savedSwipes);
+      }
+      setUserId(id);
+    })();
+    return () => { cancelled = true; };
+  }, [router]);
+
+  // Adds unseen movies to the deck; returns how many were actually added.
+  const appendMovies = (incoming: FeedMovie[]): number => {
+    const seen = new Set<number>([...swipedIdsRef.current, ...moviesRef.current.map((m) => m.id)]);
+    const fresh: FeedMovie[] = [];
+    for (const m of incoming) {
+      if (!m || seen.has(m.id)) continue;
+      seen.add(m.id);
+      fresh.push(m);
+    }
+    if (fresh.length > 0) {
+      moviesRef.current = [...moviesRef.current, ...fresh];
+      setMovies((prev) => {
+        const ids = new Set(prev.map((m) => m.id));
+        return [...prev, ...fresh.filter((m) => !ids.has(m.id))];
+      });
+    }
+    return fresh.length;
+  };
+
+  // Fallback to the plain TMDB feed (saved filters / profile genres).
+  const fetchMoviesFallback = async (pageNum: number, rateLimited: boolean): Promise<number | FeedLoadError> => {
+    try {
+      const [filters, profile] = await Promise.all([getFilters(), getProfile()]);
+      const params = new URLSearchParams({
+        genres: filters?.genres?.selected?.join(',') || profile?.genres?.join(',') || '',
+        languages: filters?.languages?.selected?.join(',') || '',
+        page: String(Math.min(pageNum, 100)), // TMDB caps discover pages
+        exclude: swipedIdsRef.current.join(','),
+        seed_movie_id: '0', liked_genres: '',
+      });
+      const res = await fetchWithTimeout(apiUrl(`/api/tmdb/feed?${params.toString()}`), {}, 10000);
+      if (!res.ok) return rateLimited || res.status === 429 ? 'rate_limited' : 'failed';
+      const data = await res.json();
+      return appendMovies(Array.isArray(data?.results) ? data.results : []);
+    } catch {
+      return rateLimited ? 'rate_limited' : 'failed';
     }
   };
 
-  // Network error retry count
-  const networkErrorCount = useRef(0);
-  const MAX_NETWORK_ERRORS = 3;
-
-  // Fetch movie feed using recommendation API with retry logic
-  const fetchMovies = useCallback(async (pageNum: number, retryCount: number = 0) => {
-    if (fetchingRef.current || !userId) return;
-    fetchingRef.current = true;
-    setLoading(true);
-
+  // One page of personalised recommendations (fallback: /api/tmdb/feed).
+  // Resolves to the number of movies added to the deck, or the error.
+  const fetchPage = async (pageNum: number): Promise<number | FeedLoadError> => {
+    let rateLimited = false;
     try {
-      // Create AbortController for timeout
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
-
-      // Use the new recommendation API with cosine similarity
-      const res = await fetch(`${BACKEND_URL}/api/recommendations`, {
+      const res = await fetchWithTimeout(apiUrl('/api/recommendations'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: userId,
-          page: pageNum,
-          limit: 20,
-        }),
-        signal: controller.signal,
+        body: JSON.stringify({ user_id: userId, page: pageNum, limit: 20 }),
       });
-
-      clearTimeout(timeoutId);
-
-      if (!res.ok) {
-        console.warn('Recommendation API failed, using fallback');
-        await fetchMoviesFallback(pageNum);
-        networkErrorCount.current = 0; // Reset on success
-        return;
-      }
-
-      const data = await res.json();
-      
-      const newMovies: FeedMovie[] = data.results
-        .filter((m: any) => !swipeState.swipedMovieIds.includes(m.id))
-        .map((m: any) => ({
+      if (res.ok) {
+        const data = await res.json();
+        const results: any[] = Array.isArray(data?.results) ? data.results.filter(Boolean) : [];
+        return appendMovies(results.map((m: any) => ({
           id: m.id,
           title: m.title,
           poster_path: m.poster_path,
@@ -1111,142 +830,57 @@ export default function SwipeScreen() {
           overview: m.overview,
           vote_average: m.vote_average,
           genre_ids: m.genre_ids,
-        }));
-
-      setMovies((prev) => {
-        const existingIds = new Set(prev.map((m) => m.id));
-        const filtered = newMovies.filter((m: FeedMovie) => !existingIds.has(m.id));
-        return [...prev, ...filtered];
-      });
-      
-      console.log(`Fetched ${newMovies.length} personalized recommendations (page ${pageNum})`);
-      networkErrorCount.current = 0; // Reset on success
-    } catch (err: any) {
-      // Handle abort/timeout silently
-      if (err.name === 'AbortError') {
-        console.log('Request timed out, retrying...');
+        })));
       }
-      
-      // Check if it's a network error (transient)
-      const isNetworkError = err.message?.includes('Network request failed') || 
-                            err.message?.includes('Failed to fetch') ||
-                            err.name === 'AbortError';
-      
-      if (isNetworkError && retryCount < 2) {
-        // Retry with exponential backoff for network errors
-        console.log(`Network error, retrying (attempt ${retryCount + 1}/2)...`);
-        await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1)));
-        fetchingRef.current = false;
-        return fetchMovies(pageNum, retryCount + 1);
-      }
-      
-      networkErrorCount.current++;
-      
-      // Only log error for non-network issues or after max retries
-      if (!isNetworkError) {
-        console.error('Error fetching recommendations:', err);
-      } else {
-        console.log('Network temporarily unavailable, using fallback');
-      }
-      
-      // Try fallback silently
-      try {
-        await fetchMoviesFallback(pageNum);
-      } catch (fallbackErr) {
-        // If even fallback fails, don't show error - just wait for next attempt
-        console.log('Fallback also failed, will retry on next page');
-      }
-    } finally {
-      setLoading(false);
-      fetchingRef.current = false;
+      rateLimited = res.status === 429;
+    } catch {
+      // network error / timeout → fallback feed
     }
-  }, [userId, swipeState.swipedMovieIds]);
+    return fetchMoviesFallback(pageNum, rateLimited);
+  };
 
-  // Fallback to old feed API with page capping
-  const fetchMoviesFallback = async (pageNum: number) => {
+  // Loads the next page. Stops auto-fetching (loadError) after any error or
+  // 2 consecutive empty pages; Retry resumes — never resets to page 1.
+  const loadNextPage = async () => {
+    if (fetchingRef.current || !userId) return;
+    fetchingRef.current = true;
+    setLoading(true);
     try {
-      const [filters, profile] = await Promise.all([getFilters(), getProfile()]);
-      const excludeIds = swipeState.swipedMovieIds.join(',');
-      const genres = filters?.genres?.selected?.join(',') || profile?.genres?.join(',') || '';
-      const languages = filters?.languages?.selected?.join(',') || '';
-
-      // Cap page number for TMDB API
-      const cappedPage = Math.min(pageNum, 100);
-      
-      // Create AbortController for timeout
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-      const params = new URLSearchParams({
-        genres, languages, page: String(cappedPage), exclude: excludeIds,
-        seed_movie_id: '0', liked_genres: '',
-      });
-
-      const res = await fetch(`${BACKEND_URL}/api/tmdb/feed?${params.toString()}`, {
-        signal: controller.signal,
-      });
-      
-      clearTimeout(timeoutId);
-      
-      if (!res.ok) throw new Error('Failed to fetch feed');
-      const data = await res.json();
-
-      const newMovies: FeedMovie[] = data.results.filter(
-        (m: FeedMovie) => !swipeState.swipedMovieIds.includes(m.id)
-      );
-
-      setMovies((prev) => {
-        const existingIds = new Set(prev.map((m) => m.id));
-        const filtered = newMovies.filter((m: FeedMovie) => !existingIds.has(m.id));
-        return [...prev, ...filtered];
-      });
-      
-      console.log(`Fallback fetched ${newMovies.length} movies (page ${cappedPage})`);
-    } catch (err: any) {
-      // Handle quietly - don't show error to user for transient network issues
-      if (err.name === 'AbortError') {
-        console.log('Fallback request timed out');
-      } else {
-        console.log('Fallback fetch issue:', err.message || err);
+      const pageNum = nextPageRef.current;
+      const result = await fetchPage(pageNum);
+      if (typeof result !== 'number') {
+        setLoadError(result); // Retry re-requests this page
+        return;
       }
+      nextPageRef.current = pageNum + 1;
+      if (result > 0) {
+        emptyFetchCount.current = 0;
+      } else {
+        emptyFetchCount.current += 1;
+        if (emptyFetchCount.current >= 2) setLoadError('failed');
+      }
+    } catch {
+      setLoadError('failed');
+    } finally {
+      fetchingRef.current = false;
+      setLoading(false);
     }
   };
 
-  useEffect(() => { 
-    // Only fetch when userId is available and page is > 0
-    if (userId && page > 0) {
-      fetchMovies(page); 
-    }
-  }, [page, userId]);
-
-  // Track consecutive empty fetches
-  const emptyFetchCount = useRef(0);
-
+  // Keep the deck topped up; re-checked after every fetch (loading flips back).
   useEffect(() => {
-    // Cap page at 100 to prevent TMDB 400 errors (API max is 500, but we use randomization after 100)
-    const MAX_PAGE = 100;
-    
-    if (movies.length < 5 && !loading && userId && page > 0) {
-      if (page >= MAX_PAGE) {
-        // Reset to page 1 with new random offset for variety
-        console.log('Reached page limit, resetting to page 1');
-        setPage(1);
-        emptyFetchCount.current = 0;
-      } else {
-        setPage((p) => p + 1);
-      }
+    if (userId && !loading && !loadError && movies.length < 5) {
+      loadNextPage();
     }
-  }, [movies.length, loading, userId, page]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, loading, loadError, movies.length]);
+
+  const handleRetry = () => {
+    emptyFetchCount.current = 0;
+    setLoadError(null);
+  };
 
   const handleSwipe = useCallback((direction: 'left' | 'right', movie: FeedMovie) => {
-    // Clear any existing undo timeout
-    if (undoTimeoutRef.current) {
-      clearTimeout(undoTimeoutRef.current);
-      undoTimeoutRef.current = null;
-    }
-    
-    // Store the movie for undo capability
-    setLastSwipedMovie(movie);
     setPendingMovie(movie);
     
     if (direction === 'right') {
@@ -1257,24 +891,18 @@ export default function SwipeScreen() {
     setMovies((prev) => prev.filter((m) => m.id !== movie.id));
   }, []);
 
-  // Handle undo - restore the last swiped movie
+  // Undo (and rating-modal dismiss): put the pending card back on top.
   const handleUndo = useCallback(() => {
-    if (pendingMovie) {
-      // Put the movie back at the front of the deck
-      setMovies((prev) => [pendingMovie, ...prev]);
-      
-      // Clear the pending movie
-      setPendingMovie(null);
-      setLastSwipedMovie(null);
-      
-      // Close any open modals
-      setShowRatingModal(false);
-      setShowLeftModal(false);
-      
-      // Show brief toast confirmation
-      setShowUndoToast(true);
-      setTimeout(() => setShowUndoToast(false), 1500);
-    }
+    setShowRatingModal(false);
+    setShowLeftModal(false);
+    if (!pendingMovie) return;
+    const restored = pendingMovie;
+    setMovies((prev) => (prev.some((m) => m.id === restored.id) ? prev : [restored, ...prev]));
+    setPendingMovie(null);
+
+    // Show brief toast confirmation
+    setShowUndoToast(true);
+    setTimeout(() => setShowUndoToast(false), 1500);
   }, [pendingMovie]);
 
   const recordSwipe = useCallback(async (
@@ -1295,13 +923,14 @@ export default function SwipeScreen() {
       swipedMovieIds: [...swipeState.swipedMovieIds, movie.id],
     };
 
+    swipedIdsRef.current = newState.swipedMovieIds;
     setSwipeState(newState);
-    await saveSwipeState(newState);
+    await saveSwipeState(newState).catch(() => undefined);
 
     // Send swipe to backend recommendation engine (only if it counts for profiling)
     if (countsForProfile && userId) {
       try {
-        await fetch(`${BACKEND_URL}/api/user/swipe`, {
+        await fetch(apiUrl('/api/user/swipe'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1312,9 +941,8 @@ export default function SwipeScreen() {
             reason: reasons.length > 0 ? reasons.join(', ') : null,
           }),
         });
-        console.log(`Recorded ${direction} swipe to backend for movie ${movie.id}`);
-      } catch (e) {
-        console.error('Error recording swipe to backend:', e);
+      } catch {
+        // best effort — the swipe is already saved locally
       }
     }
   }, [swipeState, userId]);
@@ -1324,7 +952,6 @@ export default function SwipeScreen() {
     setShowRatingModal(false);
     const movieToRecord = pendingMovie;
     setPendingMovie(null);
-    setLastSwipedMovie(null);
     
     // Then record the swipe asynchronously (non-blocking)
     if (movieToRecord) {
@@ -1337,7 +964,6 @@ export default function SwipeScreen() {
     setShowLeftModal(false);
     const movieToRecord = pendingMovie;
     setPendingMovie(null);
-    setLastSwipedMovie(null);
     
     // Then record the swipe asynchronously (non-blocking)
     if (movieToRecord) {
@@ -1347,15 +973,6 @@ export default function SwipeScreen() {
 
   // Handle "Not Watched" - skip movie without affecting recommendations
   const handleNotWatched = useCallback((movie: FeedMovie) => {
-    // Clear any existing undo timeout
-    if (undoTimeoutRef.current) {
-      clearTimeout(undoTimeoutRef.current);
-      undoTimeoutRef.current = null;
-    }
-    
-    // Store for potential undo
-    setLastSwipedMovie(movie);
-    
     // Remove from current deck
     setMovies((prev) => prev.filter((m) => m.id !== movie.id));
     
@@ -1370,20 +987,10 @@ export default function SwipeScreen() {
   const currentMovie = movies[0];
   const nextMovie = movies[1];
 
-  const dynamicStyles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: colors.bg },
-    headerBorder: { borderBottomColor: colors.border },
-    counterBadge: { backgroundColor: colors.primary },
-    progressFill: { backgroundColor: colors.gold },
-    likeBtn: { borderColor: `${colors.primary}60`, backgroundColor: `${colors.primary}15` },
-    dislikeBtn: { borderColor: 'rgba(255,107,107,0.4)', backgroundColor: 'rgba(255,107,107,0.1)' },
-    notWatchedBtn: { borderColor: 'rgba(136,136,136,0.4)', backgroundColor: 'rgba(136,136,136,0.1)' },
-  });
-
   return (
-    <SafeAreaView style={dynamicStyles.container} testID="swipe-screen">
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.bg }]} edges={['top']} testID="swipe-screen">
       {/* Header */}
-      <View style={[styles.header, dynamicStyles.headerBorder]}>
+      <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <View style={styles.brandMark}>
           <Ionicons name="film-outline" size={22} color={colors.primary} />
         </View>
@@ -1406,14 +1013,15 @@ export default function SwipeScreen() {
             Swipe {remainingSwipes} more to build your taste profile
           </Text>
           <View style={[styles.progressBar, { backgroundColor: colors.border }]}>
-            <View style={[styles.progressFill, dynamicStyles.progressFill, { width: `${(swipeState.totalSwipes / REQUIRED_SWIPES) * 100}%` }]} />
+            <View style={[styles.progressFill, { backgroundColor: colors.gold, width: `${(swipeState.totalSwipes / REQUIRED_SWIPES) * 100}%` }]} />
           </View>
         </View>
       )}
 
       {/* Cards stack */}
       <View style={styles.cardsContainer}>
-        {loading && movies.length === 0 ? (
+        {movies.length === 0 && !loadError ? (
+          // Auto-fetch keeps going until cards arrive or loadError is set.
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color={colors.primary} />
             <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Loading movies...</Text>
@@ -1421,13 +1029,16 @@ export default function SwipeScreen() {
         ) : movies.length === 0 ? (
           <View style={styles.emptyContainer}>
             <Ionicons name="film-outline" size={64} color={colors.textMuted} />
-            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No more movies to show</Text>
+            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+              {loadError === 'rate_limited' ? 'Too many requests — try again shortly' : "Couldn't load more"}
+            </Text>
             <TouchableOpacity
               style={[styles.refreshBtn, { backgroundColor: colors.primary }]}
-              onPress={() => { setPage(1); setLoading(true); fetchMovies(1); }}
+              onPress={handleRetry}
+              disabled={loading}
               testID="refresh-movies-btn"
             >
-              <Text style={styles.refreshBtnText}>Refresh</Text>
+              <Text style={styles.refreshBtnText}>Retry</Text>
             </TouchableOpacity>
           </View>
         ) : (
@@ -1451,7 +1062,7 @@ export default function SwipeScreen() {
       {movies.length > 0 && (
         <View style={styles.actionsContainer}>
           <TouchableOpacity
-            style={[styles.actionBtn, dynamicStyles.dislikeBtn]}
+            style={[styles.actionBtn, styles.dislikeBtn]}
             onPress={() => currentMovie && handleSwipe('left', currentMovie)}
             testID="swipe-left-btn"
             activeOpacity={0.8}
@@ -1460,7 +1071,7 @@ export default function SwipeScreen() {
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.actionBtn, dynamicStyles.notWatchedBtn]}
+            style={[styles.actionBtn, styles.notWatchedBtn]}
             onPress={() => currentMovie && handleNotWatched(currentMovie)}
             testID="not-watched-btn"
             activeOpacity={0.8}
@@ -1469,7 +1080,7 @@ export default function SwipeScreen() {
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.actionBtn, dynamicStyles.likeBtn]}
+            style={[styles.actionBtn, { borderColor: `${colors.primary}60`, backgroundColor: `${colors.primary}15` }]}
             onPress={() => currentMovie && handleSwipe('right', currentMovie)}
             testID="swipe-right-btn"
             activeOpacity={0.8}
@@ -1498,7 +1109,6 @@ export default function SwipeScreen() {
       {/* Modals */}
       <RatingModal
         visible={showRatingModal}
-        onClose={() => { setShowRatingModal(false); setPendingMovie(null); }}
         onSubmit={handleRatingSubmit}
         onUndo={handleUndo}
         movieTitle={pendingMovie?.title || ''}
@@ -1506,33 +1116,18 @@ export default function SwipeScreen() {
       />
       <LeftSwipeModal
         visible={showLeftModal}
-        onClose={() => { setShowLeftModal(false); setPendingMovie(null); }}
         onSubmit={handleLeftSubmit}
         onUndo={handleUndo}
         movieTitle={pendingMovie?.title || ''}
         colors={colors}
       />
-      <ProfileDrawer
-        visible={showProfileDrawer}
-        onClose={() => setShowProfileDrawer(false)}
-        onLogout={handleLogout}
-        onFilters={() => { setShowProfileDrawer(false); router.push('/filters?from=profile'); }}
-        onViewProfile={() => { setShowProfileDrawer(false); router.push('/profile'); }}
-        onProfilePreview={handleOpenProfilePreview}
-        colors={colors}
-      />
       <MovieDetailsBottomSheet
         visible={showDetailsModal}
-        onClose={() => setShowDetailsModal(false)}
+        onClose={handleCloseDetails}
         movieId={selectedMovieId}
         colors={colors}
       />
-      {/* In-App Profile Preview - Self-contained component with visibility editing */}
-      <InAppProfilePreview
-        visible={showProfilePreview}
-        onClose={handleCloseProfilePreview}
-      />
-      
+
       {/* Undo Toast Notification */}
       {showUndoToast && (
         <View style={[styles.undoToast, { backgroundColor: colors.bgCard }]}>
@@ -1553,18 +1148,15 @@ export default function SwipeScreen() {
 }
 
 const styles = StyleSheet.create({
+  container: { flex: 1 },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: SPACING.m, paddingVertical: SPACING.s, borderBottomWidth: 1,
   },
-  menuBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   brandMark: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   profileBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   headerCenter: { flexDirection: 'row', alignItems: 'center', gap: SPACING.s },
   headerTitle: { fontSize: 18, fontWeight: 'bold' },
-  headerRight: { width: 44, alignItems: 'flex-end' },
-  counterBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: BORDER_RADIUS.full, minWidth: 32, alignItems: 'center', marginLeft: SPACING.s },
-  counterText: { fontSize: 14, fontWeight: 'bold', color: '#FFF' },
   progressContainer: { paddingHorizontal: SPACING.l, paddingVertical: SPACING.m },
   progressText: { fontSize: 13, textAlign: 'center', marginBottom: SPACING.s },
   progressBar: { height: 4, borderRadius: 2, overflow: 'hidden' },
@@ -1591,7 +1183,8 @@ const styles = StyleSheet.create({
   genres: { fontSize: 13, color: '#757575' },
   actionsContainer: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: SPACING.l, paddingVertical: SPACING.m },
   actionBtn: { width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center', borderWidth: 2 },
-  infoActionBtn: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', borderWidth: 2 },
+  dislikeBtn: { borderColor: 'rgba(255,107,107,0.4)', backgroundColor: 'rgba(255,107,107,0.1)' },
+  notWatchedBtn: { borderColor: 'rgba(136,136,136,0.4)', backgroundColor: 'rgba(136,136,136,0.1)' },
   instructionsContainer: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: SPACING.xxl, paddingBottom: SPACING.m },
   instructionItem: { flexDirection: 'row', alignItems: 'center', gap: SPACING.xs },
   instructionText: { fontSize: 12 },

@@ -10,30 +10,25 @@
  * Returns: "HSR Layout, Bangalore"
  */
 
-// Indian pincode to area/city mapping (expandable)
+// Indian pincode to area/city mapping (expandable).
+// Every row is checked against India Post's post-office list for that pincode
+// (api.postalpincode.in). Only add a pincode whose post offices all serve ONE
+// locality — anything else falls through to the address-based extraction
+// below, which uses the address's own locality and is never wrong-area.
 const PINCODE_MAP: Record<string, { area: string; city: string }> = {
   // Bangalore pincodes
   '560102': { area: 'HSR Layout', city: 'Bangalore' },
-  '560034': { area: 'HSR Layout', city: 'Bangalore' },
-  '560068': { area: 'BTM Layout', city: 'Bangalore' },
-  '560076': { area: 'BTM Layout', city: 'Bangalore' },
-  '560095': { area: 'Whitefield', city: 'Bangalore' },
+  '560034': { area: 'Koramangala', city: 'Bangalore' },
+  '560095': { area: 'Koramangala', city: 'Bangalore' },
   '560066': { area: 'Whitefield', city: 'Bangalore' },
   '560001': { area: 'MG Road', city: 'Bangalore' },
-  '560002': { area: 'Shivajinagar', city: 'Bangalore' },
-  '560003': { area: 'Ulsoor', city: 'Bangalore' },
-  '560004': { area: 'Frazer Town', city: 'Bangalore' },
-  '560008': { area: 'Shantinagar', city: 'Bangalore' },
-  '560011': { area: 'Malleshwaram', city: 'Bangalore' },
-  '560017': { area: 'Koramangala', city: 'Bangalore' },
-  '560029': { area: 'Banashankari', city: 'Bangalore' },
+  '560011': { area: 'Jayanagar', city: 'Bangalore' },
+  '560017': { area: 'Vimanapura', city: 'Bangalore' },
+  '560029': { area: 'Tavarekere', city: 'Bangalore' },
   '560030': { area: 'Adugodi', city: 'Bangalore' },
   '560038': { area: 'Indiranagar', city: 'Bangalore' },
   '560041': { area: 'Jayanagar', city: 'Bangalore' },
-  '560047': { area: 'HAL', city: 'Bangalore' },
-  '560070': { area: 'Bannerghatta Road', city: 'Bangalore' },
-  '560078': { area: 'Electronic City', city: 'Bangalore' },
-  '560100': { area: 'Sarjapur', city: 'Bangalore' },
+  '560100': { area: 'Electronic City', city: 'Bangalore' },
   '560103': { area: 'Bellandur', city: 'Bangalore' },
   // Mumbai pincodes
   '400001': { area: 'Fort', city: 'Mumbai' },
@@ -45,34 +40,22 @@ const PINCODE_MAP: Record<string, { area: string; city: string }> = {
   '400097': { area: 'Malad', city: 'Mumbai' },
   // Delhi pincodes
   '110001': { area: 'Connaught Place', city: 'Delhi' },
-  '110017': { area: 'Hauz Khas', city: 'Delhi' },
-  '110019': { area: 'Saket', city: 'Delhi' },
-  '110020': { area: 'Greater Kailash', city: 'Delhi' },
+  '110020': { area: 'Okhla', city: 'Delhi' },
   '110024': { area: 'Defence Colony', city: 'Delhi' },
-  '110025': { area: 'Lajpat Nagar', city: 'Delhi' },
-  '110048': { area: 'Chanakyapuri', city: 'Delhi' },
-  '110049': { area: 'Vasant Vihar', city: 'Delhi' },
   // Chennai pincodes
   '600001': { area: 'George Town', city: 'Chennai' },
-  '600004': { area: 'T Nagar', city: 'Chennai' },
-  '600018': { area: 'Adyar', city: 'Chennai' },
-  '600020': { area: 'Nungambakkam', city: 'Chennai' },
-  '600034': { area: 'Anna Nagar', city: 'Chennai' },
-  '600096': { area: 'OMR', city: 'Chennai' },
+  '600018': { area: 'Teynampet', city: 'Chennai' },
+  '600034': { area: 'Nungambakkam', city: 'Chennai' },
+  '600096': { area: 'Perungudi', city: 'Chennai' },
   // Hyderabad pincodes
-  '500001': { area: 'Charminar', city: 'Hyderabad' },
-  '500034': { area: 'Jubilee Hills', city: 'Hyderabad' },
+  '500034': { area: 'Banjara Hills', city: 'Hyderabad' },
   '500081': { area: 'Madhapur', city: 'Hyderabad' },
-  '500084': { area: 'Gachibowli', city: 'Hyderabad' },
   // Pune pincodes
   '411001': { area: 'Camp', city: 'Pune' },
-  '411006': { area: 'Deccan', city: 'Pune' },
-  '411014': { area: 'Koregaon Park', city: 'Pune' },
+  '411006': { area: 'Yerwada', city: 'Pune' },
   '411057': { area: 'Hinjewadi', city: 'Pune' },
   // Kolkata pincodes
   '700001': { area: 'BBD Bagh', city: 'Kolkata' },
-  '700019': { area: 'Park Street', city: 'Kolkata' },
-  '700029': { area: 'Salt Lake', city: 'Kolkata' },
 };
 
 /**
@@ -124,7 +107,7 @@ export function formatLocationForPrivacy(fullLocation: any): string {
 
   // FALLBACK: Regex-based extraction
   // Split by comma and clean up
-  let parts = fullLocation.split(',').map(p => p.trim()).filter(Boolean);
+  let parts: string[] = (fullLocation as string).split(',').map((p: string) => p.trim()).filter(Boolean);
   
   if (parts.length === 0) return fullLocation;
   

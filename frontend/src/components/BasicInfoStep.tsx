@@ -1,17 +1,25 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, Modal,
-  ScrollView, Alert, ActivityIndicator, Platform, KeyboardAvoidingView, Keyboard,
+  ScrollView, Alert, ActivityIndicator,
 } from 'react-native';
+// RN's own KeyboardAvoidingView breaks in APK builds with edgeToEdgeEnabled —
+// the keyboard-controller one reads native WindowInsets.
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { COLORS, SPACING, BORDER_RADIUS } from '../theme';
 import { ProfileData } from '../types';
+import { apiUrl } from '../store';
+import { GENDERS } from './profile/constants';
 import { formatLocationForPrivacy } from '../utils/locationFormatter';
 
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+// Places autocomplete is billed per request — wait for a typing pause.
+const LOCATION_SEARCH_DEBOUNCE_MS = 350;
+// Distance from the top of the screen to this step (onboarding header +
+// progress bar + status bar) so the keyboard padding lines up.
+const KEYBOARD_OFFSET = 100;
 
-const GENDERS = ['Man', 'Woman', 'Non-binary', 'Prefer not to say', 'Other'];
 const GENDER_IDENTITIES = ['Bisexual', 'Gay', 'Lesbian', 'Pansexual', 'Asexual', 'Queer', 'Questioning', 'Prefer not to say'];
 
 // Generate arrays for date picker
@@ -58,10 +66,14 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
   );
   const [predictions, setPredictions] = useState<any[]>([]);
   const [searchingLocation, setSearchingLocation] = useState(false);
+  const [locationError, setLocationError] = useState('');
   const [gettingCurrentLoc, setGettingCurrentLoc] = useState(false);
   const [ageConfirmed, setAgeConfirmed] = useState(!!data.age && data.age >= 18);
 
   const showsGenderIdentity = data.gender === 'Non-binary' || data.gender === 'Other';
+  // Not (yet) on ProfileData — read it defensively.
+  const rawIdentity = (data as any).genderIdentity;
+  const genderIdentity: string = typeof rawIdentity === 'string' ? rawIdentity : '';
 
   const [selectedDay, setSelectedDay] = useState(data.dobDay ? parseInt(data.dobDay) : 15);
   const [selectedMonth, setSelectedMonth] = useState(data.dobMonth ? parseInt(data.dobMonth) : 6);
@@ -71,20 +83,40 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
   const monthScrollRef = useRef<ScrollView>(null);
   const yearScrollRef = useRef<ScrollView>(null);
 
-  // Scroll to center item on mount
+  // Location search: pending debounce timer + a sequence number so only the
+  // response to the LATEST query is applied (slow responses can't overwrite
+  // newer ones, and nothing is applied after unmount).
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchSeqRef = useRef(0);
+  const mountedRef = useRef(true);
+
   useEffect(() => {
-    setTimeout(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      searchSeqRef.current += 1;
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    };
+  }, []);
+
+  // Scroll the wheels to the selected date on mount — and again after the
+  // under-age screen hands back to the (re-mounted) form.
+  useEffect(() => {
+    if (underAge) return;
+    const timer = setTimeout(() => {
       const dayIndex = selectedDay - 1;
       const monthIndex = selectedMonth - 1;
       const yearIndex = YEARS.indexOf(selectedYear);
-      
+
       dayScrollRef.current?.scrollTo({ y: dayIndex * ITEM_HEIGHT, animated: false });
       monthScrollRef.current?.scrollTo({ y: monthIndex * ITEM_HEIGHT, animated: false });
       if (yearIndex >= 0) {
         yearScrollRef.current?.scrollTo({ y: yearIndex * ITEM_HEIGHT, animated: false });
       }
     }, 100);
-  }, []);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [underAge]);
 
   // Re-validate on mount for back navigation
   useEffect(() => {
@@ -92,6 +124,18 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
       validateAndSetDate(parseInt(data.dobDay), parseInt(data.dobMonth), parseInt(data.dobYear), false);
     }
   }, []);
+
+  // Keep the ISO date of birth (YYYY-MM-DD) in step with the picked
+  // day/month/year so it goes up with the rest of the step data (the server
+  // derives age from it). Also covers progress restored from an older build.
+  useEffect(() => {
+    const d = parseInt(data.dobDay, 10);
+    const m = parseInt(data.dobMonth, 10);
+    const y = parseInt(data.dobYear, 10);
+    if (!d || !m || !y) return;
+    const iso = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    if (data.dob !== iso) onUpdate('dob', iso);
+  }, [data.dobDay, data.dobMonth, data.dobYear, data.dob, onUpdate]);
 
   const validateAndSetDate = useCallback((day: number, month: number, year: number, updateData: boolean = true) => {
     const maxDays = getMaxDays(month, year);
@@ -160,30 +204,70 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
     }
   };
 
-  const searchLocation = useCallback(async (text: string) => {
+  // Cancels a pending debounce and invalidates any in-flight search.
+  const cancelLocationSearch = () => {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = null;
+    searchSeqRef.current += 1;
+    setSearchingLocation(false);
+  };
+
+  const searchLocation = useCallback((text: string) => {
     setLocationSearch(text);
-    if (text.length < 2) { setPredictions([]); return; }
-    setSearchingLocation(true);
-    try {
-      const resp = await fetch(`${BACKEND_URL}/api/places/autocomplete?input=${encodeURIComponent(text)}`);
-      const result = await resp.json();
-      setPredictions(result.predictions || []);
-    } catch (e) {
-      console.error('Location search error:', e);
-    } finally {
+    setLocationError('');
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    const seq = ++searchSeqRef.current;
+    const query = text.trim();
+    if (query.length < 2) {
+      searchTimerRef.current = null;
+      setPredictions([]);
       setSearchingLocation(false);
+      return;
     }
+    searchTimerRef.current = setTimeout(async () => {
+      searchTimerRef.current = null;
+      setSearchingLocation(true);
+      try {
+        const resp = await fetch(apiUrl(`/api/places/autocomplete?input=${encodeURIComponent(query)}`));
+        if (seq !== searchSeqRef.current) return; // superseded by newer input
+        if (!resp.ok) {
+          setPredictions([]);
+          setLocationError(resp.status === 429
+            ? 'Too many searches — please try again shortly.'
+            : 'Location search is unavailable right now. Try "Use My Current Location".');
+          return;
+        }
+        const result = await resp.json();
+        if (seq !== searchSeqRef.current) return;
+        setPredictions(Array.isArray(result?.predictions) ? result.predictions : []);
+      } catch {
+        if (seq === searchSeqRef.current) {
+          setPredictions([]);
+          setLocationError('Could not search locations. Check your connection.');
+        }
+      } finally {
+        if (seq === searchSeqRef.current) setSearchingLocation(false);
+      }
+    }, LOCATION_SEARCH_DEBOUNCE_MS);
   }, []);
 
   const selectLocation = (description: string) => {
-    // Store full address for backend, display formatted version
+    cancelLocationSearch();
+    // Autocomplete is city-level ("(cities)"), so the label is safe to show
+    // others; keep the full text private in locationFull.
     onUpdate('location', description);
-    onUpdate('locationFull', description); // Keep full for backend
+    onUpdate('locationFull', description);
+    // A typed-in city has no GPS fix — drop any earlier one so distance
+    // filtering never uses coordinates from a different place.
+    onUpdate('coordinates', undefined);
     setLocationSearch(formatLocationForPrivacy(description));
     setPredictions([]);
+    setLocationError('');
   };
 
   const getCurrentLocation = async () => {
+    cancelLocationSearch();
+    setLocationError('');
     setGettingCurrentLoc(true);
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
@@ -193,22 +277,36 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
       }
       const loc = await Location.getCurrentPositionAsync({});
       const resp = await fetch(
-        `${BACKEND_URL}/api/places/geocode?lat=${loc.coords.latitude}&lng=${loc.coords.longitude}`
+        apiUrl(`/api/places/geocode?lat=${loc.coords.latitude}&lng=${loc.coords.longitude}`)
       );
+      if (!mountedRef.current) return;
+      if (!resp.ok) {
+        Alert.alert(
+          resp.status === 429 ? 'Please wait' : 'Error',
+          resp.status === 429
+            ? 'Too many location requests — please try again shortly.'
+            : 'Could not get your location.'
+        );
+        return;
+      }
       const result = await resp.json();
+      if (!mountedRef.current) return;
       if (result.location) {
         const fullAddress = result.formatted_address || result.location;
-        // Store full address for backend
-        onUpdate('location', fullAddress);
+        // `location` is the only location field other users ever see, so it
+        // gets the privacy-safe "Area, City" label; the full street address
+        // and the GPS fix stay private (locationFull / coordinates).
+        const label = formatLocationForPrivacy(fullAddress) || result.location;
+        onUpdate('location', label);
         onUpdate('locationFull', fullAddress);
         onUpdate('coordinates', { lat: loc.coords.latitude, lng: loc.coords.longitude });
-        // Display formatted version
-        setLocationSearch(formatLocationForPrivacy(fullAddress));
+        setLocationSearch(label);
+        setPredictions([]);
       }
-    } catch (e) {
-      Alert.alert('Error', 'Could not get your location.');
+    } catch {
+      if (mountedRef.current) Alert.alert('Error', 'Could not get your location.');
     } finally {
-      setGettingCurrentLoc(false);
+      if (mountedRef.current) setGettingCurrentLoc(false);
     }
   };
 
@@ -243,10 +341,10 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
 
   return (
     <>
-      <KeyboardAvoidingView 
-        style={styles.flex} 
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0}
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior="padding"
+        keyboardVerticalOffset={KEYBOARD_OFFSET}
       >
         <ScrollView 
           style={styles.flex} 
@@ -281,8 +379,8 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
           <>
             <Text style={styles.label}>Gender Identity (Optional)</Text>
             <TouchableOpacity style={styles.dropdown} onPress={() => setShowIdentityPicker(true)} testID="basic-identity-dropdown">
-              <Text style={[styles.dropdownText, !(data as any).genderIdentity && styles.placeholder]}>
-                {(data as any).genderIdentity || 'Select your identity'}
+              <Text style={[styles.dropdownText, !genderIdentity && styles.placeholder]}>
+                {genderIdentity || 'Select your identity'}
               </Text>
               <Ionicons name="chevron-down" size={20} color={COLORS.textMuted} />
             </TouchableOpacity>
@@ -422,6 +520,7 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
           testID="basic-location-input"
         />
         {searchingLocation && <ActivityIndicator size="small" color={COLORS.primary} style={styles.loadingIndicator} />}
+        {!!locationError && <Text style={styles.searchError}>{locationError}</Text>}
 
         {predictions.length > 0 && (
           <View style={styles.predictionsContainer}>
@@ -451,7 +550,12 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
       </KeyboardAvoidingView>
 
       {/* Gender Picker Modal */}
-      <Modal visible={showGenderPicker} transparent animationType="fade">
+      <Modal
+        visible={showGenderPicker}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowGenderPicker(false)}
+      >
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowGenderPicker(false)}>
           <View style={styles.pickerContent}>
             <Text style={styles.pickerTitle}>Select Gender</Text>
@@ -459,7 +563,13 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
               <TouchableOpacity
                 key={g}
                 style={[styles.pickerItem, data.gender === g && styles.pickerItemActive]}
-                onPress={() => { onUpdate('gender', g); setShowGenderPicker(false); }}
+                onPress={() => {
+                  onUpdate('gender', g);
+                  // Gender identity only applies to Non-binary / Other — don't
+                  // keep sending a hidden stale value.
+                  if (g !== 'Non-binary' && g !== 'Other' && genderIdentity) onUpdate('genderIdentity', '');
+                  setShowGenderPicker(false);
+                }}
                 testID={`gender-${g.toLowerCase().replace(/\s+/g, '-')}`}
               >
                 <Text style={[styles.pickerItemText, data.gender === g && styles.pickerItemTextActive]}>{g}</Text>
@@ -470,7 +580,12 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
       </Modal>
 
       {/* Gender Identity Picker Modal */}
-      <Modal visible={showIdentityPicker} transparent animationType="fade">
+      <Modal
+        visible={showIdentityPicker}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowIdentityPicker(false)}
+      >
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowIdentityPicker(false)}>
           <View style={styles.pickerContent}>
             <Text style={styles.pickerTitle}>Select Identity</Text>
@@ -478,11 +593,11 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
               {GENDER_IDENTITIES.map(g => (
                 <TouchableOpacity
                   key={g}
-                  style={[styles.pickerItem, (data as any).genderIdentity === g && styles.pickerItemActive]}
+                  style={[styles.pickerItem, genderIdentity === g && styles.pickerItemActive]}
                   onPress={() => { onUpdate('genderIdentity', g); setShowIdentityPicker(false); }}
                   testID={`identity-${g.toLowerCase().replace(/\s+/g, '-')}`}
                 >
-                  <Text style={[styles.pickerItemText, (data as any).genderIdentity === g && styles.pickerItemTextActive]}>{g}</Text>
+                  <Text style={[styles.pickerItemText, genderIdentity === g && styles.pickerItemTextActive]}>{g}</Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -550,6 +665,7 @@ const styles = StyleSheet.create({
   },
   predictionText: { fontSize: 14, color: COLORS.text, flex: 1 },
   loadingIndicator: { marginTop: SPACING.s },
+  searchError: { fontSize: 13, color: COLORS.textMuted, marginTop: SPACING.xs },
   currentLocBtn: {
     flexDirection: 'row', alignItems: 'center', gap: SPACING.s, paddingVertical: SPACING.m, marginTop: SPACING.s,
   },

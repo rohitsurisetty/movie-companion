@@ -12,8 +12,8 @@ import { usePathname } from 'expo-router';
 import { useTina } from '../context/TinaContext';
 import { shadow } from '../utils/shadow';
 
-// Tina avatar
-const TINA_AVATAR = 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&h=200&fit=crop&crop=face';
+// Tina avatar — bundled app logo (no hotlinked stock photo of a real person)
+const TINA_AVATAR = require('../../assets/images/filmydating-logo.png');
 
 interface FloatingTinaButtonProps {
   // Optional custom positioning
@@ -107,7 +107,7 @@ export default function FloatingTinaButton({
         <View style={styles.glowInner} />
         
         {/* Avatar */}
-        <Image source={{ uri: TINA_AVATAR }} style={styles.avatar} />
+        <Image source={TINA_AVATAR} style={styles.avatar} />
         
         {/* Online indicator */}
         <View style={styles.onlineIndicator} />

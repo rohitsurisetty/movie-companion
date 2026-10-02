@@ -9,13 +9,22 @@ This module implements a robust content-based recommendation system that:
 5. Adapts dynamically based on user behavior
 """
 
+import logging
 import math
 from typing import Dict, List, Optional, Any, Set, Tuple
-from datetime import datetime, timezone
+from datetime import datetime
 import httpx
 
-# TMDB Configuration
-TMDB_ACCESS_TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiIxMDkyYWVhMzI1YWI2YWZhMTc0NjYxNjZmMDJiYjc4NiIsIm5iZiI6MTc3MzE5NDA5Mi4zNDcwMDAxLCJzdWIiOiI2OWIwY2I2YzM3MTk4MWM3MjJhYzFlODYiLCJzY29wZXMiOlsiYXBpX3JlYWQiXSwidmVyc2lvbiI6MX0.ZZcD2Bgm2DNiqXhzsBLP64R4cgWza-2CHOZ10k4Yoks"
+from enums import normalize as normalize_enum, normalize_list as normalize_enum_list
+from settings import settings
+
+logger = logging.getLogger(__name__)
+
+
+# TMDB Configuration — the bearer token comes from the environment
+# (TMDB_ACCESS_TOKEN via settings). Never hardcode it here.
+def _tmdb_headers() -> Dict[str, str]:
+    return {"Authorization": f"Bearer {settings.tmdb_access_token}"}
 
 # =============================================
 # MAPPINGS AND CONSTANTS
@@ -31,6 +40,35 @@ GENRE_ID_TO_NAME = {
 }
 
 GENRE_NAME_TO_ID = {v: k for k, v in GENRE_ID_TO_NAME.items()}
+
+
+def genre_vector_key(name: str) -> str:
+    """Taste-vector key for a genre name.
+
+    TMDB calls genre 878 "Science Fiction" while the app's canonical value (and
+    GENRE_ID_TO_NAME) is "Sci-Fi"; normalising via enums puts profile, swipe and
+    movie vectors on the same key: both become 'genre_sci_fi'.
+    """
+    canon = str(normalize_enum("genres", name)).strip()
+    return f"genre_{canon.lower().replace(' ', '_').replace('-', '_')}"
+
+
+# Taste-vector genre key -> TMDB genre id (e.g. 'genre_sci_fi' -> 878)
+GENRE_KEY_TO_ID = {genre_vector_key(name): gid for gid, name in GENRE_ID_TO_NAME.items()}
+
+
+def _canonical_genre_keys(vector: Dict[str, float]) -> Dict[str, float]:
+    """Fold genre dimensions stored under a non-canonical spelling (vectors saved
+    before genre names were normalised, e.g. 'genre_science_fiction') into the
+    canonical key, summing weights. Covers 'unwatched_genre_*' keys too."""
+    out: Dict[str, float] = {}
+    for key, weight in vector.items():
+        if key.startswith("genre_"):
+            key = genre_vector_key(key[len("genre_"):].replace("_", " "))
+        elif key.startswith("unwatched_genre_"):
+            key = "unwatched_" + genre_vector_key(key[len("unwatched_genre_"):].replace("_", " "))
+        out[key] = out.get(key, 0.0) + weight
+    return out
 
 # Comprehensive language code mappings
 LANGUAGE_TO_CODE = {
@@ -58,33 +96,33 @@ LANGUAGE_TO_CODE = {
 
 CODE_TO_LANGUAGE = {v: k for k, v in LANGUAGE_TO_CODE.items()}
 
+# Keys below are the canonical option values from enums.OPTIONS; profile /
+# Tina values are mapped onto them with normalize_enum() before lookup.
+
 # Movie frequency to content freshness mapping
 FREQUENCY_TO_PREFERENCE = {
-    'Daily': {'recency': 'new', 'mainstream': 0.8},
-    'Multiple times a week': {'recency': 'new', 'mainstream': 0.7},
+    'More than twice a week': {'recency': 'new', 'mainstream': 0.8},
+    'Twice a week': {'recency': 'new', 'mainstream': 0.7},
     'Once a week': {'recency': 'recent', 'mainstream': 0.6},
-    'Few times a month': {'recency': 'any', 'mainstream': 0.5},
+    'Twice a month': {'recency': 'any', 'mainstream': 0.5},
     'Once a month': {'recency': 'any', 'mainstream': 0.4},
     'Rarely': {'recency': 'any', 'mainstream': 0.3},
 }
 
 # OTT vs Theatre preference mapping
 OTT_THEATRE_PREFERENCE = {
-    'OTT all the way': {'blockbuster': 0.3, 'indie': 0.7, 'international': 0.8},
-    'Mostly OTT': {'blockbuster': 0.4, 'indie': 0.6, 'international': 0.7},
-    'Both equally': {'blockbuster': 0.5, 'indie': 0.5, 'international': 0.5},
-    'Mostly Theatre': {'blockbuster': 0.7, 'indie': 0.3, 'international': 0.3},
-    'Theatre experience always': {'blockbuster': 0.8, 'indie': 0.2, 'international': 0.2},
+    'OTT Person': {'blockbuster': 0.35, 'indie': 0.65, 'international': 0.75},
+    'Theatre Person': {'blockbuster': 0.75, 'indie': 0.25, 'international': 0.25},
+    'Both OTT & Theatre': {'blockbuster': 0.5, 'indie': 0.5, 'international': 0.5},
+    'Neither': {'blockbuster': 0.5, 'indie': 0.4, 'international': 0.4},  # below every threshold -> no bias
 }
 
 # Relationship intent to genre affinity (subtle signals)
 INTENT_GENRE_AFFINITY = {
-    'Something Casual': ['Comedy', 'Action', 'Adventure'],
-    'Long-term Relationship': ['Romance', 'Drama', 'Family'],
-    'Movie Buddy': ['Action', 'Sci-Fi', 'Thriller', 'Horror'],
-    'Not Sure Yet': [],  # No bias
-    'Marriage': ['Romance', 'Drama', 'Family'],
+    'Casual': ['Comedy', 'Action', 'Adventure'],
     'Friendship': ['Comedy', 'Adventure', 'Animation'],
+    'Serious relationship': ['Romance', 'Drama', 'Family'],
+    'Exploring': [],  # No bias
 }
 
 
@@ -100,7 +138,7 @@ def get_movie_era(release_date: str) -> str:
         year = int(release_date[:4])
         decade = (year // 10) * 10
         return f"{decade}s"
-    except:
+    except (ValueError, TypeError):  # malformed date from TMDB — expected, not worth a log line
         return 'unknown'
 
 
@@ -203,7 +241,7 @@ class TasteVector:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'TasteVector':
         tv = cls()
-        tv.vector = data.get("vector", {})
+        tv.vector = _canonical_genre_keys(data.get("vector") or {})
         tv.like_count = data.get("like_count", 0)
         tv.dislike_count = data.get("dislike_count", 0)
         tv.total_swipes = data.get("total_swipes", 0)
@@ -306,7 +344,7 @@ def initialize_taste_vector_from_profile(profile: Dict[str, Any]) -> TasteVector
     # ========================
     genres = profile.get("genres", [])
     for genre in genres:
-        genre_key = f"genre_{genre.lower().replace(' ', '_').replace('-', '_')}"
+        genre_key = genre_vector_key(genre)
         tv.add_signal(genre_key, 1.5)  # Strong weight for explicitly selected genres
     
     # ========================
@@ -320,7 +358,7 @@ def initialize_taste_vector_from_profile(profile: Dict[str, Any]) -> TasteVector
         movie_genres = movie.get("genres", [])
         for genre in movie_genres:
             if isinstance(genre, str):
-                genre_key = f"genre_{genre.lower().replace(' ', '_').replace('-', '_')}"
+                genre_key = genre_vector_key(genre)
                 tv.add_signal(genre_key, rank_weight)
         
         # Era signal
@@ -359,7 +397,7 @@ def initialize_taste_vector_from_profile(profile: Dict[str, Any]) -> TasteVector
     # ========================
     # 4. MOVIE FREQUENCY (Mainstream vs Niche)
     # ========================
-    movie_frequency = profile.get("movieFrequency", "")
+    movie_frequency = normalize_enum("movieFrequency", profile.get("movieFrequency") or "")
     tv.movie_frequency = movie_frequency
     
     if movie_frequency in FREQUENCY_TO_PREFERENCE:
@@ -386,7 +424,7 @@ def initialize_taste_vector_from_profile(profile: Dict[str, Any]) -> TasteVector
     # ========================
     # 5. OTT vs THEATRE PREFERENCE
     # ========================
-    ott_theatre = profile.get("ottTheatre", "")
+    ott_theatre = normalize_enum("ottTheatre", profile.get("ottTheatre") or "")
     tv.ott_theatre = ott_theatre
     
     if ott_theatre in OTT_THEATRE_PREFERENCE:
@@ -407,12 +445,13 @@ def initialize_taste_vector_from_profile(profile: Dict[str, Any]) -> TasteVector
     # ========================
     # 6. RELATIONSHIP INTENT (Subtle genre affinity)
     # ========================
-    relationship_intents = profile.get("relationshipIntent", [])
+    # normalize_enum_list also accepts a single string (Tina may store one)
+    relationship_intents = normalize_enum_list("relationshipIntent", profile.get("relationshipIntent"))
     for intent in relationship_intents:
         if intent in INTENT_GENRE_AFFINITY:
             affinity_genres = INTENT_GENRE_AFFINITY[intent]
             for genre in affinity_genres:
-                genre_key = f"genre_{genre.lower().replace(' ', '_').replace('-', '_')}"
+                genre_key = genre_vector_key(genre)
                 tv.add_signal(genre_key, 0.3)  # Subtle boost
     
     # ========================
@@ -471,7 +510,7 @@ async def enrich_movie_with_full_details(movie_id: int, http_client: httpx.Async
         resp = await http_client.get(
             f"https://api.themoviedb.org/3/movie/{movie_id}",
             params={"append_to_response": "credits,keywords"},
-            headers={"Authorization": f"Bearer {TMDB_ACCESS_TOKEN}"}
+            headers=_tmdb_headers()
         )
         if resp.status_code == 200:
             data = resp.json()
@@ -581,8 +620,9 @@ async def enrich_movie_with_full_details(movie_id: int, http_client: httpx.Async
                 "adult": data.get("adult", False),
                 "status": data.get("status", ""),
             }
+        logger.warning("TMDB movie details %s returned HTTP %s", movie_id, resp.status_code)
     except Exception as e:
-        print(f"Error fetching full movie details for {movie_id}: {e}")
+        logger.warning("TMDB movie details %s request failed: %s", movie_id, e)
     return {}
 
 
@@ -622,7 +662,7 @@ async def enrich_top_movies(top_movies: List[Dict[str, Any]], http_client: httpx
             else:
                 enriched_movies.append(movie)
         except Exception as e:
-            print(f"Error enriching top movie {movie_id}: {e}")
+            logger.warning("Error enriching top movie %s: %s", movie_id, e)
             enriched_movies.append(movie)
     
     return enriched_movies
@@ -652,7 +692,7 @@ def initialize_taste_vector_from_enriched_movies(
         # ========================
         for genre in movie.get("genres", []):
             if isinstance(genre, str):
-                genre_key = f"genre_{genre.lower().replace(' ', '_').replace('-', '_')}"
+                genre_key = genre_vector_key(genre)
                 tv.add_signal(genre_key, rank_weight * 1.2)
         
         # ========================
@@ -824,7 +864,7 @@ def update_taste_vector_from_swipe(
     # 1. GENRE SIGNALS (Primary signal)
     # ========================
     for genre in movie_details.get("genres", []):
-        genre_key = f"genre_{genre.lower().replace(' ', '_').replace('-', '_')}"
+        genre_key = genre_vector_key(genre)
         tv.add_signal(genre_key, base_weight * 1.0)
     
     # ========================
@@ -864,7 +904,7 @@ def update_taste_vector_from_swipe(
                 actor_weight = base_weight * 0.4
             tv.add_signal(actor_key, actor_weight)
         except Exception as e:
-            print(f"Error processing actor {actor_name}: {e}")
+            logger.warning("Error processing actor signal: %s", e)
     
     # ========================
     # 3. DIRECTOR SIGNALS (Very strong signal)
@@ -1036,7 +1076,7 @@ def update_taste_vector_from_swipe(
         if any(word in reason_lower for word in ["didn't watch", "haven't seen", "not seen", "unwatched", "not watched"]):
             # Partially reverse the negative signals we added for genres
             for genre in movie_details.get("genres", []):
-                genre_key = f"genre_{genre.lower().replace(' ', '_').replace('-', '_')}"
+                genre_key = genre_vector_key(genre)
                 tv.add_signal(genre_key, 0.3)  # Partial reversal
     
     return tv
@@ -1057,7 +1097,7 @@ def compute_movie_vector(movie: Dict[str, Any]) -> Dict[str, float]:
     for genre_id in movie.get("genre_ids", []):
         genre_name = GENRE_ID_TO_NAME.get(genre_id, "")
         if genre_name:
-            genre_key = f"genre_{genre_name.lower().replace(' ', '_').replace('-', '_')}"
+            genre_key = genre_vector_key(genre_name)
             vector[genre_key] = 1.0
     
     # Era feature
@@ -1193,16 +1233,14 @@ def score_movie_for_user(
     # UNWATCHED PATTERNS PENALTY
     # ========================
     # Check if movie matches patterns from "didn't watch" swipes
-    movie_genres = [g.get("name", g) if isinstance(g, dict) else g for g in movie.get("genre_ids", [])]
-    
-    # Convert genre IDs to names
+    # Convert genre IDs to names (canonical spelling, e.g. 878 -> "Sci-Fi")
     movie_genre_names = []
     for gid in movie.get("genre_ids", []):
         if isinstance(gid, int) and gid in GENRE_ID_TO_NAME:
             movie_genre_names.append(GENRE_ID_TO_NAME[gid])
     
     for genre in movie_genre_names:
-        unwatched_key = f"unwatched_genre_{genre.lower().replace(' ', '_').replace('-', '_')}"
+        unwatched_key = "unwatched_" + genre_vector_key(genre)
         if unwatched_key in user_taste.vector and user_taste.vector[unwatched_key] < -0.5:
             # Apply mild penalty for unwatched content patterns
             score *= 0.9
@@ -1222,7 +1260,7 @@ def score_movie_for_user(
             
             # Visuals lovers get action/sci-fi boost
             if user_taste.reason_stats.get("visuals", 0) > total_reasons * 0.3:
-                if any(g in movie_genre_names for g in ["Action", "Science Fiction", "Fantasy"]):
+                if any(g in movie_genre_names for g in ["Action", "Sci-Fi", "Fantasy"]):
                     score *= 1.05
             
             # Emotional lovers get drama/romance boost
@@ -1281,10 +1319,7 @@ async def get_candidate_movies(
     genre_scores = []
     for key, value in user_taste.vector.items():
         if key.startswith("genre_") and value > 0:
-            genre_name = key.replace("genre_", "").replace("_", " ").title()
-            if genre_name == "Sci Fi":
-                genre_name = "Sci-Fi"
-            genre_id = GENRE_NAME_TO_ID.get(genre_name)
+            genre_id = GENRE_KEY_TO_ID.get(key)
             if genre_id:
                 genre_scores.append((genre_id, value))
     
@@ -1297,7 +1332,6 @@ async def get_candidate_movies(
     async with httpx.AsyncClient(timeout=15.0) as http_client:
         
         # Define related Indian languages for better recommendations
-        INDIAN_LANGUAGES = {'te', 'ta', 'hi', 'ml', 'kn', 'bn', 'mr', 'gu', 'pa'}
         INDIAN_LANG_RELATIONS = {
             'te': ['ta', 'ml', 'kn', 'hi'],  # Telugu users might like Tamil, Malayalam, Kannada, Hindi
             'ta': ['ml', 'te', 'kn', 'hi'],  # Tamil users
@@ -1330,13 +1364,15 @@ async def get_candidate_movies(
                     resp = await http_client.get(
                         "https://api.themoviedb.org/3/discover/movie",
                         params=params,
-                        headers={"Authorization": f"Bearer {TMDB_ACCESS_TOKEN}"}
+                        headers=_tmdb_headers()
                     )
                     if resp.status_code == 200:
                         results = resp.json().get("results", [])
                         all_movies.extend(results)
+                    else:
+                        logger.warning("TMDB discover (lang=%s) returned HTTP %s", lang_code, resp.status_code)
                 except Exception as e:
-                    print(f"Error fetching {lang_code} movies: {e}")
+                    logger.warning("TMDB discover (lang=%s) request failed: %s", lang_code, e)
         
         # 2. RELATED LANGUAGES (Indian multilingual recommendations)
         if len(all_movies) < 30 and related_langs:
@@ -1356,7 +1392,7 @@ async def get_candidate_movies(
                         resp = await http_client.get(
                             "https://api.themoviedb.org/3/discover/movie",
                             params=params,
-                            headers={"Authorization": f"Bearer {TMDB_ACCESS_TOKEN}"}
+                            headers=_tmdb_headers()
                         )
                         if resp.status_code == 200:
                             results = resp.json().get("results", [])
@@ -1364,8 +1400,10 @@ async def get_candidate_movies(
                             for m in results:
                                 m['_is_related_lang'] = True
                             all_movies.extend(results)
-                    except:
-                        pass
+                        else:
+                            logger.warning("TMDB discover (related lang=%s) returned HTTP %s", lang_code, resp.status_code)
+                    except Exception as e:
+                        logger.warning("TMDB discover (related lang=%s) request failed: %s", lang_code, e)
         
         # 3. GENRE-BASED DISCOVERY (if we have genre preferences)
         if top_genre_ids and len(all_movies) < 40:
@@ -1388,19 +1426,21 @@ async def get_candidate_movies(
                 resp = await http_client.get(
                     "https://api.themoviedb.org/3/discover/movie",
                     params=params,
-                    headers={"Authorization": f"Bearer {TMDB_ACCESS_TOKEN}"}
+                    headers=_tmdb_headers()
                 )
                 if resp.status_code == 200:
                     all_movies.extend(resp.json().get("results", []))
-            except:
-                pass
+                else:
+                    logger.warning("TMDB discover (genres) returned HTTP %s", resp.status_code)
+            except Exception as e:
+                logger.warning("TMDB discover (genres) request failed: %s", e)
         
         # 4. TRENDING MOVIES (for diversity)
         try:
             resp = await http_client.get(
                 "https://api.themoviedb.org/3/trending/movie/week",
                 params={"page": tmdb_page},  # Use mapped TMDB page
-                headers={"Authorization": f"Bearer {TMDB_ACCESS_TOKEN}"}
+                headers=_tmdb_headers()
             )
             if resp.status_code == 200:
                 trending = resp.json().get("results", [])
@@ -1409,15 +1449,17 @@ async def get_candidate_movies(
                     all_lang_codes = list(preferred_langs) + list(related_langs)
                     trending = [m for m in trending if m.get("original_language") in all_lang_codes]
                 all_movies.extend(trending)
-        except:
-            pass
+            else:
+                logger.warning("TMDB trending returned HTTP %s", resp.status_code)
+        except Exception as e:
+            logger.warning("TMDB trending request failed: %s", e)
         
         # 5. TOP RATED (quality content)
         try:
             resp = await http_client.get(
                 "https://api.themoviedb.org/3/movie/top_rated",
                 params={"page": tmdb_page},  # Use mapped TMDB page
-                headers={"Authorization": f"Bearer {TMDB_ACCESS_TOKEN}"}
+                headers=_tmdb_headers()
             )
             if resp.status_code == 200:
                 top_rated = resp.json().get("results", [])
@@ -1425,8 +1467,10 @@ async def get_candidate_movies(
                 if preferred_langs:
                     top_rated = [m for m in top_rated if m.get("original_language") in preferred_langs]
                 all_movies.extend(top_rated)
-        except:
-            pass
+            else:
+                logger.warning("TMDB top_rated returned HTTP %s", resp.status_code)
+        except Exception as e:
+            logger.warning("TMDB top_rated request failed: %s", e)
         
         # 5. POPULAR (for cold start and diversity)
         if user_taste.total_swipes < 10 or len(all_movies) < 30:
@@ -1434,7 +1478,7 @@ async def get_candidate_movies(
                 resp = await http_client.get(
                     "https://api.themoviedb.org/3/movie/popular",
                     params={"page": tmdb_page},  # Use mapped TMDB page
-                    headers={"Authorization": f"Bearer {TMDB_ACCESS_TOKEN}"}
+                    headers=_tmdb_headers()
                 )
                 if resp.status_code == 200:
                     popular = resp.json().get("results", [])
@@ -1442,8 +1486,10 @@ async def get_candidate_movies(
                     if preferred_langs:
                         popular = [m for m in popular if m.get("original_language") in preferred_langs]
                     all_movies.extend(popular)
-            except:
-                pass
+                else:
+                    logger.warning("TMDB popular returned HTTP %s", resp.status_code)
+            except Exception as e:
+                logger.warning("TMDB popular request failed: %s", e)
     
     # Deduplicate while preserving order
     seen = set()
@@ -1496,8 +1542,8 @@ async def get_personalized_feed(
     """
     import random
     import hashlib
-    from datetime import datetime, date
-    
+    from datetime import date
+
     if top_movie_ids is None:
         top_movie_ids = set()
     
@@ -1547,14 +1593,13 @@ async def get_personalized_feed(
                 
                 # Add slight boost for movies matching user's top preferences
                 # This makes each user's feed unique based on their taste
-                movie_genres = []
-                for gid in movie.get("genre_ids", []):
-                    if gid in GENRE_ID_TO_NAME:
-                        movie_genres.append(GENRE_ID_TO_NAME[gid].lower().replace(" ", "_").replace("-", "_"))
-                
+                movie_genre_keys = [
+                    genre_vector_key(GENRE_ID_TO_NAME[gid])
+                    for gid in movie.get("genre_ids", []) if gid in GENRE_ID_TO_NAME
+                ]
+
                 # Check if movie matches user's strong genre preferences
-                for genre in movie_genres:
-                    genre_key = f"genre_{genre}"
+                for genre_key in movie_genre_keys:
                     if genre_key in user_taste.vector and user_taste.vector[genre_key] > 1.0:
                         personalized_score *= 1.1  # 10% boost for matching strong preferences
                         break
@@ -1595,8 +1640,7 @@ async def get_personalized_feed(
     for item in scored_movies[:limit]:
         movie = item[0]
         personalized_score = item[1]
-        original_score = item[2] if len(item) > 2 else personalized_score
-        
+
         results.append({
             "id": movie["id"],
             "title": movie["title"],

@@ -1,21 +1,75 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, Modal, TextInput,
-  ActivityIndicator, Platform, Alert, Dimensions,
-  ScrollView, KeyboardAvoidingView, Image,
+  View, Text, TouchableOpacity, StyleSheet, TextInput,
+  ActivityIndicator, Alert, BackHandler, Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import * as WebBrowser from 'expo-web-browser';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+// RN's own KeyboardAvoidingView breaks on APK builds with edgeToEdgeEnabled
+// (see the KeyboardProvider comment in app/_layout.tsx) — use the
+// keyboard-controller one, which reads native WindowInsets.
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, BORDER_RADIUS } from '../src/theme';
 import { useTina } from '../src/context/TinaContext';
+import {
+  API_BASE, apiUrl, getAuth, saveAuth, clearAll,
+  isOnboardingComplete, setOnboardingComplete,
+  getProfile, saveProfile, getUserId,
+} from '../src/store';
 
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
-const { width } = Dimensions.get('window');
+type AuthMode = 'main' | 'phone' | 'phone-otp';
 
-type AuthMode = 'main' | 'email' | 'phone' | 'email-otp' | 'phone-otp' | 'forgot-password' | 'reset-sent';
+const RESEND_COOLDOWN_SECONDS = 30;
+const OTP_LENGTH = 6;
+const BOOT_CHECK_TIMEOUT_MS = 8000;
+
+/**
+ * Normalise what the user typed into E.164 for the backend.
+ *  - strips spaces/dashes/brackets
+ *  - "+<anything>" is kept as-is (already international)
+ *  - a leading trunk "0" is dropped (09876543210 → 9876543210)
+ *  - "91XXXXXXXXXX" (12 digits) gets the "+" back
+ *  - 10 digits → "+91" prefix (launch market is India; the UI shows +91)
+ * Returns null when the input can't be a valid number.
+ */
+const toE164 = (raw: string): string | null => {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const hasPlus = trimmed.startsWith('+');
+  let digits = trimmed.replace(/\D/g, '');
+  if (!digits) return null;
+  if (hasPlus) {
+    // E.164 allows 8–15 digits including country code.
+    return digits.length >= 8 && digits.length <= 15 ? `+${digits}` : null;
+  }
+  if (digits.length === 11 && digits.startsWith('0')) digits = digits.slice(1);
+  if (digits.length === 12 && digits.startsWith('91')) return `+${digits}`;
+  if (digits.length === 10) return `+91${digits}`;
+  return null;
+};
+
+// @react-native-google-signin/google-signin is a native module: it is NOT
+// present in Expo Go, and its JS entry throws at require-time when the native
+// side is missing. Lazy-require inside try/catch so the login screen still
+// renders there and we can show a friendly message instead of crashing.
+let googleConfigured = false;
+const loadGoogleSignin = (): any | null => {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const mod = require('@react-native-google-signin/google-signin');
+    if (!mod?.GoogleSignin) return null;
+    if (!googleConfigured) {
+      mod.GoogleSignin.configure({
+        webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+      });
+      googleConfigured = true;
+    }
+    return mod;
+  } catch {
+    return null;
+  }
+};
 
 export default function AuthScreen() {
   const router = useRouter();
@@ -23,34 +77,23 @@ export default function AuthScreen() {
   const [loading, setLoading] = useState(true);
   const [authLoading, setAuthLoading] = useState(false);
   const [authMode, setAuthMode] = useState<AuthMode>('main');
-  
+
   // Form states
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [otp, setOtp] = useState('');
   const [isNewUser, setIsNewUser] = useState(false);
-  const [otpSent, setOtpSent] = useState(false);
-  
-  const hasProcessed = useRef(false);
+  const [resendIn, setResendIn] = useState(0);
+
   const hasResetTina = useRef(false);
+  // Set once we've handed off to another route so the `finally` blocks below
+  // don't flash the login buttons for a frame before navigation lands.
+  const navigatingRef = useRef(false);
+  // E.164 number the last OTP went to (drives the resend cooldown).
+  const lastSentToRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (hasProcessed.current) return;
-    // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
-    if (Platform.OS === 'web') {
-      const hash = window.location.hash;
-      if (hash && hash.includes('session_id=')) {
-        hasProcessed.current = true;
-        const sessionId = hash.split('session_id=')[1]?.split('&')[0];
-        if (sessionId) {
-          window.history.replaceState(null, '', window.location.pathname);
-          processGoogleAuth(sessionId);
-          return;
-        }
-      }
-    }
     checkExistingAuth();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Reset Tina state when showing login screen (user logged out or new user)
@@ -58,163 +101,233 @@ export default function AuthScreen() {
     if (!loading && !hasResetTina.current) {
       hasResetTina.current = true;
       // Reset Tina state so floating button doesn't show on login page
-      console.log('[AuthScreen] Resetting Tina state for login page');
       setOnboardingStage('pre_decision');
       resetTinaState();
     }
   }, [loading, setOnboardingStage, resetTinaState]);
 
+  // Resend-OTP cooldown ticker
+  useEffect(() => {
+    if (resendIn <= 0) return;
+    const t = setTimeout(() => setResendIn((s) => Math.max(0, s - 1)), 1000);
+    return () => clearTimeout(t);
+  }, [resendIn]);
+
+  // Hardware back on the phone / OTP sub-screens returns to the main login
+  // choices instead of backgrounding the app (index is the root route).
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (authMode === 'phone-otp') {
+        setOtp('');
+        setAuthMode('phone');
+        return true;
+      }
+      if (authMode === 'phone') {
+        resetForm();
+        return true;
+      }
+      return false;
+    });
+    return () => sub.remove();
+  }, [authMode]);
+
+  // Returning user on a fresh install / new phone: pull their profile from
+  // the server so screens that read the local copy (feed, profile, Tina)
+  // aren't empty — and so a later edit can't POST a blank profile over the
+  // real one. Best effort: never blocks login.
+  const hydrateProfileFromServer = useCallback(async () => {
+    try {
+      const local = await getProfile();
+      if (local?.name) return;
+      const uid = await getUserId();
+      if (!uid || !API_BASE) return;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), BOOT_CHECK_TIMEOUT_MS);
+      const res = await fetch(apiUrl(`/api/user/profile/${encodeURIComponent(uid)}`), {
+        signal: controller.signal,
+      }).finally(() => clearTimeout(timer));
+      if (!res.ok) return;
+      const data = await res.json().catch(() => null);
+      if (data?.profile && typeof data.profile === 'object') {
+        await saveProfile({ ...(local || {}), ...data.profile });
+      }
+    } catch {
+      /* offline / timeout — the profile screen re-fetches on focus */
+    }
+  }, []);
+
+  const goAfterLogin = useCallback(async (serverSaysOnboarded?: boolean) => {
+    navigatingRef.current = true;
+    if (serverSaysOnboarded === true) {
+      // Returning user on a fresh install: trust the server flag so they
+      // aren't pushed through onboarding again.
+      await setOnboardingComplete().catch(() => undefined);
+      await hydrateProfileFromServer();
+      router.replace('/(tabs)/feed');
+      return;
+    }
+    const onboardingDone = await isOnboardingComplete();
+    if (onboardingDone) await hydrateProfileFromServer();
+    router.replace(onboardingDone ? '/(tabs)/feed' : '/onboarding');
+  }, [router, hydrateProfileFromServer]);
+
+  /**
+   * Boot: if we have a stored session, validate it with GET /api/auth/me.
+   *  200 → proceed (onboarding-complete check → tabs)
+   *  401 → session is dead: wipe local auth, show login
+   *  network error / timeout → fall back to the cached decision so offline
+   *  users aren't stranded on a spinner.
+   */
   const checkExistingAuth = async () => {
     try {
-      const auth = await AsyncStorage.getItem('@film_companion_auth');
-      if (auth) {
-        const onboardingDone = await AsyncStorage.getItem('@film_companion_onboarding_complete');
-        if (onboardingDone === 'true') {
-          router.replace('/(tabs)/feed');
-        } else {
-          router.replace('/onboarding');
-        }
+      const auth = await getAuth();
+      if (!auth) {
+        setLoading(false);
         return;
       }
-    } catch (e) {
-      console.error('Auth check error:', e);
-    }
-    setLoading(false);
-  };
-
-  const processGoogleAuth = async (sessionId: string) => {
-    setLoading(false);
-    setAuthLoading(true);
-    try {
-      const resp = await fetch(`${BACKEND_URL}/api/auth/session`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: sessionId }),
-        credentials: 'include',
-      });
-      if (!resp.ok) throw new Error('Auth failed');
-      const data = await resp.json();
-      // Use saveAuth() so the session_token goes to SecureStore — same
-      // reason as in verify-otp. Direct AsyncStorage.setItem here would
-      // leave token-required fetches with no Authorization header.
-      const { saveAuth } = await import('../src/store');
-      await saveAuth(data);
-      
-      // Check if new user or existing
-      if (data.is_new_user) {
-        router.replace('/onboarding');
-      } else {
-        const onboardingDone = await AsyncStorage.getItem('@film_companion_onboarding_complete');
-        if (onboardingDone === 'true') {
-          router.replace('/(tabs)/feed');
-        } else {
-          router.replace('/onboarding');
+      if (!API_BASE) {
+        await goAfterLogin();
+        return;
+      }
+      let resp: Response | null = null;
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), BOOT_CHECK_TIMEOUT_MS);
+        resp = await fetch(apiUrl('/api/auth/me'), { signal: controller.signal });
+        clearTimeout(timer);
+      } catch {
+        resp = null; // offline / timeout → cached decision below
+      }
+      if (resp && resp.status === 401) {
+        await clearAll();
+        setLoading(false);
+        return;
+      }
+      let serverOnboarded: boolean | undefined;
+      if (resp && resp.ok) {
+        const me = await resp.json().catch(() => null);
+        if (me && typeof me.onboarding_complete === 'boolean') {
+          serverOnboarded = me.onboarding_complete;
         }
       }
+      await goAfterLogin(serverOnboarded === true ? true : undefined);
     } catch (e) {
-      console.error('Google auth error:', e);
-      Alert.alert('Error', 'Authentication failed. Please try again.');
-      setAuthLoading(false);
+      console.warn('[auth] boot check failed:', e);
+      setLoading(false);
     }
+  };
+
+  // Persist via saveAuth() so the session_token lands in SecureStore (not
+  // plaintext AsyncStorage) and so the global authenticated-fetch wrapper
+  // can read it back; then route exactly like the OTP success path.
+  const completeLogin = async (data: any) => {
+    await saveAuth(data);
+    if (data?.is_new_user) {
+      navigatingRef.current = true;
+      router.replace('/onboarding');
+      return;
+    }
+    await goAfterLogin(
+      typeof data?.onboarding_complete === 'boolean' ? data.onboarding_complete : undefined,
+    );
   };
 
   const handleGoogleAuth = async () => {
-    // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
-    setAuthLoading(true);
-    try {
-      if (Platform.OS === 'web') {
-        const redirectUrl = window.location.origin;
-        window.location.href = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
-      } else {
-        const Linking = require('expo-linking');
-        const redirectUrl = Linking.createURL('/');
-        const result = await WebBrowser.openAuthSessionAsync(
-          `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`,
-          redirectUrl
-        );
-        if (result.type === 'success' && result.url) {
-          const sid = result.url.split('session_id=')[1]?.split('&')[0];
-          if (sid) await processGoogleAuth(sid);
-        }
-        setAuthLoading(false);
-      }
-    } catch (e) {
-      console.error('Google auth error:', e);
-      setAuthLoading(false);
-    }
-  };
-
-  // Send OTP for email
-  const handleSendEmailOTP = async () => {
-    if (!email.trim() || !email.includes('@')) {
-      Alert.alert('Error', 'Please enter a valid email address');
+    const mod = loadGoogleSignin();
+    if (!mod) {
+      Alert.alert(
+        'Google Sign-In unavailable',
+        'Google Sign-In needs the installed app build; use phone login here.',
+      );
       return;
     }
-    
+    const { GoogleSignin, statusCodes } = mod;
     setAuthLoading(true);
     try {
-      const resp = await fetch(`${BACKEND_URL}/api/auth/send-email-otp`, {
+      await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+      const r = await GoogleSignin.signIn();
+      if (!r || r.type === 'cancelled') return; // user dismissed — silent
+      const idToken: string | undefined = r?.data?.idToken || undefined;
+      if (!idToken) {
+        Alert.alert('Error', 'Google did not return a sign-in token. Please try again.');
+        return;
+      }
+      const resp = await fetch(apiUrl('/api/auth/google'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim().toLowerCase() }),
+        body: JSON.stringify({ id_token: idToken }),
       });
-      const data = await resp.json();
-      
-      if (resp.ok) {
-        setIsNewUser(data.is_new_user);
-        setOtpSent(true);
-        setAuthMode('email-otp');
-        
-        // Show OTP in alert for testing (mocked)
-        if (data.otp) {
-          Alert.alert('OTP Sent', `Your OTP is: ${data.otp}\n\n(This is shown for testing only)`);
-        } else {
-          Alert.alert('Success', 'OTP sent to your email');
-        }
-      } else {
-        Alert.alert('Error', data.detail || 'Failed to send OTP');
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        Alert.alert('Error', data?.detail || 'Google sign-in failed. Please try again.');
+        return;
       }
-    } catch (e) {
-      console.error('Send OTP error:', e);
-      Alert.alert('Error', 'Failed to send OTP. Please try again.');
+      await completeLogin(data);
+    } catch (e: any) {
+      const code = e?.code;
+      if (code && (code === statusCodes?.SIGN_IN_CANCELLED || code === statusCodes?.IN_PROGRESS)) {
+        return; // cancelled / double-tap — silent
+      }
+      if (code && code === statusCodes?.PLAY_SERVICES_NOT_AVAILABLE) {
+        Alert.alert(
+          'Google Play services needed',
+          'Update Google Play services to use Google Sign-In, or use phone login.',
+        );
+        return;
+      }
+      console.warn('[auth] google sign-in failed:', code || e?.message || 'unknown');
+      Alert.alert('Error', 'Google sign-in failed. Please try again or use phone login.');
     } finally {
-      setAuthLoading(false);
+      if (!navigatingRef.current) setAuthLoading(false);
     }
   };
 
   // Send OTP for phone
   const handleSendPhoneOTP = async () => {
-    if (!phone.trim() || phone.length < 10) {
-      Alert.alert('Error', 'Please enter a valid phone number');
+    const e164 = toE164(phone);
+    if (!e164) {
+      Alert.alert('Error', 'Please enter a valid 10-digit mobile number');
       return;
     }
-    
+    if (resendIn > 0) {
+      // A code was just sent to this number — go back to code entry instead
+      // of silently ignoring the tap. A different number may be sent now
+      // (the backend rate-limits per number and answers 429 if needed).
+      if (e164 === lastSentToRef.current) {
+        setAuthMode('phone-otp');
+        return;
+      }
+    }
+
     setAuthLoading(true);
     try {
-      const resp = await fetch(`${BACKEND_URL}/api/auth/send-phone-otp`, {
+      const resp = await fetch(apiUrl('/api/auth/send-phone-otp'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: phone.trim() }),
+        body: JSON.stringify({ phone: e164 }),
       });
-      const data = await resp.json();
-      
+      const data = await resp.json().catch(() => ({}));
+
       if (resp.ok) {
-        setIsNewUser(data.is_new_user);
-        setOtpSent(true);
+        setIsNewUser(!!data.is_new_user);
+        setOtp('');
+        lastSentToRef.current = e164;
+        // Honour the server's cooldown (seconds) when it sends one.
+        const serverCooldown = Number(data?.resend_after);
+        setResendIn(
+          Number.isFinite(serverCooldown) && serverCooldown > 0 && serverCooldown <= 600
+            ? Math.ceil(serverCooldown)
+            : RESEND_COOLDOWN_SECONDS,
+        );
         setAuthMode('phone-otp');
-        
-        // Show OTP in alert for testing (mocked)
-        if (data.otp) {
-          Alert.alert('OTP Sent', `Your OTP is: ${data.otp}\n\n(This is shown for testing only)`);
-        } else {
-          Alert.alert('Success', 'OTP sent to your phone');
-        }
+      } else if (resp.status === 429) {
+        Alert.alert('Too many attempts', 'Too many attempts, try later.');
       } else {
         Alert.alert('Error', data.detail || 'Failed to send OTP');
       }
     } catch (e) {
-      console.error('Send OTP error:', e);
-      Alert.alert('Error', 'Failed to send OTP. Please try again.');
+      console.warn('[auth] send OTP failed:', e);
+      Alert.alert('Error', 'Failed to send OTP. Please check your connection and try again.');
     } finally {
       setAuthLoading(false);
     }
@@ -222,100 +335,58 @@ export default function AuthScreen() {
 
   // Verify OTP and login/signup
   const handleVerifyOTP = async () => {
-    if (!otp.trim() || otp.length < 4) {
-      Alert.alert('Error', 'Please enter the OTP');
+    const code = otp.trim();
+    if (!/^\d{6}$/.test(code)) {
+      Alert.alert('Error', `Please enter the ${OTP_LENGTH}-digit code`);
       return;
     }
-    
-    // Name is now optional - can be set during onboarding
+    const e164 = toE164(phone);
+    if (!e164) {
+      Alert.alert('Error', 'Please enter a valid phone number');
+      setAuthMode('phone');
+      return;
+    }
+
+    // Name is optional - collected during onboarding
     setAuthLoading(true);
     try {
-      const isEmail = authMode === 'email-otp';
-      const resp = await fetch(`${BACKEND_URL}/api/auth/verify-otp`, {
+      const resp = await fetch(apiUrl('/api/auth/verify-otp'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          type: isEmail ? 'email' : 'phone',
-          identifier: isEmail ? email.trim().toLowerCase() : phone.trim(),
-          otp: otp.trim(),
-          // Name is optional - will be collected in onboarding
+          type: 'phone',
+          identifier: e164,
+          otp: code,
         }),
       });
-      const data = await resp.json();
-      
+      const data = await resp.json().catch(() => ({}));
+
       if (resp.ok) {
-        // Persist via saveAuth() so the session_token lands in SecureStore
-        // (not plaintext AsyncStorage) and so the global authenticated-fetch
-        // wrapper can read it back. The previous direct AsyncStorage.setItem
-        // bypassed both layers, causing every subsequent request to either
-        // miss the Authorization header entirely OR resolve to a stale
-        // cookie-cached identity — which surfaced as "Not found" on photo
-        // upload because require_owner saw a body user_id that didn't match
-        // the session's resolved user_id.
-        const { saveAuth } = await import('../src/store');
-        await saveAuth(data);
-        
-        // Navigate based on user status
-        if (data.is_new_user) {
-          router.replace('/onboarding');
-        } else {
-          const onboardingDone = await AsyncStorage.getItem('@film_companion_onboarding_complete');
-          if (onboardingDone === 'true') {
-            router.replace('/(tabs)/feed');
-          } else {
-            router.replace('/onboarding');
-          }
-        }
+        await completeLogin(data);
+      } else if (resp.status === 429) {
+        Alert.alert('Too many attempts', 'Too many attempts, try later.');
       } else {
         Alert.alert('Error', data.detail || 'Invalid OTP');
       }
     } catch (e) {
-      console.error('Verify OTP error:', e);
+      console.warn('[auth] verify OTP failed:', e);
       Alert.alert('Error', 'Verification failed. Please try again.');
     } finally {
-      setAuthLoading(false);
-    }
-  };
-
-  // Forgot Password
-  const handleForgotPassword = async () => {
-    if (!email.trim() || !email.includes('@')) {
-      Alert.alert('Error', 'Please enter a valid email address');
-      return;
-    }
-    
-    setAuthLoading(true);
-    try {
-      const resp = await fetch(`${BACKEND_URL}/api/auth/forgot-password`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim().toLowerCase() }),
-      });
-      const data = await resp.json();
-      
-      if (resp.ok) {
-        setAuthMode('reset-sent');
-      } else {
-        Alert.alert('Error', data.detail || 'Failed to send reset link');
-      }
-    } catch (e) {
-      console.error('Forgot password error:', e);
-      Alert.alert('Error', 'Failed to send reset link. Please try again.');
-    } finally {
-      setAuthLoading(false);
+      if (!navigatingRef.current) setAuthLoading(false);
     }
   };
 
   // Reset form
   const resetForm = () => {
-    setName('');
-    setEmail('');
     setPhone('');
     setOtp('');
     setIsNewUser(false);
-    setOtpSent(false);
+    setResendIn(0);
     setAuthMode('main');
   };
+
+  const phoneValid = toE164(phone) !== null;
+  const otpValid = /^\d{6}$/.test(otp);
 
   if (loading) {
     return (
@@ -363,7 +434,7 @@ export default function AuthScreen() {
               activeOpacity={0.8}
             >
               <Ionicons name="call-outline" size={20} color={COLORS.white} />
-              <Text style={styles.btnText}>Continue with Phone Number</Text>
+              <Text style={styles.btnText}>Login with Phone Number</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -375,71 +446,8 @@ export default function AuthScreen() {
               <Ionicons name="logo-google" size={20} color={COLORS.white} />
               <Text style={styles.btnText}>Continue with Google</Text>
             </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.outlineBtn}
-              onPress={() => { resetForm(); setAuthMode('email'); }}
-              testID="email-auth-btn"
-              activeOpacity={0.8}
-            >
-              <Ionicons name="mail-outline" size={20} color={COLORS.text} />
-              <Text style={styles.outlineBtnText}>Continue with Email</Text>
-            </TouchableOpacity>
           </View>
-
-          <TouchableOpacity 
-            testID="forgot-password-btn" 
-            onPress={() => { resetForm(); setAuthMode('forgot-password'); }}
-          >
-            <Text style={styles.forgotText}>Forgot Password?</Text>
-          </TouchableOpacity>
         </View>
-      </SafeAreaView>
-    );
-  }
-
-  // Email Login Screen
-  if (authMode === 'email') {
-    return (
-      <SafeAreaView style={styles.container}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.formContainer}
-        >
-          <TouchableOpacity style={styles.backBtn} onPress={resetForm}>
-            <Ionicons name="arrow-back" size={24} color={COLORS.text} />
-          </TouchableOpacity>
-          
-          <View style={styles.formHeader}>
-            <Ionicons name="mail-outline" size={48} color={COLORS.primary} />
-            <Text style={styles.formTitle}>Login with Email</Text>
-            <Text style={styles.formSubtitle}>
-              Enter your email address to receive a verification code
-            </Text>
-          </View>
-
-          <View style={styles.formInputs}>
-            <TextInput
-              style={styles.input}
-              placeholder="Email Address"
-              placeholderTextColor={COLORS.textMuted}
-              value={email}
-              onChangeText={setEmail}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoComplete="email"
-              testID="email-input"
-            />
-            
-            <TouchableOpacity
-              style={[styles.primaryBtn, !email.includes('@') && styles.btnDisabled]}
-              onPress={handleSendEmailOTP}
-              disabled={!email.includes('@')}
-            >
-              <Text style={styles.btnText}>Send OTP</Text>
-            </TouchableOpacity>
-          </View>
-        </KeyboardAvoidingView>
       </SafeAreaView>
     );
   }
@@ -448,90 +456,46 @@ export default function AuthScreen() {
   if (authMode === 'phone') {
     return (
       <SafeAreaView style={styles.container}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.formContainer}
-        >
+        <KeyboardAvoidingView behavior="padding" style={styles.formContainer}>
           <TouchableOpacity style={styles.backBtn} onPress={resetForm}>
             <Ionicons name="arrow-back" size={24} color={COLORS.text} />
           </TouchableOpacity>
-          
+
           <View style={styles.formHeader}>
             <Ionicons name="call-outline" size={48} color={COLORS.primary} />
             <Text style={styles.formTitle}>Login with Phone</Text>
             <Text style={styles.formSubtitle}>
-              Enter your phone number to receive a verification code
+              Enter your mobile number to receive a verification code
             </Text>
           </View>
 
           <View style={styles.formInputs}>
-            <TextInput
-              style={styles.input}
-              placeholder="Phone Number (e.g., +91XXXXXXXXXX)"
-              placeholderTextColor={COLORS.textMuted}
-              value={phone}
-              onChangeText={setPhone}
-              keyboardType="phone-pad"
-              testID="phone-input"
-            />
-            
+            <View style={styles.phoneRow}>
+              <View style={styles.phonePrefix}>
+                <Text style={styles.phonePrefixText}>+91</Text>
+              </View>
+              <TextInput
+                style={[styles.input, styles.phoneInput]}
+                placeholder="10-digit mobile number"
+                placeholderTextColor={COLORS.textMuted}
+                value={phone}
+                onChangeText={(t) => setPhone(t.replace(/[^\d+\s-]/g, ''))}
+                keyboardType="phone-pad"
+                autoComplete="tel"
+                textContentType="telephoneNumber"
+                maxLength={16}
+                returnKeyType="done"
+                onSubmitEditing={phoneValid ? handleSendPhoneOTP : undefined}
+                testID="phone-input"
+              />
+            </View>
+
             <TouchableOpacity
-              style={[styles.primaryBtn, phone.length < 10 && styles.btnDisabled]}
+              style={[styles.primaryBtn, !phoneValid && styles.btnDisabled]}
               onPress={handleSendPhoneOTP}
-              disabled={phone.length < 10}
+              disabled={!phoneValid}
             >
               <Text style={styles.btnText}>Send OTP</Text>
-            </TouchableOpacity>
-          </View>
-        </KeyboardAvoidingView>
-      </SafeAreaView>
-    );
-  }
-
-  // Email OTP Verification Screen
-  if (authMode === 'email-otp') {
-    return (
-      <SafeAreaView style={styles.container}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.formContainer}
-        >
-          <TouchableOpacity style={styles.backBtn} onPress={() => setAuthMode('email')}>
-            <Ionicons name="arrow-back" size={24} color={COLORS.text} />
-          </TouchableOpacity>
-          
-          <View style={styles.formHeader}>
-            <Ionicons name="shield-checkmark-outline" size={48} color={COLORS.primary} />
-            <Text style={styles.formTitle}>Verify OTP</Text>
-            <Text style={styles.formSubtitle}>
-              Enter the 6-digit code sent to {email}
-            </Text>
-          </View>
-
-          <View style={styles.formInputs}>
-            <TextInput
-              style={[styles.input, styles.otpInput]}
-              placeholder="Enter OTP"
-              placeholderTextColor={COLORS.textMuted}
-              value={otp}
-              onChangeText={setOtp}
-              keyboardType="number-pad"
-              maxLength={6}
-              testID="otp-input"
-            />
-            
-            <TouchableOpacity
-              style={[styles.primaryBtn, otp.length < 4 && styles.btnDisabled]}
-              onPress={handleVerifyOTP}
-              disabled={otp.length < 4}
-            >
-              <Text style={styles.btnText}>
-                {isNewUser ? 'Create Account' : 'Login'}
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity onPress={handleSendEmailOTP} style={styles.resendBtn}>
-              <Text style={styles.resendText}>Didn&apos;t receive code? Resend</Text>
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
@@ -543,19 +507,16 @@ export default function AuthScreen() {
   if (authMode === 'phone-otp') {
     return (
       <SafeAreaView style={styles.container}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.formContainer}
-        >
-          <TouchableOpacity style={styles.backBtn} onPress={() => setAuthMode('phone')}>
+        <KeyboardAvoidingView behavior="padding" style={styles.formContainer}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => { setOtp(''); setAuthMode('phone'); }}>
             <Ionicons name="arrow-back" size={24} color={COLORS.text} />
           </TouchableOpacity>
-          
+
           <View style={styles.formHeader}>
             <Ionicons name="shield-checkmark-outline" size={48} color={COLORS.primary} />
             <Text style={styles.formTitle}>Verify OTP</Text>
             <Text style={styles.formSubtitle}>
-              Enter the 6-digit code sent to {phone}
+              Enter the {OTP_LENGTH}-digit code sent to {toE164(phone) || phone}
             </Text>
           </View>
 
@@ -565,96 +526,40 @@ export default function AuthScreen() {
               placeholder="Enter OTP"
               placeholderTextColor={COLORS.textMuted}
               value={otp}
-              onChangeText={setOtp}
+              onChangeText={(t) => setOtp(t.replace(/\D/g, '').slice(0, OTP_LENGTH))}
               keyboardType="number-pad"
-              maxLength={6}
+              maxLength={OTP_LENGTH}
+              autoComplete="sms-otp"
+              textContentType="oneTimeCode"
+              returnKeyType="done"
+              onSubmitEditing={otpValid ? handleVerifyOTP : undefined}
               testID="otp-input"
             />
-            
+
             <TouchableOpacity
-              style={[styles.primaryBtn, otp.length < 4 && styles.btnDisabled]}
+              style={[styles.primaryBtn, !otpValid && styles.btnDisabled]}
               onPress={handleVerifyOTP}
-              disabled={otp.length < 4}
+              disabled={!otpValid}
             >
               <Text style={styles.btnText}>
                 {isNewUser ? 'Create Account' : 'Login'}
               </Text>
             </TouchableOpacity>
 
-            <TouchableOpacity onPress={handleSendPhoneOTP} style={styles.resendBtn}>
-              <Text style={styles.resendText}>Didn&apos;t receive code? Resend</Text>
-            </TouchableOpacity>
-          </View>
-        </KeyboardAvoidingView>
-      </SafeAreaView>
-    );
-  }
-
-  // Forgot Password Screen
-  if (authMode === 'forgot-password') {
-    return (
-      <SafeAreaView style={styles.container}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.formContainer}
-        >
-          <TouchableOpacity style={styles.backBtn} onPress={resetForm}>
-            <Ionicons name="arrow-back" size={24} color={COLORS.text} />
-          </TouchableOpacity>
-          
-          <View style={styles.formHeader}>
-            <Ionicons name="key-outline" size={48} color={COLORS.primary} />
-            <Text style={styles.formTitle}>Forgot Password</Text>
-            <Text style={styles.formSubtitle}>
-              Enter your email address to receive a password reset link
-            </Text>
-          </View>
-
-          <View style={styles.formInputs}>
-            <TextInput
-              style={styles.input}
-              placeholder="Email Address"
-              placeholderTextColor={COLORS.textMuted}
-              value={email}
-              onChangeText={setEmail}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              testID="forgot-email-input"
-            />
-            
             <TouchableOpacity
-              style={[styles.primaryBtn, !email.includes('@') && styles.btnDisabled]}
-              onPress={handleForgotPassword}
-              disabled={!email.includes('@')}
+              onPress={handleSendPhoneOTP}
+              style={styles.resendBtn}
+              disabled={resendIn > 0}
+              testID="resend-otp-btn"
             >
-              <Text style={styles.btnText}>Send Reset Link</Text>
+              <Text style={[styles.resendText, resendIn > 0 && styles.resendTextDisabled]}>
+                {resendIn > 0
+                  ? `Resend code in ${resendIn}s`
+                  : "Didn't receive code? Resend"}
+              </Text>
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
-      </SafeAreaView>
-    );
-  }
-
-  // Reset Link Sent Screen
-  if (authMode === 'reset-sent') {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.formContainer}>
-          <View style={styles.formHeader}>
-            <Ionicons name="checkmark-circle-outline" size={64} color={COLORS.success} />
-            <Text style={styles.formTitle}>Check Your Email</Text>
-            <Text style={styles.formSubtitle}>
-              We&apos;ve sent a password reset link to {email}
-            </Text>
-          </View>
-
-          <TouchableOpacity
-            style={styles.primaryBtn}
-            onPress={resetForm}
-          >
-            <Text style={styles.btnText}>Back to Login</Text>
-          </TouchableOpacity>
-        </View>
       </SafeAreaView>
     );
   }
@@ -733,22 +638,6 @@ const styles = StyleSheet.create({
     gap: SPACING.s,
     minHeight: 52,
   },
-  appleBtn: {
-    // deprecated - kept removed
-    display: 'none',
-  },
-  outlineBtn: {
-    backgroundColor: 'transparent',
-    paddingVertical: 16,
-    borderRadius: BORDER_RADIUS.full,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: SPACING.s,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    minHeight: 52,
-  },
   primaryBtn: {
     backgroundColor: COLORS.primary,
     paddingVertical: 16,
@@ -764,18 +653,8 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  outlineBtnText: {
-    color: COLORS.text,
-    fontSize: 16,
-    fontWeight: '600',
-  },
   btnDisabled: {
     opacity: 0.5,
-  },
-  forgotText: {
-    color: COLORS.textMuted,
-    fontSize: 14,
-    textDecorationLine: 'underline',
   },
   // Form styles
   formContainer: {
@@ -823,6 +702,29 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.border,
   },
+  // Phone input with a fixed "+91" country prefix on the left
+  phoneRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: SPACING.s,
+  },
+  phonePrefix: {
+    backgroundColor: COLORS.bgInput,
+    borderRadius: BORDER_RADIUS.m,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    paddingHorizontal: SPACING.m,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  phonePrefixText: {
+    color: COLORS.text,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  phoneInput: {
+    flex: 1,
+  },
   otpInput: {
     textAlign: 'center',
     fontSize: 24,
@@ -835,5 +737,8 @@ const styles = StyleSheet.create({
   resendText: {
     color: COLORS.primary,
     fontSize: 14,
+  },
+  resendTextDisabled: {
+    color: COLORS.textMuted,
   },
 });
