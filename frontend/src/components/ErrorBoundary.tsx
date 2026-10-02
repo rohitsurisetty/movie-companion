@@ -44,7 +44,8 @@ export default class ErrorBoundary extends React.Component<Props, State> {
         <Text style={styles.message}>
           {this.props.fallbackMessage || "Sorry about that. Tap below to try again."}
         </Text>
-        {!!this.state.error?.message && (
+        {/* Raw error text is for developers only; production shows the friendly copy above. */}
+        {__DEV__ && !!this.state.error?.message && (
           <Text style={styles.errMsg} numberOfLines={3}>
             {this.state.error.message}
           </Text>

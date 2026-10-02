@@ -37,3 +37,11 @@ yarn-error.*
 *.tsbuildinfo
 
 app-example
+
+# Metro cache
+.metro-cache/
+
+# env
+.env
+.env.*
+!.env.example

@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { View, Text, Image, StyleSheet, ImageStyle, StyleProp, ViewStyle } from 'react-native';
 
-// Remote Tina avatar (works in preview + APK if the network can reach Unsplash).
-// If the request fails (rate-limit / no network / region block), we gracefully fall
-// back to a stylized red circle with the letter "T" so the UI never breaks.
-const REMOTE = 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&h=200&fit=crop&crop=face';
+// Bundled Tina avatar (app logo) — no network fetch, and no stock photo of a
+// real person posing as the AI matchmaker. If the image ever fails to decode,
+// we fall back to a stylized red circle with the letter "T" so the UI never breaks.
+const TINA_AVATAR = require('../../assets/images/filmydating-logo.png');
 
 type Props = {
   size?: number;
@@ -42,7 +42,7 @@ export default function TinaAvatar({ size = 32, style, borderColor, borderWidth 
   return (
     <View style={wrapperStyle}>
       <Image
-        source={{ uri: REMOTE }}
+        source={TINA_AVATAR}
         style={{ width: size, height: size } as ImageStyle}
         onError={() => setFailed(true)}
       />

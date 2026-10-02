@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Image, TextInput,
   FlatList, Platform,
-  Dimensions, ScrollView, Animated, Easing, ActivityIndicator,
+  ScrollView, Animated, Easing, ActivityIndicator,
 } from 'react-native';
 // Use react-native-keyboard-controller's KeyboardAvoidingView — the RN one
 // breaks on Android APK builds when edgeToEdgeEnabled=true (input gets
@@ -11,15 +11,12 @@ import {
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS } from '../theme';
 import { ProfileData } from '../types';
+import { apiUrl } from '../store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const { width } = Dimensions.get('window');
-const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || process.env.EXPO_PUBLIC_API_URL || '';
-
-// Tina avatar - friendly, warm image
-const TINA_AVATAR = 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&h=200&fit=crop&crop=face';
+// Tina avatar - bundled app logo (no hotlinked stock photo of a real person)
+const TINA_AVATAR = require('../../assets/images/filmydating-logo.png');
 
 // Total mandatory fields for progress calculation
 const TOTAL_TOPICS = 12;
@@ -27,29 +24,10 @@ const TOTAL_TOPICS = 12;
 // Storage key for conversation persistence
 const TINA_CONVERSATION_KEY = 'tina_conversation_state';
 
-// Fallback greetings when API fails - contextual based on onboarding stage
-const FALLBACK_GREETINGS = {
-  default: [
-    "Hey there! 💫 I'm Tina, your personal matchmaker.",
-    "Let's get to know you better so I can find someone who shares your movie taste!",
-  ],
-  returning: [
-    "Welcome back! 😊",
-    "Ready to continue where we left off?",
-  ],
-  movieSelection: [
-    "Great picks! 🎬",
-    "I can already tell we're going to find you some amazing matches!",
-  ],
-  profileStart: [
-    "Hi! Let's get your profile ready 🎬",
-    "I'll guide you through the process - it'll be fun, I promise!",
-  ],
-  emailVerification: [
-    "Perfect! Your email is verified ✅",
-    "Now let's build your profile together!",
-  ],
-};
+const RATE_LIMIT_MSG = 'Tina needs a moment — try again shortly.';
+
+// Normalize show_options (/tina/chat sends multi_select, /tina/welcome-back multiSelect)
+const isMultiSelect = (so: any): boolean => !!(so?.multi_select ?? so?.multiSelect);
 
 type Message = {
   id: string;
@@ -139,7 +117,9 @@ export default function TinaChatScreen({
   const [selectedOptions, setSelectedOptions] = useState<string[]>([]);
   const [showSendButton, setShowSendButton] = useState(false);
   const [currentDeepLink, setCurrentDeepLink] = useState<DeepLinkAction | null>(null);
-  const [isExiting, setIsExiting] = useState(false);
+  // Failed request: shown as a Tina-side error bubble with Retry (never stored
+  // in `messages`, so it isn't persisted or synced to the parent).
+  const [chatError, setChatError] = useState<{ text: string; retry: () => void } | null>(null);
   const [pendingMoviesProcessed, setPendingMoviesProcessed] = useState(false);
   // Synchronous guard — React's setPendingMoviesProcessed is async, and BOTH
   // initializeConversation AND the late-arriving useEffect race to handle
@@ -241,7 +221,7 @@ export default function TinaChatScreen({
     try {
       const data = {
         userId,
-        messages: msgs,
+        messages: msgs.filter(m => !!m?.text), // never persist empty bubbles
         timestamp: Date.now(),
         profileData,
         topicsCollected,
@@ -263,7 +243,8 @@ export default function TinaChatScreen({
         if (data.timestamp && Date.now() - data.timestamp < 24 * 60 * 60 * 1000) {
           if (data.profileData) setProfileData(data.profileData);
           if (data.topicsCollected) setTopicsCollected(data.topicsCollected);
-          return data.messages || [];
+          // Drop empty bubbles persisted by older builds
+          return (data.messages || []).filter((m: any) => !!m?.text);
         }
       }
     } catch (error) {
@@ -275,7 +256,7 @@ export default function TinaChatScreen({
   // Fetch welcome-back message from backend
   const fetchWelcomeBackMessage = useCallback(async (isOnboardingComplete: boolean = false): Promise<string | null> => {
     try {
-      const response = await fetch(`${API_BASE}/api/tina/welcome-back`, {
+      const response = await fetch(apiUrl('/api/tina/welcome-back'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -284,19 +265,19 @@ export default function TinaChatScreen({
           is_onboarding_complete: isOnboardingComplete,
         }),
       });
-      
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success && data.message) {
-          // If there are options to show, set them
-          if (data.show_options) {
-            setCurrentOptions(data.show_options);
-          }
-          return data.message;
-        }
+
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.success || !data.message) {
+        throw new Error(`welcome-back failed (${response.status})`);
       }
-    } catch (error) {
-      console.error('[Tina] Failed to fetch welcome-back message:', error);
+      // If there are options to show, set them
+      if (data.show_options) {
+        setCurrentOptions({ ...data.show_options, multiSelect: isMultiSelect(data.show_options) });
+      }
+      return data.message;
+    } catch (error: any) {
+      // Callers fall back to a local greeting / Retry bubble
+      console.warn('[Tina] Failed to fetch welcome-back message:', error?.message);
     }
     return null;
   }, [userId, userName]);
@@ -362,6 +343,12 @@ export default function TinaChatScreen({
               setTimeout(() => sendToTina(''), 800);
             }
           }, 200);
+        } else if (onboardingContext !== 'post_onboarding') {
+          // Welcome-back failed — don't leave the user stuck; offer Retry
+          setChatError({
+            text: "Oops! I couldn't reach Tina just now 😅",
+            retry: () => sendToTina(''),
+          });
         }
       }
       return;
@@ -396,7 +383,7 @@ export default function TinaChatScreen({
         const timeoutId = setTimeout(() => controller.abort(), 8000);
         
         const res = await fetch(
-          `${API_BASE}/api/tina/greeting?user_name=${encodeURIComponent(userName || '')}`,
+          apiUrl(`/api/tina/greeting?user_name=${encodeURIComponent(userName || '')}`),
           { signal: controller.signal }
         );
         clearTimeout(timeoutId);
@@ -486,7 +473,7 @@ export default function TinaChatScreen({
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/tina/onboarding-status/${encodeURIComponent(userId)}`);
+        const res = await fetch(apiUrl(`/api/tina/onboarding-status/${encodeURIComponent(userId)}`));
         if (!res.ok) return;
         const data = await res.json();
         if (cancelled) return;
@@ -569,16 +556,19 @@ export default function TinaChatScreen({
   };
 
   // Handle movies received from TopMoviesStep
-  const handleMoviesReceived = async (movies: any[]) => {
-    // Show user's selection as a message
+  const handleMoviesReceived = async (movies: any[], isRetry: boolean = false) => {
+    // Show user's selection as a message (once — not again on Retry)
     const movieTitles = movies.map(m => m.title).join(', ');
-    addMessage(`My top movies: ${movieTitles}`, true);
-    
+    if (!isRetry) {
+      addMessage(`My top movies: ${movieTitles}`, true);
+    }
+    setChatError(null);
+
     // Send to Tina backend
     setIsTyping(true);
-    
+
     try {
-      const response = await fetch(`${API_BASE}/api/tina/chat`, {
+      const response = await fetch(apiUrl('/api/tina/chat'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -589,28 +579,32 @@ export default function TinaChatScreen({
         }),
       });
 
-      const data = await response.json();
-      
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.success) {
+        throw new Error(response.status === 429 ? RATE_LIMIT_MSG : `Tina chat failed (${response.status})`);
+      }
+
       await new Promise(r => setTimeout(r, 500 + Math.random() * 600));
       setIsTyping(false);
 
-      // Update state
-      const completedCount = data.completion_percentage ? Math.round((data.completion_percentage / 100) * TOTAL_TOPICS) : 0;
-      setTopicsCollected(completedCount);
+      // Update state (only when the backend reports progress — never reset to 0)
       if (typeof data.completion_percentage === 'number') {
+        setTopicsCollected(Math.round((data.completion_percentage / 100) * TOTAL_TOPICS));
         setCompletionPct(Math.max(0, Math.min(100, data.completion_percentage)));
       }
       if (data.profile_data) setProfileData(data.profile_data);
 
-      // Add Tina's acknowledgment
-      addMessage(data.response, false);
+      // Add Tina's acknowledgment (never an empty/undefined bubble)
+      if (data.response) {
+        addMessage(data.response, false);
+      }
 
       // Continue with next question
       if (data.show_options) {
         setTimeout(() => {
           setCurrentOptions({
             ...data.show_options,
-            multiSelect: data.show_options.multi_select || data.show_options.multiSelect,
+            multiSelect: isMultiSelect(data.show_options),
           });
           setSelectedOptions([]);
           setShowSendButton(false);
@@ -631,12 +625,16 @@ export default function TinaChatScreen({
       //   • archetype_reveal fires (end of 360° quiz) — handled in sendToTina, OR
       //   • the user explicitly exits/skips (exit_intent path).
 
-    } catch (error) {
-      console.error('Chat error:', error);
+    } catch (error: any) {
+      // No fake success bubble — the picks weren't saved. Offer Retry.
+      console.warn('[Tina] movie submit failed:', error?.message);
       setIsTyping(false);
-      addMessage("Nice choices! 😍 I can already tell you have great taste.", false);
-      // Continue conversation
-      setTimeout(() => sendToTina(''), 1000);
+      setChatError({
+        text: error?.message === RATE_LIMIT_MSG
+          ? RATE_LIMIT_MSG
+          : "Oops! I couldn't save your movie picks 😅",
+        retry: () => handleMoviesReceived(movies, true),
+      });
     }
   };
 
@@ -645,20 +643,23 @@ export default function TinaChatScreen({
     selectedOption?: string, 
     selectedOpts?: string[],
     selected360Option?: { question_id: string; option_key: string },
+    isRetry: boolean = false,
   ) => {
-    if (userMessage) {
+    // On Retry the user's bubble is already in the list — don't add it twice
+    if (userMessage && !isRetry) {
       addMessage(userMessage, true);
+      setInputText('');
     }
 
+    setChatError(null);
     setIsTyping(true);
-    setInputText('');
     setCurrentOptions(null);
     setSelectedOptions([]);
     setShowSendButton(false);
     setCurrentDeepLink(null);
 
     try {
-      const response = await fetch(`${API_BASE}/api/tina/chat`, {
+      const response = await fetch(apiUrl('/api/tina/chat'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -672,31 +673,35 @@ export default function TinaChatScreen({
         }),
       });
 
-      const data = await response.json();
-      
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.success) {
+        throw new Error(response.status === 429 ? RATE_LIMIT_MSG : `Tina chat failed (${response.status})`);
+      }
+
       // Natural typing delay
       await new Promise(r => setTimeout(r, 500 + Math.random() * 600));
-      
+
       setIsTyping(false);
 
       // Handle exit
       if (data.exit_intent) {
-        addMessage(data.response, false);
+        if (data.response) addMessage(data.response, false);
         setProfileData(data.profile_data || {});
         setTimeout(() => onExit(data.profile_data || {}), 2000);
         return;
       }
 
-      // Update state
-      const completedCount = data.completion_percentage ? Math.round((data.completion_percentage / 100) * TOTAL_TOPICS) : 0;
-      setTopicsCollected(completedCount);
+      // Update state (only when the backend reports progress — never reset to 0)
       if (typeof data.completion_percentage === 'number') {
+        setTopicsCollected(Math.round((data.completion_percentage / 100) * TOTAL_TOPICS));
         setCompletionPct(Math.max(0, Math.min(100, data.completion_percentage)));
       }
       if (data.profile_data) setProfileData(data.profile_data);
 
-      // Add Tina's response
-      addMessage(data.response, false);
+      // Add Tina's response (never an empty/undefined bubble)
+      if (data.response) {
+        addMessage(data.response, false);
+      }
 
       // Archetype reveal at the end of 360° quiz
       if (data.archetype_reveal) {
@@ -734,7 +739,7 @@ export default function TinaChatScreen({
           setCurrentOptions({
             field: data.show_options.field,
             options: data.show_options.options,
-            multiSelect: data.show_options.multi_select || data.show_options.multiSelect,
+            multiSelect: isMultiSelect(data.show_options),
             mode: data.show_options.mode,
             question_id: data.show_options.question_id,
           });
@@ -760,15 +765,18 @@ export default function TinaChatScreen({
       // archetype_reveal before we exit. Without this guard, Tina would close
       // abruptly the moment the last mandatory field is collected.
 
-    } catch (error) {
-      console.error('Chat error:', error);
+    } catch (error: any) {
+      console.warn('[Tina] chat request failed:', error?.message);
       setIsTyping(false);
-      addMessage("Oops! Let me try that again... 😅", false);
+      setChatError({
+        text: error?.message === RATE_LIMIT_MSG ? RATE_LIMIT_MSG : "Oops! That didn't go through 😅",
+        retry: () => sendToTina(userMessage, selectedOption, selectedOpts, selected360Option, true),
+      });
     }
   };
 
   const handleSend = () => {
-    if (inputText.trim()) {
+    if (inputText.trim() && !isTyping) {
       sendToTina(inputText.trim());
     }
   };
@@ -834,22 +842,11 @@ export default function TinaChatScreen({
     // Future: handle other types like music, interests, etc.
   };
 
-  // Skip button handler - graceful exit
-  const handleSkip = () => {
-    if (isExiting) return;
-    setIsExiting(true);
-    
-    // Add farewell message
-    addMessage("No worries! 😊", false);
-    setTimeout(() => {
-      addMessage("I've saved everything you've shared so far.", false);
-      setTimeout(() => {
-        addMessage("We can continue later and I'll pick up exactly where we left off. 💫", false);
-        setTimeout(() => {
-          onExit(profileData);
-        }, 1500);
-      }, 600);
-    }, 600);
+  const handleRetry = () => {
+    if (!chatError || isTyping) return;
+    const { retry } = chatError;
+    setChatError(null);
+    retry();
   };
 
   const renderMessage = ({ item }: { item: Message }) => {
@@ -866,7 +863,7 @@ export default function TinaChatScreen({
         ]}
       >
         {!item.isUser && (
-          <Image source={{ uri: TINA_AVATAR }} style={styles.msgAvatar} />
+          <Image source={TINA_AVATAR} style={styles.msgAvatar} />
         )}
         <View style={[styles.bubble, item.isUser ? styles.userBubble : styles.tinaBubble]}>
           <Text style={[styles.bubbleText, item.isUser && styles.userBubbleText]}>
@@ -885,7 +882,7 @@ export default function TinaChatScreen({
           {/* Left - Tina Avatar */}
           <View style={styles.headerLeft}>
             <View style={styles.avatarContainer}>
-              <Image source={{ uri: TINA_AVATAR }} style={styles.headerAvatar} />
+              <Image source={TINA_AVATAR} style={styles.headerAvatar} />
               <View style={styles.onlineDot} />
             </View>
           </View>
@@ -955,7 +952,7 @@ export default function TinaChatScreen({
         {/* Loading State - Shows animated indicator while initializing */}
         {isLoading && messages.length === 0 && (
           <View style={styles.loadingContainer}>
-            <Image source={{ uri: TINA_AVATAR }} style={styles.loadingAvatar} />
+            <Image source={TINA_AVATAR} style={styles.loadingAvatar} />
             <View style={styles.loadingContent}>
               <Animated.View style={[styles.typingDotsContainer, { opacity: typingAnimation }]}>
                 <View style={styles.typingDot} />
@@ -981,7 +978,7 @@ export default function TinaChatScreen({
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={!isLoading ? (
             <View style={styles.emptyContainer}>
-              <Image source={{ uri: TINA_AVATAR }} style={styles.emptyAvatar} />
+              <Image source={TINA_AVATAR} style={styles.emptyAvatar} />
               <Text style={styles.emptyTitle}>Hi there! 👋</Text>
               <Text style={styles.emptyText}>I&apos;m Tina, your matchmaker.</Text>
               <Text style={styles.emptySubtext}>Getting things ready for you...</Text>
@@ -990,13 +987,32 @@ export default function TinaChatScreen({
           ) : null}
           ListFooterComponent={isTyping ? (
             <View style={styles.typingRow}>
-              <Image source={{ uri: TINA_AVATAR }} style={styles.msgAvatar} />
+              <Image source={TINA_AVATAR} style={styles.msgAvatar} />
               <View style={styles.typingBubble}>
                 <Animated.View style={[styles.typingDotsContainer, { opacity: typingAnimation }]}>
                   <View style={styles.typingDot} />
                   <View style={[styles.typingDot, styles.typingDotMiddle]} />
                   <View style={styles.typingDot} />
                 </Animated.View>
+              </View>
+            </View>
+          ) : chatError ? (
+            // Error bubble with Retry — UI-only, never added to `messages`
+            <View style={styles.typingRow}>
+              <Image source={TINA_AVATAR} style={styles.msgAvatar} />
+              <View style={[styles.bubble, styles.tinaBubble, styles.errorBubble]}>
+                <Text style={styles.bubbleText}>{chatError.text}</Text>
+                <TouchableOpacity
+                  style={styles.retryBtn}
+                  onPress={handleRetry}
+                  activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Retry"
+                  testID="tina-retry-btn"
+                >
+                  <Ionicons name="refresh" size={16} color="#FFF" />
+                  <Text style={styles.retryText}>Retry</Text>
+                </TouchableOpacity>
               </View>
             </View>
           ) : null}
@@ -1102,7 +1118,9 @@ export default function TinaChatScreen({
               onChangeText={setInputText}
               multiline
               maxLength={500}
+              // Multiline on Android: Enter inserts a newline — the send icon is the primary path
               returnKeyType="send"
+              blurOnSubmit={false}
               onSubmitEditing={handleSend}
             />
             <TouchableOpacity 
@@ -1218,17 +1236,6 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.6)',
     marginTop: 1,
   },
-  skipButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-  },
-  skipText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.7)',
-  },
 
   // Progress pill (header top-right) — shows signup completion 0-100%.
   // Made deliberately prominent (110px wide, branded fill, two-row layout
@@ -1274,41 +1281,6 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
 
-  // Progress
-  progressSection: {
-    paddingHorizontal: 16,
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.08)',
-  },
-  progressHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  progressLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.5)',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  progressCount: {
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.4)',
-  },
-  progressBarBg: { 
-    height: 6, 
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  progressBarFill: { 
-    height: '100%',
-    borderRadius: 3,
-  },
-
   // Chat Area
   chatArea: { 
     flex: 1,
@@ -1350,8 +1322,29 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     lineHeight: 22,
   },
-  userBubbleText: { 
+  userBubbleText: {
     color: '#FFFFFF',
+  },
+  // Failed-request bubble + Retry
+  errorBubble: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,107,107,0.35)',
+  },
+  retryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    marginTop: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 16,
+    backgroundColor: '#FF6B6B',
+  },
+  retryText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
   },
 
   // Typing indicator

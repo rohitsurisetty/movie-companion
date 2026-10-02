@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal,
   Pressable, ActivityIndicator,
@@ -12,6 +12,7 @@ interface Props {
   visible: boolean;
   onClose: () => void;
   userName: string;
+  /** Resolves on success; rejects (Error.message = user-facing copy) on failure. */
   onUnmatch: (reason: string) => Promise<void>;
   onTransitionToReport: () => void;
 }
@@ -22,30 +23,47 @@ export const UnmatchModal: React.FC<Props> = ({
   const [step, setStep] = useState<'reason' | 'confirm_report'>('reason');
   const [selectedReason, setSelectedReason] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const insets = useSafeAreaInsets();
+
+  // Reset whenever the modal closes, however it was closed (incl. the
+  // "report them" hand-off), so it always reopens on the reason list.
+  useEffect(() => {
+    if (!visible) {
+      setStep('reason');
+      setSelectedReason(null);
+      setIsSubmitting(false);
+      setSubmitError(null);
+    }
+  }, [visible]);
 
   const handleReasonSelect = (reasonId: string) => {
     setSelectedReason(reasonId);
+    setSubmitError(null);
     setStep('confirm_report');
   };
 
   const handleConfirmUnmatch = async (shouldReport: boolean) => {
+    if (isSubmitting) return;
     if (shouldReport) {
       onClose();
       onTransitionToReport();
-    } else {
-      setIsSubmitting(true);
+      return;
+    }
+    setIsSubmitting(true);
+    setSubmitError(null);
+    try {
       await onUnmatch(selectedReason || 'other');
-      setIsSubmitting(false);
-      setStep('reason');
-      setSelectedReason(null);
       onClose();
+    } catch (e) {
+      setSubmitError(e instanceof Error && e.message ? e.message : "Couldn't unmatch. Please try again.");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const handleClose = () => {
-    setStep('reason');
-    setSelectedReason(null);
+    if (isSubmitting) return;
     onClose();
   };
 
@@ -122,6 +140,8 @@ export const UnmatchModal: React.FC<Props> = ({
                 </TouchableOpacity>
               </View>
 
+              {submitError ? <Text style={styles.errorText}>{submitError}</Text> : null}
+
               <TouchableOpacity onPress={() => setStep('reason')} style={styles.backBtn}>
                 <Ionicons name="arrow-back" size={18} color={COLORS.textMuted} />
                 <Text style={styles.backBtnText}>Back</Text>
@@ -151,6 +171,7 @@ const styles = StyleSheet.create({
   confirmBtnNo: { backgroundColor: COLORS.bgInput, borderWidth: 1, borderColor: COLORS.border },
   confirmBtnYes: { backgroundColor: COLORS.primary },
   confirmBtnText: { fontSize: 16, fontWeight: '600', color: COLORS.text },
+  errorText: { fontSize: 14, color: COLORS.primary, textAlign: 'center', marginTop: 12, lineHeight: 20 },
   backBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 16, gap: 6 },
   backBtnText: { fontSize: 14, color: COLORS.textMuted },
 });

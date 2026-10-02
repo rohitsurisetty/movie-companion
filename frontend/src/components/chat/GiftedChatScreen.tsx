@@ -1,7 +1,7 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal,
-  Pressable, ActivityIndicator, Alert, TextInput,
+  Pressable, ActivityIndicator, Alert, TextInput, AppState, BackHandler,
 } from 'react-native';
 // Use the KeyboardAvoidingView from react-native-keyboard-controller (NOT
 // the one from react-native). The RN version relies on the activity being
@@ -11,9 +11,12 @@ import {
 // API and works identically in Expo Go and production.
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from 'expo-router';
 import { GiftedChat, Bubble, IMessage } from 'react-native-gifted-chat';
 import { Avatar } from '../Avatar';
-import { API_BASE, COLORS } from './theme';
+import { apiUrl } from '../../store';
+import { COLORS } from './theme';
+import { parseServerDate } from './utils';
 import type { Conversation, BackendMessage } from './types';
 import { ProfileBottomSheet } from './ProfileBottomSheet';
 import { DidYouMeetModal } from './DidYouMeetModal';
@@ -29,148 +32,292 @@ interface Props {
   otherUserNameOverride?: string;
 }
 
-export const GiftedChatScreen: React.FC<Props> = ({
+// No websocket yet: an open conversation re-fetches its messages this often.
+const POLL_INTERVAL_MS = 4000;
+
+const toTime = (d: IMessage['createdAt']) => (d instanceof Date ? d.getTime() : Number(d) || 0);
+
+// Merge by message id, newest first — polling never duplicates a message. An
+// unchanged message keeps its object so the list doesn't re-render every poll.
+const mergeMessages = (current: IMessage[], incoming: IMessage[]): IMessage[] => {
+  const byId = new Map<IMessage['_id'], IMessage>();
+  current.forEach((m) => byId.set(m._id, m));
+  incoming.forEach((m) => {
+    const known = byId.get(m._id);
+    byId.set(m._id, known && !known.pending && known.text === m.text ? known : m);
+  });
+  return Array.from(byId.values()).sort((a, b) => toTime(b.createdAt) - toTime(a.createdAt));
+};
+
+const sameList = (a: IMessage[], b: IMessage[]) =>
+  a.length === b.length && a.every((m, i) => m === b[i]);
+
+const sendErrorMessage = (status?: number) => {
+  if (status === 400) return "You can't send a message to yourself.";
+  if (status === 404) return 'This conversation is no longer available. The match may have ended.';
+  if (status === 429) return "You're sending messages too quickly. Please try again shortly.";
+  return "Your message wasn't sent. Check your connection and try again.";
+};
+
+const actionErrorMessage = (status?: number) =>
+  status === 429
+    ? 'Too many requests. Please try again shortly.'
+    : 'Something went wrong. Check your connection and try again.';
+
+const ConversationChat: React.FC<Props> = ({
   conversation, userId, onBack, isReadOnly = false, otherUserNameOverride,
 }) => {
   const [messages, setMessages] = useState<IMessage[]>([]);
   const [loading, setLoading] = useState(true);
+  // 404 from the server: unmatched / deleted / no longer a participant.
+  const [unavailable, setUnavailable] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
-  const [, setShowSuggestions] = useState(false);
-  const [isTyping, setIsTyping] = useState(false);
   const [showDidYouMeet, setShowDidYouMeet] = useState(false);
   const [showComingSoon, setShowComingSoon] = useState(false);
   const [comingSoonFeature, setComingSoonFeature] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [showUnmatchModal, setShowUnmatchModal] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const [inputText, setInputText] = useState('');
 
+  const mountedRef = useRef(true);
+  const messagesRef = useRef<IMessage[]>([]);
+  const fetchingRef = useRef(false);
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Once true (404, report, unmatch, delete) this screen never polls again.
+  const stoppedRef = useRef(false);
+  const readSyncedRef = useRef(false);
+  // Reply suggestions are an LLM call: request them once per new incoming
+  // message, and drop responses that arrive after the user has replied.
+  const suggestedForRef = useRef<IMessage['_id'] | null>(null);
+  const suggestionsReqRef = useRef(0);
+  const reportedRef = useRef(false);
+  const reportUnmatchFailedRef = useRef(false);
+
+  const conversationId = conversation.conversation_id;
   const otherUser = conversation.other_user;
   const otherUserId = conversation.other_user_id;
   const displayName = otherUserNameOverride || otherUser?.name || 'Unknown';
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   const showComingSoonModal = (feature: string) => {
     setComingSoonFeature(feature);
     setShowComingSoon(true);
   };
 
-  const convertToGiftedMessages = (backendMessages: BackendMessage[]): IMessage[] => {
-    return backendMessages.map((msg) => ({
-      _id: msg.message_id,
-      text: msg.content,
-      createdAt: new Date(msg.created_at),
-      user: {
-        _id: msg.sender_id,
-        name: msg.sender_id === userId ? 'You' : otherUser?.name || 'Unknown',
-        avatar: msg.sender_id === userId || isReadOnly ? undefined : otherUser?.avatar,
-      },
-    }));
-  };
+  const updateMessages = useCallback((next: (prev: IMessage[]) => IMessage[]) => {
+    const updated = next(messagesRef.current);
+    if (sameList(messagesRef.current, updated)) return;
+    messagesRef.current = updated;
+    setMessages(updated);
+  }, []);
 
-  useEffect(() => {
-    fetchMessages();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversation.conversation_id]);
-
-  useEffect(() => {
-    if (messages.length > 0) {
-      const lastMessage = messages[0];
-      const otherPersonSentLast = lastMessage.user._id !== userId;
-      setShowSuggestions(otherPersonSentLast && suggestions.length > 0);
+  const stopPolling = useCallback(() => {
+    stoppedRef.current = true;
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
     }
-  }, [messages, suggestions, userId]);
+  }, []);
 
-  const fetchMessages = async () => {
+  const convertToGiftedMessages = useCallback((backendMessages: BackendMessage[]): IMessage[] => (
+    backendMessages
+      .filter((msg) => !!msg?.message_id)
+      .map((msg) => ({
+        _id: msg.message_id,
+        text: msg.content,
+        createdAt: parseServerDate(msg.created_at),
+        user: {
+          _id: msg.sender_id,
+          name: msg.sender_id === userId ? 'You' : otherUser?.name || 'Unknown',
+          avatar: msg.sender_id === userId || isReadOnly ? undefined : otherUser?.avatar,
+        },
+      }))
+  ), [userId, isReadOnly, otherUser?.name, otherUser?.avatar]);
+
+  const markRead = useCallback(async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/chat/messages/${conversation.conversation_id}`);
-      if (response.ok) {
-        const data = await response.json();
-        const giftedMessages = convertToGiftedMessages(data.messages || []);
-        setMessages(giftedMessages);
-
-        if (userId) {
-          await fetch(`${API_BASE}/api/chat/read/${conversation.conversation_id}?user_id=${encodeURIComponent(userId)}`, { method: 'POST' });
-        }
-
-        if (data.messages && data.messages.length > 0) {
-          fetchSuggestions();
-        }
-      }
-    } catch (error) {
-      console.error('Error fetching messages:', error);
-    } finally {
-      setLoading(false);
+      await fetch(
+        apiUrl(`/api/chat/read/${encodeURIComponent(conversationId)}?user_id=${encodeURIComponent(userId)}`),
+        { method: 'POST' },
+      );
+    } catch {
+      // Best effort: the next poll still sees the messages unread and retries.
     }
-  };
+  }, [conversationId, userId]);
 
-  const fetchSuggestions = async () => {
+  const fetchSuggestions = useCallback(async () => {
+    const req = ++suggestionsReqRef.current;
     try {
-      const response = await fetch(`${API_BASE}/api/chat/reply-suggestions`, {
+      const response = await fetch(apiUrl('/api/chat/reply-suggestions'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user_id: userId,
-          conversation_id: conversation.conversation_id,
+          conversation_id: conversationId,
         }),
       });
-      if (response.ok) {
-        const data = await response.json();
-        setSuggestions(data.suggestions || []);
-      }
-    } catch (error) {
-      console.error('Error fetching suggestions:', error);
+      if (!response.ok) return;
+      const data = await response.json();
+      if (!mountedRef.current || req !== suggestionsReqRef.current || stoppedRef.current) return;
+      setSuggestions(Array.isArray(data?.suggestions) ? data.suggestions : []);
+    } catch {
+      // Suggestions are optional.
     }
-  };
+  }, [userId, conversationId]);
 
+  const fetchMessages = useCallback(async () => {
+    if (fetchingRef.current || stoppedRef.current) return;
+    fetchingRef.current = true;
+    try {
+      const response = await fetch(apiUrl(`/api/chat/messages/${encodeURIComponent(conversationId)}`));
+      if (!mountedRef.current || stoppedRef.current) return;
+      if (response.status === 404 || response.status === 403) {
+        stopPolling();
+        setUnavailable(true);
+        setSuggestions([]);
+        return;
+      }
+      // 429 / 5xx: keep what is on screen; the next poll retries.
+      if (!response.ok) return;
+      const data = await response.json();
+      if (!mountedRef.current || stoppedRef.current) return;
+      const backendMessages: BackendMessage[] = Array.isArray(data?.messages) ? data.messages : [];
+      updateMessages((prev) => mergeMessages(prev, convertToGiftedMessages(backendMessages)));
+
+      const hasUnread = backendMessages.some((m) => m.sender_id !== userId && !m.read);
+      if (hasUnread || !readSyncedRef.current) {
+        readSyncedRef.current = true;
+        markRead();
+      }
+
+      const newest = messagesRef.current[0];
+      if (!isReadOnly && newest && newest.user._id !== userId && newest._id !== suggestedForRef.current) {
+        suggestedForRef.current = newest._id;
+        fetchSuggestions();
+      }
+    } catch {
+      // Network blip: the next poll retries.
+    } finally {
+      fetchingRef.current = false;
+      if (mountedRef.current) setLoading(false);
+    }
+  }, [conversationId, userId, isReadOnly, convertToGiftedMessages, updateMessages, markRead, fetchSuggestions, stopPolling]);
+
+  // Poll only while this screen is focused and the app is in the foreground;
+  // the interval is cleared on blur, unmount and back. A read-only
+  // (unmatched) conversation can't receive messages, so it loads once.
+  useFocusEffect(
+    useCallback(() => {
+      if (stoppedRef.current) return undefined;
+      fetchMessages();
+      if (isReadOnly) return undefined;
+      const timer = setInterval(() => {
+        if (AppState.currentState === 'active') fetchMessages();
+      }, POLL_INTERVAL_MS);
+      pollTimerRef.current = timer;
+      return () => {
+        clearInterval(timer);
+        if (pollTimerRef.current === timer) pollTimerRef.current = null;
+      };
+    }, [fetchMessages, isReadOnly]),
+  );
+
+  // Android hardware back leaves the conversation (modals handle back
+  // themselves via onRequestClose) instead of exiting the tab / app.
+  useFocusEffect(
+    useCallback(() => {
+      const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+        onBack();
+        return true;
+      });
+      return () => sub.remove();
+    }, [onBack]),
+  );
+
+  // Optimistic send: the bubble shows as pending, is swapped for the server
+  // copy on success (same message_id as polling → no duplicate) and removed on
+  // failure, with the draft restored and the reason explained. Replies arrive
+  // through polling (there is no typing indicator — no presence data exists).
   const onSend = useCallback(async (newMessages: IMessage[] = []) => {
-    const messageText = newMessages[0]?.text;
-    if (!messageText?.trim()) return;
+    const messageText = newMessages[0]?.text?.trim();
+    if (!messageText || stoppedRef.current) return;
 
-    setMessages(previousMessages => GiftedChat.append(previousMessages, newMessages));
-    setShowSuggestions(false);
+    const localId = newMessages[0]._id;
+    updateMessages((prev) => mergeMessages(prev, [{ ...newMessages[0], text: messageText, pending: true }]));
+    suggestionsReqRef.current += 1;
     setSuggestions([]);
 
+    let failedStatus: number | undefined;
     try {
-      await fetch(`${API_BASE}/api/chat/send`, {
+      const response = await fetch(apiUrl('/api/chat/send'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           sender_id: userId,
           receiver_id: otherUserId,
-          content: messageText.trim(),
+          content: messageText,
           message_type: 'text',
         }),
       });
-
-      setIsTyping(true);
-      setTimeout(async () => {
-        setIsTyping(false);
-        await fetchMessages();
-      }, 4000);
-    } catch (error) {
-      console.error('Error sending message:', error);
+      if (response.ok) {
+        const data = await response.json().catch(() => null);
+        if (!mountedRef.current) return;
+        const saved: BackendMessage | undefined = data?.message;
+        updateMessages((prev) => {
+          const withoutLocal = prev.filter((m) => m._id !== localId);
+          return saved?.message_id ? mergeMessages(withoutLocal, convertToGiftedMessages([saved])) : withoutLocal;
+        });
+        if (!saved?.message_id) fetchMessages();
+        return;
+      }
+      failedStatus = response.status;
+    } catch {
+      failedStatus = undefined;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId, otherUserId, conversation.conversation_id]);
 
+    if (!mountedRef.current) return;
+    updateMessages((prev) => prev.filter((m) => m._id !== localId));
+    setInputText((current) => (current.trim() ? current : messageText));
+    if (failedStatus === 404) {
+      stopPolling();
+      setUnavailable(true);
+    }
+    Alert.alert('Message not sent', sendErrorMessage(failedStatus));
+  }, [userId, otherUserId, updateMessages, convertToGiftedMessages, fetchMessages, stopPolling]);
+
+  // Rejects with user-facing copy so UnmatchModal can show it and stay open.
   const handleUnmatchWithReason = async (reason: string) => {
+    let response: Response;
     try {
-      await fetch(`${API_BASE}/api/chat/unmatch`, {
+      response = await fetch(apiUrl('/api/chat/unmatch'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: userId, other_user_id: otherUserId, reason }),
       });
-      onBack();
-    } catch (error) {
-      console.error('Error unmatching:', error);
+    } catch {
+      throw new Error(actionErrorMessage());
     }
+    // 404 = the match is already gone, which is what the user asked for.
+    if (!response.ok && response.status !== 404) throw new Error(actionErrorMessage(response.status));
+    stopPolling();
+    onBack();
   };
 
+  // Resolves once the report is filed (ReportModal then shows "Thank you"),
+  // rejects with user-facing copy otherwise. A report also ends the match;
+  // closing the modal afterwards returns to the inbox (handleReportClose).
   const handleReportWithDetails = async (reason: string, details?: string) => {
+    let reportRes: Response;
     try {
-      await fetch(`${API_BASE}/api/chat/report`, {
+      reportRes = await fetch(apiUrl('/api/chat/report'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -180,14 +327,64 @@ export const GiftedChatScreen: React.FC<Props> = ({
           details: details || null,
         }),
       });
-      await fetch(`${API_BASE}/api/chat/unmatch`, {
+    } catch {
+      throw new Error(actionErrorMessage());
+    }
+    if (!reportRes.ok) throw new Error(actionErrorMessage(reportRes.status));
+
+    reportedRef.current = true;
+    stopPolling();
+    setSuggestions([]);
+    try {
+      const unmatchRes = await fetch(apiUrl('/api/chat/unmatch'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: userId, other_user_id: otherUserId, reason: 'reported' }),
       });
-    } catch (error) {
-      console.error('Error reporting:', error);
+      reportUnmatchFailedRef.current = !unmatchRes.ok && unmatchRes.status !== 404;
+    } catch {
+      reportUnmatchFailedRef.current = true;
     }
+  };
+
+  const handleReportClose = () => {
+    setShowReportModal(false);
+    if (!reportedRef.current) return;
+    if (reportUnmatchFailedRef.current) {
+      Alert.alert(
+        'Report sent',
+        "We couldn't unmatch you automatically. You can unmatch from the chat menu.",
+      );
+    }
+    onBack();
+  };
+
+  const handleDeleteChat = async () => {
+    if (deleting) return;
+    setDeleting(true);
+    let failure: string | null = null;
+    try {
+      const response = await fetch(apiUrl('/api/chat/delete'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: userId,
+          conversation_id: conversationId,
+        }),
+      });
+      if (!response.ok && response.status !== 404) failure = actionErrorMessage(response.status);
+    } catch {
+      failure = actionErrorMessage();
+    }
+    if (!mountedRef.current) return;
+    setDeleting(false);
+    if (failure) {
+      Alert.alert('Could not delete chat', failure);
+      return;
+    }
+    setShowDeleteConfirm(false);
+    stopPolling();
+    onBack();
   };
 
   const renderBubble = (props: any) => (
@@ -278,9 +475,6 @@ export const GiftedChatScreen: React.FC<Props> = ({
             <Avatar name={otherUser?.name || 'U'} size={40} imageUrl={otherUser?.avatar} />
             <View style={styles.chatHeaderInfo}>
               <Text style={styles.chatHeaderName}>{displayName}</Text>
-              <Text style={styles.chatHeaderStatus}>
-                {isTyping ? 'typing...' : 'Online'}
-              </Text>
             </View>
           </TouchableOpacity>
         )}
@@ -319,25 +513,30 @@ export const GiftedChatScreen: React.FC<Props> = ({
             renderComposer={renderComposer}
             renderSend={renderSend}
             renderAvatar={renderAvatar}
-            scrollToBottom
-            isTyping={isTyping}
-            infiniteScroll
-            inverted={true}
-            renderUsernameOnMessage={false}
-            showUserAvatar={false}
-            showAvatarForEveryMessage={false}
-            renderAvatarOnTop
+            // gifted-chat 3 prop names (the v2 names were silently ignored).
+            isScrollToBottomEnabled
+            isInverted
+            isUsernameVisible={false}
+            isUserAvatarVisible={false}
+            isAvatarVisibleForEveryMessage={false}
+            isAvatarOnTop
             messagesContainerStyle={styles.messagesContainer}
-            bottomOffset={0}
             minInputToolbarHeight={0}
-            listViewProps={{
+            listProps={{
               style: { backgroundColor: COLORS.bg },
               keyboardDismissMode: 'interactive',
               keyboardShouldPersistTaps: 'handled',
             }}
           />
 
-          {isReadOnly ? (
+          {unavailable ? (
+            <View style={styles.readOnlyNotice}>
+              <View style={styles.readOnlyIconContainer}>
+                <Ionicons name="chatbubbles-outline" size={20} color={COLORS.warning} />
+              </View>
+              <Text style={styles.readOnlyText}>This conversation is no longer available</Text>
+            </View>
+          ) : isReadOnly ? (
             <View style={styles.readOnlyNotice}>
               <View style={styles.readOnlyIconContainer}>
                 <Ionicons name="lock-closed" size={20} color={COLORS.warning} />
@@ -494,25 +693,14 @@ export const GiftedChatScreen: React.FC<Props> = ({
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.confirmBtnDelete}
-                onPress={async () => {
-                  try {
-                    await fetch(`${API_BASE}/api/chat/delete`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({
-                        user_id: userId,
-                        conversation_id: conversation.conversation_id,
-                      }),
-                    });
-                    setShowDeleteConfirm(false);
-                    onBack();
-                  } catch (error) {
-                    console.error('Error deleting chat:', error);
-                    Alert.alert('Error', 'Could not delete chat. Please try again.');
-                  }
-                }}
+                onPress={handleDeleteChat}
+                disabled={deleting}
               >
-                <Text style={styles.confirmBtnDeleteText}>Yes, delete</Text>
+                {deleting ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.confirmBtnDeleteText}>Yes, delete</Text>
+                )}
               </TouchableOpacity>
             </View>
           </View>
@@ -546,7 +734,7 @@ export const GiftedChatScreen: React.FC<Props> = ({
 
       <ReportModal
         visible={showReportModal}
-        onClose={() => setShowReportModal(false)}
+        onClose={handleReportClose}
         userName={otherUser?.name || 'this user'}
         onReport={handleReportWithDetails}
         onUnmatchInstead={() => setShowUnmatchModal(true)}
@@ -561,6 +749,13 @@ export const GiftedChatScreen: React.FC<Props> = ({
   );
 };
 
+// Keyed by conversation: when the parent swaps conversations without
+// unmounting (History → "Go to Chat" while a chat is open) everything —
+// messages, polling, modals, draft — starts fresh instead of merging threads.
+export const GiftedChatScreen: React.FC<Props> = (props) => (
+  <ConversationChat key={props.conversation.conversation_id} {...props} />
+);
+
 const styles = StyleSheet.create({
   chatContainer: { flex: 1, backgroundColor: COLORS.bg },
   chatHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: COLORS.border },
@@ -568,7 +763,6 @@ const styles = StyleSheet.create({
   chatHeaderProfile: { flex: 1, flexDirection: 'row', alignItems: 'center', marginLeft: 4 },
   chatHeaderInfo: { marginLeft: 12 },
   chatHeaderName: { fontSize: 17, fontWeight: '600', color: COLORS.text },
-  chatHeaderStatus: { fontSize: 12, color: COLORS.online, marginTop: 1 },
   chatHeaderActions: { flexDirection: 'row' },
   headerActionBtn: { padding: 10 },
   chatHeaderReadOnly: { flex: 1, marginLeft: 12 },

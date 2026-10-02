@@ -1,4 +1,4 @@
-import { Stack } from 'expo-router';
+import { Stack, router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { StyleSheet } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -7,17 +7,33 @@ import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { TinaProvider } from '../src/context/TinaContext';
 import FloatingTinaButton from '../src/components/FloatingTinaButton';
 import TinaModal from '../src/components/TinaModal';
-import { installAuthenticatedFetch } from '../src/store';
+import ErrorBoundary from '../src/components/ErrorBoundary';
+import { API_BASE, installAuthenticatedFetch } from '../src/store';
 
 // Install the auto-auth fetch wrapper as early as possible (module-load
 // time, before any route mounts). After this every `fetch()` call to the
 // backend gets `Authorization: Bearer <token>` automatically — required
 // now that the backend enforces auth on all non-public /api routes.
-const API_BASE = (process.env.EXPO_PUBLIC_BACKEND_URL || '').trim();
-installAuthenticatedFetch(API_BASE);
+// API_BASE comes from the store (single source of truth for the backend URL).
+// On a 401 from any non-auth endpoint the wrapper wipes local auth and we
+// bounce to the login screen; `router` is the global imperative router so
+// this works from module scope.
+installAuthenticatedFetch(API_BASE, {
+  onUnauthorized: () => {
+    try {
+      router.replace('/');
+    } catch {
+      // Router not mounted yet — the login screen re-checks auth on boot.
+    }
+  },
+});
 
 export default function RootLayout() {
   return (
+    <ErrorBoundary
+      fallbackTitle="Something went wrong"
+      fallbackMessage="The app hit an unexpected error. Tap below to try again."
+    >
     <SafeAreaProvider>
       {/* KeyboardProvider is REQUIRED at the root for
           react-native-keyboard-controller hooks/components to work. It hooks
@@ -51,6 +67,7 @@ export default function RootLayout() {
         </TinaProvider>
       </KeyboardProvider>
     </SafeAreaProvider>
+    </ErrorBoundary>
   );
 }
 

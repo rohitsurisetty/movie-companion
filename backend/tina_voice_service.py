@@ -6,6 +6,13 @@ deliberately keep the payload small (base64-encoded MP3) so the React Native
 client can play the audio with `expo-audio` without needing any extra
 plumbing.
 
+All public functions here are async (they use `AsyncElevenLabs`) so the
+network round-trip to ElevenLabs never blocks the FastAPI event loop:
+
+  * `synthesize_speech(text, voice_id)`  -> awaitable, returns a data URI str
+  * `stream_speech(text, voice_id)`      -> async generator yielding MP3 bytes
+  * `transcribe_audio(audio_bytes, ...)` -> awaitable, returns the transcript
+
 Voice default: Sarah (premade female, ID `EXAVITQu4vr4xnSDxMaL`) – this is the
 ElevenLabs Free-tier-compatible voice. To switch to an Indian English voice
 such as `UYoWPkHjaRgjWccloxC5` (Monika Sogam) the user must upgrade to a paid
@@ -16,17 +23,19 @@ import os
 import io
 import base64
 import logging
-from typing import Optional
+from typing import AsyncIterator, Optional
 
 from dotenv import load_dotenv
-from elevenlabs.client import ElevenLabs
+from elevenlabs.client import AsyncElevenLabs
 from elevenlabs.types import VoiceSettings
 
 load_dotenv()
 
+from settings import settings  # noqa: E402  (dotenv must be loaded first)
+
 logger = logging.getLogger(__name__)
 
-ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+ELEVENLABS_API_KEY = settings.elevenlabs_api_key or os.getenv("ELEVENLABS_API_KEY", "")
 DEFAULT_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "EXAVITQu4vr4xnSDxMaL")  # Sarah – premade female (Free-tier compatible)
 
 # Models: eleven_multilingual_v2 handles English with non-native accents well.
@@ -35,11 +44,19 @@ DEFAULT_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "EXAVITQu4vr4xnSDxMaL")  # S
 TTS_MODEL_ID = os.getenv("ELEVENLABS_TTS_MODEL", "eleven_flash_v2_5")
 STT_MODEL_ID = "scribe_v1"
 
-_client: Optional[ElevenLabs] = None
+# Hard ceiling on a single TTS request. A runaway client can't rack up the
+# bill on huge messages, and the voice-call UX never needs more than this.
+MAX_TTS_CHARS = 800
+
+# Per-request HTTP timeout (seconds) for the ElevenLabs API. The SDK default
+# is 240s which would pin a worker for minutes on an upstream stall.
+ELEVENLABS_TIMEOUT_SECONDS = 15
+
+_client: Optional[AsyncElevenLabs] = None
 
 
-def _get_client() -> ElevenLabs:
-    """Lazily build (and cache) the ElevenLabs client."""
+def _get_client() -> AsyncElevenLabs:
+    """Lazily build (and cache) the async ElevenLabs client."""
     global _client
     if _client is None:
         if not ELEVENLABS_API_KEY:
@@ -47,7 +64,7 @@ def _get_client() -> ElevenLabs:
                 "ELEVENLABS_API_KEY is not configured. "
                 "Please set it in backend/.env."
             )
-        _client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
+        _client = AsyncElevenLabs(api_key=ELEVENLABS_API_KEY, timeout=ELEVENLABS_TIMEOUT_SECONDS)
     return _client
 
 
@@ -56,7 +73,25 @@ def is_voice_enabled() -> bool:
     return bool(ELEVENLABS_API_KEY)
 
 
-def synthesize_speech(text: str, voice_id: Optional[str] = None) -> str:
+def _clean_tts_text(text: str) -> str:
+    clean_text = (text or "").strip()
+    if not clean_text:
+        raise ValueError("No text provided for speech synthesis")
+    if len(clean_text) > MAX_TTS_CHARS:
+        clean_text = clean_text[:MAX_TTS_CHARS].rstrip() + "…"
+    return clean_text
+
+
+def _voice_settings() -> VoiceSettings:
+    return VoiceSettings(
+        stability=0.55,
+        similarity_boost=0.85,
+        style=0.35,
+        use_speaker_boost=True,
+    )
+
+
+async def synthesize_speech(text: str, voice_id: Optional[str] = None) -> str:
     """Generate speech audio for `text` and return a base64-encoded MP3 string.
 
     Returns a data URI (`data:audio/mpeg;base64,...`) so the frontend can pass
@@ -64,28 +99,21 @@ def synthesize_speech(text: str, voice_id: Optional[str] = None) -> str:
     """
     client = _get_client()
     voice = voice_id or DEFAULT_VOICE_ID
+    clean_text = _clean_tts_text(text)
 
-    # Defensive: cap text length so we don't accidentally rack up the bill
-    # on huge messages.
-    clean_text = (text or "").strip()
-    if not clean_text:
-        raise ValueError("No text provided for speech synthesis")
-    if len(clean_text) > 800:
-        clean_text = clean_text[:800].rstrip() + "…"
-
+    # AsyncElevenLabs.text_to_speech.convert() is an async generator of chunks.
     audio_iter = client.text_to_speech.convert(
         text=clean_text,
         voice_id=voice,
         model_id=TTS_MODEL_ID,
-        voice_settings=VoiceSettings(
-            stability=0.55,
-            similarity_boost=0.85,
-            style=0.35,
-            use_speaker_boost=True,
-        ),
+        voice_settings=_voice_settings(),
     )
 
-    audio_bytes = b"".join(chunk for chunk in audio_iter if chunk)
+    chunks = []
+    async for chunk in audio_iter:
+        if chunk:
+            chunks.append(chunk)
+    audio_bytes = b"".join(chunks)
     if not audio_bytes:
         raise RuntimeError("ElevenLabs returned empty audio")
 
@@ -93,43 +121,35 @@ def synthesize_speech(text: str, voice_id: Optional[str] = None) -> str:
     return f"data:audio/mpeg;base64,{b64}"
 
 
-def stream_speech(text: str, voice_id: Optional[str] = None):
+async def stream_speech(text: str, voice_id: Optional[str] = None) -> AsyncIterator[bytes]:
     """Yield raw MP3 audio chunks as soon as ElevenLabs returns them.
 
     Used by the `/api/tina/voice/speak-stream` endpoint so the frontend can
     start playback the moment the first chunk arrives instead of waiting for
     the full MP3 to be encoded + base64'd + parsed. Cuts perceived gap from
     ~1.5s to ~300-400ms on voice calls.
+
+    Async generator — consume with `async for chunk in stream_speech(...)`.
     """
     client = _get_client()
     voice = voice_id or DEFAULT_VOICE_ID
+    clean_text = _clean_tts_text(text)
 
-    clean_text = (text or "").strip()
-    if not clean_text:
-        raise ValueError("No text provided for speech synthesis")
-    if len(clean_text) > 800:
-        clean_text = clean_text[:800].rstrip() + "…"
-
-    # ElevenLabs' convert() already returns a generator — we just pass each
-    # chunk straight to the client. Using the streaming endpoint with
-    # output_format default (mp3_44100_128) keeps frontend playback simple.
+    # ElevenLabs' convert() already returns an async generator — we just pass
+    # each chunk straight to the client. Using the default output_format
+    # (mp3_44100_128) keeps frontend playback simple.
     audio_iter = client.text_to_speech.convert(
         text=clean_text,
         voice_id=voice,
         model_id=TTS_MODEL_ID,
-        voice_settings=VoiceSettings(
-            stability=0.55,
-            similarity_boost=0.85,
-            style=0.35,
-            use_speaker_boost=True,
-        ),
+        voice_settings=_voice_settings(),
     )
-    for chunk in audio_iter:
+    async for chunk in audio_iter:
         if chunk:
             yield chunk
 
 
-def transcribe_audio(audio_bytes: bytes, filename: str = "tina_voice.m4a") -> str:
+async def transcribe_audio(audio_bytes: bytes, filename: str = "tina_voice.m4a") -> str:
     """Transcribe raw audio bytes to text using ElevenLabs Scribe."""
     client = _get_client()
     if not audio_bytes:
@@ -138,13 +158,14 @@ def transcribe_audio(audio_bytes: bytes, filename: str = "tina_voice.m4a") -> st
     buf = io.BytesIO(audio_bytes)
     buf.name = filename  # the SDK reads the file name for MIME inference
 
-    response = client.speech_to_text.convert(
+    response = await client.speech_to_text.convert(
         file=buf,
         model_id=STT_MODEL_ID,
     )
 
     text = getattr(response, "text", None) or str(response)
     text = (text or "").strip()
+    # Log sizes only — never the transcript itself (user speech is PII).
     logger.info(
         "Transcribed %s bytes of audio -> %s chars of text",
         len(audio_bytes),

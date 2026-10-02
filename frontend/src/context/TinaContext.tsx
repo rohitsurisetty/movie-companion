@@ -1,11 +1,12 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
-const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || process.env.EXPO_PUBLIC_API_URL || '';
+import { API_BASE, getUserId } from '../store';
 
 // Storage keys
 const TINA_STATE_KEY = 'global_tina_state';
 const TINA_MESSAGES_KEY = 'global_tina_messages';
+// Cap the chat history kept in memory/AsyncStorage so it can't grow forever.
+const MAX_PERSISTED_MESSAGES = 200;
 
 export type Message = {
   id: string;
@@ -175,7 +176,9 @@ export function TinaProvider({ children }: { children: React.ReactNode }) {
 
       if (savedMessages) {
         const messages = JSON.parse(savedMessages);
-        setState(prev => ({ ...prev, messages }));
+        if (Array.isArray(messages)) {
+          setState(prev => ({ ...prev, messages: messages.slice(-MAX_PERSISTED_MESSAGES) }));
+        }
       }
     } catch (error) {
       console.error('[TinaContext] Error loading saved state:', error);
@@ -196,7 +199,7 @@ export function TinaProvider({ children }: { children: React.ReactNode }) {
       };
       await Promise.all([
         AsyncStorage.setItem(TINA_STATE_KEY, JSON.stringify(stateToSave)),
-        AsyncStorage.setItem(TINA_MESSAGES_KEY, JSON.stringify(state.messages)),
+        AsyncStorage.setItem(TINA_MESSAGES_KEY, JSON.stringify(state.messages.slice(-MAX_PERSISTED_MESSAGES))),
       ]);
     } catch (error) {
       console.error('[TinaContext] Error saving state:', error);
@@ -335,7 +338,8 @@ export function TinaProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const updateUserProfile = useCallback((updates: Partial<UserProfileData>) => {
-    setUserProfileState(prev => prev ? { ...prev, ...updates } : null);
+    // Works before the profile is hydrated too (prev === null during signup).
+    setUserProfileState(prev => ({ ...(prev || {}), ...updates }) as UserProfileData);
     
     // Mark updated fields as collected
     const newCollectedFields = Object.keys(updates).filter(key => {
@@ -354,14 +358,16 @@ export function TinaProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const syncProfileFromBackend = useCallback(async (userId: string) => {
+    if (!userId) return; // logged out — never query with an empty/fabricated id
     try {
-      const response = await fetch(`${API_BASE}/api/user/profile/${userId}`);
+      const response = await fetch(`${API_BASE}/api/user/profile/${encodeURIComponent(userId)}`);
       if (response.ok) {
         const data = await response.json();
-        if (data.user) {
+        // Backend returns { success, profile: {...} }
+        if (data?.profile) {
           setUserProfile({
+            ...data.profile,
             userId,
-            ...data.user,
           });
         }
       }
@@ -369,6 +375,18 @@ export function TinaProvider({ children }: { children: React.ReactNode }) {
       console.error('[TinaContext] Error syncing profile:', error);
     }
   }, [setUserProfile]);
+
+  // Hydrate userProfile at boot (after persisted state is restored, so the
+  // collectedFields merge isn't clobbered). getUserId() is '' when logged out.
+  useEffect(() => {
+    if (isLoading) return;
+    let cancelled = false;
+    (async () => {
+      const uid = await getUserId();
+      if (uid && !cancelled) await syncProfileFromBackend(uid);
+    })();
+    return () => { cancelled = true; };
+  }, [isLoading, syncProfileFromBackend]);
 
   // ========== ONBOARDING ==========
 

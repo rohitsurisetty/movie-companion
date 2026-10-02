@@ -1,30 +1,34 @@
-from fastapi import FastAPI, APIRouter, Request, Response, HTTPException, BackgroundTasks, UploadFile, File, Form, Depends
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, APIRouter, Request, HTTPException, BackgroundTasks, UploadFile, File
+from fastapi.responses import JSONResponse, StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
-import os
+from pymongo.errors import ConnectionFailure
+import hmac
 import logging
 import httpx
+import bcrypt
 from pathlib import Path
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date
 import random
 import socketio
 
+# Central runtime settings (env-driven) — see settings.py
+from settings import settings, validate_required_env
+
 # Import recommendation engine
 from recommendation_engine import (
-    TasteVector, 
+    TasteVector,
     initialize_taste_vector_from_profile,
     update_taste_vector_from_swipe,
     get_personalized_feed,
-    enrich_movie_with_details,
     enrich_top_movies,
     initialize_taste_vector_from_enriched_movies,
     enrich_movie_with_full_details,
-    GENRE_ID_TO_NAME
+    genre_vector_key,
 )
 
 # Import matchmaking service for AI-based user matching
@@ -32,14 +36,13 @@ from matchmaking_service import (
     get_matches_for_user,
     get_all_mock_users,
     get_mock_user_by_id,
-    apply_hard_filters,
     set_db as set_matchmaking_db,
     invalidate_user_cache
 )
 
 # Import chat service
 from chat_service import (
-    get_or_create_conversation,
+    ChatAccessDenied,
     get_conversation_id,
     send_message,
     get_messages,
@@ -77,19 +80,20 @@ from tina_service import (
     get_user_onboarding_status,
 )
 
-# Tina voice (ElevenLabs) – TTS + STT for the "Voice Call with Tina" feature
+# Tina voice (ElevenLabs) – TTS + STT for the "Voice Call with Tina" feature.
+# The service is fully async: `await synthesize_speech(...)`, `await
+# transcribe_audio(...)`, and `stream_speech(...)` is an ASYNC generator.
 from tina_voice_service import (
-    synthesize_speech as tina_synthesize_speech,
-    stream_speech as tina_stream_speech,
-    transcribe_audio as tina_transcribe_audio,
-    is_voice_enabled as tina_voice_enabled,
+    synthesize_speech,
+    stream_speech,
+    transcribe_audio,
+    is_voice_enabled,
 )
 
 # Tina personality engine – 360° Dating Profile Framework (hidden scoring engine)
 from tina_personality import (
     set_personality_db,
     QUESTIONS as PERSONALITY_QUESTIONS,
-    QUESTION_BY_ID as PERSONALITY_QUESTION_BY_ID,
     finalize_profile as personality_finalize_profile,
     save_tina_personality,
     get_tina_personality,
@@ -104,9 +108,14 @@ from picture_service import (
     save_user_pictures,
     get_user_pictures,
     update_single_picture,
-    initialize_picture_service,
     set_mongodb_db
 )
+try:
+    # Raised by picture_service when no photo storage backend is reachable.
+    from picture_service import PhotoStorageUnavailable
+except ImportError:  # older picture_service without the signal
+    class PhotoStorageUnavailable(Exception):
+        """Placeholder so the upload handlers' except clauses stay valid."""
 
 # Centralised security dependencies — see security_deps.py for design notes.
 from security_deps import (
@@ -115,12 +124,15 @@ from security_deps import (
     get_current_user_id,
     get_current_admin,
     require_owner,
-    INSECURE_DEV_AUTH,
-    OTP_LIMITER,
     TTS_LIMITER,
+    LLM_LIMITER,
     LOGIN_ATTEMPT_LIMITER,
+    RateLimiter,
     client_ip,
 )
+
+# Auth routes (Google Sign-In, phone OTP, /auth/me, /auth/logout)
+from auth_routes import router as auth_router, configure as configure_auth
 
 # Import mock-data seeder for unmatched flow testing
 from mock_unmatched_data import seed_unmatched_for_user
@@ -131,42 +143,94 @@ import supabase_service as supabase
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+# Fail fast with a readable message if MONGO_URL / DB_NAME are missing.
+validate_required_env()
+client = AsyncIOMotorClient(settings.mongo_url, serverSelectionTimeoutMS=5000)
+db = client[settings.db_name]
 
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
+
+# =============================================
+# Per-endpoint rate limiters (in-memory sliding window, per user). LLM-backed
+# routes (/tina/chat, /chat/ice-breakers, /chat/reply-suggestions) share
+# security_deps.LLM_LIMITER under the key f"llm:{user_id}".
+# =============================================
+STT_LIMITER = RateLimiter(max_calls=20, window_seconds=60)              # /tina/voice/transcribe
+EXTERNAL_API_LIMITER = RateLimiter(max_calls=120, window_seconds=60)    # /tmdb/* + /places/*
+MATCH_REFRESH_LIMITER = RateLimiter(max_calls=3, window_seconds=60 * 10)  # /matches force_refresh
+PICTURE_MAX_B64_CHARS = 7_000_000  # ≈5 MB decoded; reject before base64-decoding
+STT_MAX_AUDIO_BYTES = 10 * 1024 * 1024  # voice clips for /tina/voice/transcribe
+
+
+def _actor_key(request: Request) -> str:
+    """Rate-limit key for the authenticated caller (falls back to IP)."""
+    uid = getattr(request.state, "user_id", None)
+    return uid or f"ip:{client_ip(request)}"
 
 # =============================================
 # Socket.IO Server Setup for Real-Time Updates
 # =============================================
 sio = socketio.AsyncServer(
     async_mode='asgi',
-    cors_allowed_origins='*',
+    cors_allowed_origins=settings.allowed_origins,
     logger=True,
     engineio_logger=False
 )
 
-# Store connected admin clients
-connected_admins: Dict[str, str] = {}  # sid -> admin_email
+# Store connected admin clients (sid -> admin username). Only authenticated
+# admins ever get in here; they are also placed in the "admins" room so every
+# dashboard broadcast is scoped to that room.
+connected_admins: Dict[str, str] = {}
+ADMIN_ROOM = "admins"
+
+
+def _lookup_admin_token(token: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Validate an admin token against the in-memory store with the same 24h
+    aging rule `security_deps.get_current_admin` applies. Returns the token
+    info dict, or None if missing/expired."""
+    if not token:
+        return None
+    info = admin_tokens.get(token)
+    if not info:
+        return None
+    created_str = info.get("created_at")
+    if created_str:
+        try:
+            created = datetime.fromisoformat(created_str)
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            if (datetime.now(timezone.utc) - created).total_seconds() > 24 * 3600:
+                admin_tokens.pop(token, None)
+                return None
+        except ValueError:
+            pass
+    return info
 
 
 @sio.event
 async def connect(sid, environ, auth):
-    """Handle new WebSocket connection"""
+    """Handle new WebSocket connection — admin dashboard only.
+
+    A valid, unexpired admin token is REQUIRED (auth payload `token`, or a
+    Bearer Authorization header). Anything else is rejected."""
+    token = None
+    if isinstance(auth, dict):
+        token = auth.get('token') or auth.get('admin_token')
+    if not token:
+        hdr = (environ or {}).get('HTTP_AUTHORIZATION', '')
+        if hdr.lower().startswith('bearer '):
+            token = hdr[7:].strip()
+    info = _lookup_admin_token(token)
+    if not info:
+        logger.warning(f"Rejected unauthenticated socket connection: {sid}")
+        return False  # reject the connection
+    connected_admins[sid] = info.get('username') or info.get('email') or 'admin'
+    await sio.enter_room(sid, ADMIN_ROOM)
     logger.info(f"Admin client connected: {sid}")
-    # For now, allow all connections (in production, verify auth token)
-    token = auth.get('token') if auth else None
-    if token and token in admin_tokens:
-        connected_admins[sid] = admin_tokens[token].get('email', 'unknown')
-        await sio.emit('connection_status', {'status': 'connected'}, room=sid)
-        # Send initial metrics
-        await broadcast_metrics()
-    else:
-        # Allow connection but note it's unauthenticated
-        connected_admins[sid] = 'guest'
-        await sio.emit('connection_status', {'status': 'connected'}, room=sid)
+    await sio.emit('connection_status', {'status': 'connected'}, room=sid)
+    # Send initial metrics
+    await broadcast_metrics()
 
 
 @sio.event
@@ -175,13 +239,18 @@ async def disconnect(sid):
     logger.info(f"Admin client disconnected: {sid}")
     if sid in connected_admins:
         del connected_admins[sid]
+    try:
+        await sio.leave_room(sid, ADMIN_ROOM)
+    except Exception:
+        pass
 
 
 async def broadcast_metrics():
     """Broadcast updated metrics to all connected admins"""
     if not connected_admins:
+        # Nobody is listening — skip the (fairly expensive) aggregation work.
         return
-    
+
     try:
         now = datetime.now(timezone.utc)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -199,27 +268,27 @@ async def broadcast_metrics():
         other = len(profiles) - male - female
         total_with_gender = male + female + other or 1
         
-        total_swipes = await db.user_swipes.count_documents({})
         swipes_today = await db.user_swipes.count_documents({
             "created_at": {"$gte": today_start.isoformat()}
         })
-        
+
         try:
-            total_matches = await db.user_matches.count_documents({})
-        except:
+            # A "match" is an accepted chat (chat_conversations.status == active)
+            total_matches = await db.chat_conversations.count_documents({"status": "active"})
+        except Exception:
             total_matches = 0
-        
+
         active_today = await db.user_swipes.distinct("user_id", {
             "created_at": {"$gte": today_start.isoformat()}
         })
-        
+
         wau_users = await db.user_swipes.distinct("user_id", {
             "created_at": {"$gte": week_ago.isoformat()}
         })
         mau_users = await db.user_swipes.distinct("user_id", {
             "created_at": {"$gte": month_ago.isoformat()}
         })
-        
+
         metrics = {
             "totalUsers": total_users,
             "activeToday": len(active_today),
@@ -238,75 +307,56 @@ async def broadcast_metrics():
                 "other": round(other / total_with_gender * 100),
             }
         }
-        
-        await sio.emit('metrics_update', metrics)
+
+        await sio.emit('metrics_update', metrics, room=ADMIN_ROOM)
     except Exception as e:
         logger.error(f"Error broadcasting metrics: {e}")
+
+
+# Fields that must never leave the server over the admin socket (contact PII,
+# moderation notes, Mongo internals, credentials).
+_SOCKET_STRIP_FIELDS = {
+    "_id", "email", "phone", "ban_reason", "session_token", "google_sub",
+    "coordinates", "locationFull", "dob",
+}
+
+
+def _socket_safe(doc: Optional[dict]) -> dict:
+    """Shallow copy of `doc` minus the fields in _SOCKET_STRIP_FIELDS."""
+    if not isinstance(doc, dict):
+        return {}
+    return {k: v for k, v in doc.items() if k not in _SOCKET_STRIP_FIELDS}
 
 
 async def broadcast_new_user(user_data: dict):
     """Broadcast new user event to all connected admins"""
     if connected_admins:
-        await sio.emit('new_user', user_data)
+        await sio.emit('new_user', _socket_safe(user_data), room=ADMIN_ROOM)
         await broadcast_metrics()
 
 
 async def broadcast_user_updated(user_data: dict):
     """Broadcast user update event to all connected admins"""
     if connected_admins:
-        await sio.emit('user_updated', user_data)
+        await sio.emit('user_updated', _socket_safe(user_data), room=ADMIN_ROOM)
 
 
 async def broadcast_new_swipe(swipe_data: dict):
     """Broadcast new swipe event to all connected admins"""
     if connected_admins:
-        await sio.emit('new_swipe', swipe_data)
+        await sio.emit('new_swipe', swipe_data, room=ADMIN_ROOM)
         await broadcast_metrics()
 
 
 async def broadcast_new_match(match_data: dict):
     """Broadcast new match event to all connected admins"""
     if connected_admins:
-        await sio.emit('new_match', match_data)
+        await sio.emit('new_match', match_data, room=ADMIN_ROOM)
         await broadcast_metrics()
 
-# API Keys (loaded from environment - see backend/.env)
-GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "")
-TMDB_ACCESS_TOKEN = os.getenv("TMDB_ACCESS_TOKEN", "")
-EMERGENT_AUTH_URL = os.getenv("EMERGENT_AUTH_URL", "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data")
-
-
-class SessionRequest(BaseModel):
-    session_id: str
-
-
-class MockLoginRequest(BaseModel):
-    email: str
-    name: str
-
-
-class SendEmailOTPRequest(BaseModel):
-    email: str
-
-
-class SendPhoneOTPRequest(BaseModel):
-    phone: str
-
-
-class VerifyOTPRequest(BaseModel):
-    type: str  # 'email' or 'phone'
-    identifier: str  # email or phone number
-    otp: str
-    name: Optional[str] = None  # Only required for new users
-
-
-class ForgotPasswordRequest(BaseModel):
-    email: str
-
-
-# In-memory OTP store (for demo/mock purposes)
-# In production, use Redis or database with TTL
-otp_store: Dict[str, Dict[str, Any]] = {}
+# API Keys (centralised in settings.py — configured via env, see backend/.env.example)
+GOOGLE_MAPS_API_KEY = settings.google_maps_api_key
+TMDB_ACCESS_TOKEN = settings.tmdb_access_token
 
 
 # =============================================
@@ -329,12 +379,25 @@ class UserProfileRequest(BaseModel):
     Complete user profile with ALL signup fields.
     Every field matters for accurate taste profiling!
     """
-    user_id: str
+    user_id: str = ""  # ignored — the session identity is used
     # Basic Info
     name: str = ""
     age: int = 0
+    # Date of birth (ISO "YYYY-MM-DD") — when present the server derives
+    # `age` from it and ignores the client-supplied value. PRIVATE.
+    dob: Optional[str] = None
+    dobDay: Optional[str] = None
+    dobMonth: Optional[str] = None
+    dobYear: Optional[str] = None
     gender: str = ""
-    location: str = ""
+    # Self-described identity when gender is Non-binary / Other. PRIVATE
+    # (not part of the public profile whitelist).
+    genderIdentity: Optional[str] = None
+    location: str = ""  # city-level label — the only location field ever served to others
+    # Full address + GPS fix from the location picker. PRIVATE: persisted for
+    # distance filtering, never returned to other users.
+    locationFull: Optional[str] = None
+    coordinates: Optional[Dict[str, float]] = None
     # Dating Preferences
     partnerPreference: str = ""
     relationshipIntent: List[str] = []
@@ -376,7 +439,7 @@ class UserProfileRequest(BaseModel):
 
 
 class SwipeRequest(BaseModel):
-    user_id: str
+    user_id: str = ""  # ignored — the session identity is used
     movie_id: int
     direction: str  # 'right' or 'left'
     rating: Optional[int] = None  # 1-5 stars (for right swipes)
@@ -385,21 +448,25 @@ class SwipeRequest(BaseModel):
 
 
 class RecommendationRequest(BaseModel):
-    user_id: str
+    user_id: str = ""  # ignored — the session identity is used
     page: int = 1
     limit: int = 20
 
 
-class FiltersRequest(BaseModel):
-    """User matching filters and preferences"""
-    user_id: str
-    session_id: Optional[str] = None
+class UserFiltersRequest(BaseModel):
+    """User matching filters and preferences.
+
+    Mirrors `buildFiltersPayload()` in the mobile client. `user_id` is
+    overridden server-side with the session identity."""
+    user_id: str = ""
     # Filter values
-    distance_radius: Optional[int] = None
+    distance_radius: Optional[int] = None  # km; None = no cap
     age_min: Optional[int] = None
     age_max: Optional[int] = None
-    height_min: Optional[str] = None
+    height_min: Optional[str] = None       # display label, e.g. 5'4"
     height_max: Optional[str] = None
+    height_min_cm: Optional[int] = None
+    height_max_cm: Optional[int] = None
     languages: Optional[List[str]] = None
     genres: Optional[List[str]] = None
     ott_theatre: Optional[str] = None
@@ -417,6 +484,8 @@ class FiltersRequest(BaseModel):
     marital_status: Optional[str] = None
     food_preference: Optional[str] = None
     intent: Optional[str] = None
+    # Full multi-select lists per section (the singles above are `selected[0]`)
+    selected_lists: Optional[Dict[str, List[str]]] = None
     # Toggle settings
     exclusive_toggles: Optional[Dict[str, bool]] = None
     expand_if_run_out_toggles: Optional[Dict[str, bool]] = None
@@ -445,11 +514,10 @@ async def root():
 # request.state.user_id)` for the highest-risk endpoints that take user_id
 # in the body or path.
 
+# NOTE: /api/tmdb/* and /api/places/* proxy paid third-party APIs and
+# therefore REQUIRE a session (they used to be public).
 _PUBLIC_PREFIXES = (
     "/api/auth/",
-    "/api/tmdb/",
-    "/api/places/",
-    "/api/prototype/",
 )
 _PUBLIC_EXACT = {
     "/api/",
@@ -481,7 +549,6 @@ async def auth_gate(request: Request, call_next):
             admin_info = await get_current_admin(request)
             request.state.admin = admin_info
         except HTTPException as exc:
-            from fastapi.responses import JSONResponse
             return JSONResponse(
                 status_code=exc.status_code,
                 content={"detail": exc.detail},
@@ -494,7 +561,6 @@ async def auth_gate(request: Request, call_next):
         uid = await get_current_user_id(request)
         request.state.user_id = uid
     except HTTPException as exc:
-        from fastapi.responses import JSONResponse
         return JSONResponse(
             status_code=exc.status_code,
             content={"detail": exc.detail},
@@ -503,431 +569,116 @@ async def auth_gate(request: Request, call_next):
     return await call_next(request)
 
 
-# ============ PROTOTYPE V1 - Static HTML prototype for investors/colleagues ============
-PROTOTYPE_V1_PATH = "/app/Film_Companion_Prototype_V1.html"
+@app.exception_handler(ChatAccessDenied)
+async def chat_access_denied_handler(request: Request, exc: ChatAccessDenied):
+    """chat_service raises ChatAccessDenied when the caller is not a participant
+    of the conversation they are touching. Answer 404 (not 403) so we never
+    confirm that a conversation id exists."""
+    return JSONResponse(status_code=404, content={"detail": "Not found"})
 
 
-@api_router.get("/prototype/v1")
-async def serve_prototype_v1():
-    """Serve the filmydating V1 prototype HTML inline (opens in browser)."""
-    if not os.path.exists(PROTOTYPE_V1_PATH):
-        raise HTTPException(status_code=404, detail="Prototype not found")
-    return FileResponse(PROTOTYPE_V1_PATH, media_type="text/html")
+_PUBLIC_PROFILE_FIELDS = (
+    "user_id", "name", "age", "gender", "location", "bio",
+    "genres", "topMovies", "filmLanguages", "languagesSpoken",
+    "movieFrequency", "ottTheatre", "relationshipIntent", "partnerPreference",
+    "height", "religion", "zodiac", "smoking", "drinking", "exercise",
+    "pets", "familyPlanning", "siblings", "education", "travel",
+    "workProfile", "maritalStatus", "foodPreference",
+    "profile_picture", "pictures", "avatar", "avatarId",
+    "archetype", "personality_summary", "primary_love_language",
+    "movieBuddyMode", "movieDateMode", "is_mock",
+)
 
 
-@api_router.get("/prototype/v1/download")
-async def download_prototype_v1():
-    """Force-download the filmydating V1 prototype HTML."""
-    if not os.path.exists(PROTOTYPE_V1_PATH):
-        raise HTTPException(status_code=404, detail="Prototype not found")
-    return FileResponse(
-        PROTOTYPE_V1_PATH,
-        media_type="text/html",
-        filename="Film_Companion_Prototype_V1.html",
-    )
+def _public_profile_view(profile: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Project a stored profile onto the PUBLIC whitelist for viewing by
+    OTHER logged-in users. This is the ONE place that decides what another
+    user may see (used by /user/profile/{id}, /matches/profile/{id},
+    /user/pictures/{id}, /tina/360/profile/{id} and the chat AI helpers).
+
+    • Never includes email/phone/session/dob/coordinates/locationFull/
+      visibilityToggles or any internal flag — only _PUBLIC_PROFILE_FIELDS.
+    • Honours the owner's `visibilityToggles`: any field whose toggle is
+      explicitly `false` is dropped.
+    • `location` is the city-level label (the only location field stored at
+      that granularity); the precise address/GPS fix is never projected.
+    """
+    if not profile:
+        return {}
+    toggles = profile.get("visibilityToggles") or {}
+    if not isinstance(toggles, dict):
+        toggles = {}
+    view: Dict[str, Any] = {}
+    for key in _PUBLIC_PROFILE_FIELDS:
+        if key not in profile:
+            continue
+        if toggles.get(key) is False:
+            continue
+        view[key] = profile[key]
+    return view
 
 
-@api_router.post("/auth/session")
-async def exchange_session(req: SessionRequest, response: Response):
-    """Exchange Emergent Auth session_id for user data"""
-    async with httpx.AsyncClient() as http_client:
-        resp = await http_client.get(
-            EMERGENT_AUTH_URL,
-            headers={"X-Session-ID": req.session_id}
-        )
+async def _profile_for_viewer(user_id: str, viewer_id: str) -> Optional[Dict[str, Any]]:
+    """Profile doc for `user_id` as `viewer_id` may see it: the full stored doc
+    for the owner, the public whitelist for anyone else (mock users included).
+    None when no such profile exists."""
+    mock_user = get_mock_user_by_id(user_id)
+    if mock_user:
+        return _public_profile_view(mock_user)
+    doc = await db.user_profiles.find_one({"user_id": user_id}, {"_id": 0})
+    if doc is None:
+        return None
+    return doc if user_id == viewer_id else _public_profile_view(doc)
+
+
+# ============================================================================
+# AUTH (/api/auth/*) lives in auth_routes.py — Google Sign-In, phone OTP,
+# /auth/me and /auth/logout. It is mounted onto api_router near the bottom of
+# this file and wired to Mongo in startup_event via configure_auth(db).
+# ============================================================================
+
+
+async def _tmdb_json(resp: httpx.Response, what: str) -> Dict[str, Any]:
+    """Validate an upstream TMDB response before touching `.json()`."""
     if resp.status_code != 200:
-        raise HTTPException(status_code=401, detail="Invalid session")
-    user_data = resp.json()
-    session_token = user_data.get("session_token", f"session_{uuid.uuid4().hex}")
-    user_id = f"user_{uuid.uuid4().hex[:12]}"
-    existing = await db.users.find_one({"email": user_data["email"]}, {"_id": 0})
-    if existing:
-        user_id = existing["user_id"]
-    else:
-        await db.users.insert_one({
-            "user_id": user_id,
-            "email": user_data["email"],
-            "name": user_data["name"],
-            "picture": user_data.get("picture", ""),
-            "created_at": datetime.now(timezone.utc).isoformat()
-        })
-    await db.user_sessions.insert_one({
-        "user_id": user_id,
-        "session_token": session_token,
-        "expires_at": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
-        "created_at": datetime.now(timezone.utc).isoformat()
-    })
-    response.set_cookie(
-        key="session_token", value=session_token, path="/",
-        secure=True, samesite="none", httponly=True, max_age=604800
-    )
-    return {
-        "user_id": user_id, "email": user_data["email"],
-        "name": user_data["name"], "picture": user_data.get("picture", ""),
-        "session_token": session_token
-    }
-
-
-@api_router.post("/auth/mock-login")
-async def mock_login(req: MockLoginRequest):
-    """Mock login for email/phone auth"""
-    user_id = f"user_{uuid.uuid4().hex[:12]}"
-    session_token = f"session_{uuid.uuid4().hex}"
-    existing = await db.users.find_one({"email": req.email}, {"_id": 0})
-    if existing:
-        user_id = existing["user_id"]
-    else:
-        await db.users.insert_one({
-            "user_id": user_id, "email": req.email, "name": req.name,
-            "picture": "", "created_at": datetime.now(timezone.utc).isoformat()
-        })
-    await db.user_sessions.insert_one({
-        "user_id": user_id, "session_token": session_token,
-        "expires_at": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
-        "created_at": datetime.now(timezone.utc).isoformat()
-    })
-    return {"user_id": user_id, "email": req.email, "name": req.name, "session_token": session_token}
-
-
-def generate_otp() -> str:
-    """Generate a 6-digit OTP"""
-    return str(random.randint(100000, 999999))
-
-
-def send_mock_welcome_email(email: str, name: str):
-    """
-    Mock welcome email - prints to console (from noreply@filmcompanion.com)
-    In production, this would use SendGrid/AWS SES/etc.
-    """
-    logger.info(f"""
-    ================================================================================
-    📧 WELCOME EMAIL SENT (MOCK)
-    ================================================================================
-    From: noreply@filmcompanion.com
-    To: {email}
-    Subject: Welcome to filmydating! 🎬
-    
-    Hi {name}!
-    
-    Welcome to filmydating - where movie lovers find their film soulmates!
-    
-    Start swiping on movies you love (or skip the ones you don't) and we'll help 
-    you connect with people who share your taste in cinema.
-    
-    Happy watching!
-    
-    - The filmydating Team
-    ================================================================================
-    """)
-
-
-@api_router.post("/auth/send-email-otp")
-async def send_email_otp(req: SendEmailOTPRequest, request: Request):
-    """
-    Send OTP to email address (mocked).
-    Returns is_new_user to indicate if name is needed during verification.
-
-    SECURITY:
-      • Rate-limited per identifier (OTP_LIMITER, 5/10min).
-      • The actual OTP is NEVER returned in the response body or logged
-        to stdout unless INSECURE_DEV_AUTH=true (QA-only override).
-    """
-    email = req.email.lower().strip()
-
-    # Rate-limit by identifier so a single victim email can't be brute-forced
-    # via repeated send-otp. Also rate-limit by IP to slow per-attacker abuse.
-    OTP_LIMITER.check_or_raise(f"otp_email:{email}")
-    OTP_LIMITER.check_or_raise(f"otp_ip:{client_ip(request)}")
-
-    # Check if this email is already registered with another account (1:1 mapping)
-    existing = await db.users.find_one({"email": email})
-    is_new_user = existing is None
-    
-    # Generate 6-digit OTP
-    otp = generate_otp()
-    
-    # Store OTP with 5 min expiry
-    otp_store[f"email:{email}"] = {
-        "otp": otp,
-        "expires": datetime.now(timezone.utc) + timedelta(minutes=5),
-        "is_new_user": is_new_user,
-        "existing_user_id": existing.get("user_id") if existing else None,
-        "existing_name": existing.get("name") if existing else None,
-    }
-
-    # PROD: send actual email here (SendGrid / Resend / SES, TBD).
-    # DEV ONLY: when INSECURE_DEV_AUTH=true we log the OTP for local QA so
-    # automation tests can read it from stdout. Never logged in prod.
-    if INSECURE_DEV_AUTH:
-        logger.info(f"[DEV] Email OTP for {email}: {otp}")
-    else:
-        logger.info(f"Email OTP issued (length={len(otp)}) to address ending ...{email[-6:]}")
-
-    response: Dict[str, Any] = {
-        "success": True,
-        "message": "OTP sent to your email",
-        "is_new_user": is_new_user,
-    }
-    if INSECURE_DEV_AUTH:
-        # Local QA convenience only — gated by env flag.
-        response["otp"] = otp
-        response["dev_mode"] = True
-    return response
-
-
-@api_router.post("/auth/send-phone-otp")
-async def send_phone_otp(req: SendPhoneOTPRequest, request: Request):
-    """
-    Send OTP to phone number (mocked).
-    Returns is_new_user to indicate if name is needed during verification.
-
-    SECURITY: OTP never leaks to response/logs unless INSECURE_DEV_AUTH=true.
-    """
-    phone = req.phone.strip()
-
-    OTP_LIMITER.check_or_raise(f"otp_phone:{phone}")
-    OTP_LIMITER.check_or_raise(f"otp_ip:{client_ip(request)}")
-
-    # Check if this phone is already registered with another account (1:1 mapping)
-    existing = await db.users.find_one({"phone": phone})
-    is_new_user = existing is None
-    
-    # Generate 6-digit OTP
-    otp = generate_otp()
-    
-    # Store OTP with 5 min expiry
-    otp_store[f"phone:{phone}"] = {
-        "otp": otp,
-        "expires": datetime.now(timezone.utc) + timedelta(minutes=5),
-        "is_new_user": is_new_user,
-        "existing_user_id": existing.get("user_id") if existing else None,
-        "existing_name": existing.get("name") if existing else None,
-    }
-
-    if INSECURE_DEV_AUTH:
-        logger.info(f"[DEV] Phone OTP for {phone}: {otp}")
-    else:
-        # Mask all but last 4 digits
-        masked = ("*" * max(0, len(phone) - 4)) + phone[-4:] if phone else "<empty>"
-        logger.info(f"Phone OTP issued (length={len(otp)}) to {masked}")
-
-    response: Dict[str, Any] = {
-        "success": True,
-        "message": "OTP sent to your phone",
-        "is_new_user": is_new_user,
-    }
-    if INSECURE_DEV_AUTH:
-        response["otp"] = otp
-        response["dev_mode"] = True
-    return response
-
-
-@api_router.post("/auth/verify-otp")
-async def verify_otp(req: VerifyOTPRequest):
-    """
-    Verify OTP and login/signup user.
-    For new users: creates account with provided name.
-    For existing users: logs in and returns existing data.
-    Enforces strict 1:1 mapping of email/phone to user_id.
-    """
-    identifier = req.identifier.lower().strip() if req.type == "email" else req.identifier.strip()
-    otp_key = f"{req.type}:{identifier}"
-    
-    # Check if OTP exists
-    stored = otp_store.get(otp_key)
-
-    # SECURITY: The universal "123456" bypass is QA-only — gated behind
-    # INSECURE_DEV_AUTH=true. In production deploys this MUST stay False or
-    # any account can be taken over with the magic six digits.
-    is_test_otp = INSECURE_DEV_AUTH and req.otp == "123456"
-    
-    if not stored and not is_test_otp:
-        raise HTTPException(status_code=400, detail="OTP expired or not found. Please request a new one.")
-    
-    # If using test OTP, create a mock stored value
-    if is_test_otp and not stored:
-        # Check if user exists
-        existing_user = await db.users.find_one({
-            "$or": [{"email": identifier}, {"phone": identifier}]
-        })
-        stored = {
-            "otp": "123456",
-            "expires": datetime.now(timezone.utc) + timedelta(hours=1),
-            "is_new_user": existing_user is None
-        }
-    
-    # Check expiry (skip for test OTP)
-    if not is_test_otp and datetime.now(timezone.utc) > stored["expires"]:
-        del otp_store[otp_key]
-        raise HTTPException(status_code=400, detail="OTP expired. Please request a new one.")
-    
-    # Verify OTP
-    if stored["otp"] != req.otp and not is_test_otp:
-        raise HTTPException(status_code=400, detail="Invalid OTP. Please check and try again.")
-    
-    # OTP is valid - clean up (only if real OTP was stored)
-    if otp_key in otp_store:
-        del otp_store[otp_key]
-    
-    is_new_user = stored["is_new_user"]
-    
-    if is_new_user:
-        # Create new user
-        user_id = f"user_{uuid.uuid4().hex[:12]}"
-        session_token = f"session_{uuid.uuid4().hex}"
-        
-        # Name is optional - can be set later during onboarding
-        user_name = req.name.strip() if req.name else ""
-        
-        user_data = {
-            "user_id": user_id,
-            "name": user_name,
-            "picture": "",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-        
-        # Store email or phone based on login type (strict 1:1 mapping)
-        if req.type == "email":
-            user_data["email"] = identifier
-        else:
-            user_data["phone"] = identifier
-        
-        await db.users.insert_one(user_data)
-        
-        # Send welcome email
-        send_mock_welcome_email(
-            identifier if req.type == "email" else f"{identifier}@phone.filmcompanion.com",
-            user_name if user_name else "there"
-        )
-        
-        logger.info(f"New user created: {user_id} via {req.type}: {identifier}")
-        
-        # Broadcast new user to admin dashboard
-        try:
-            await broadcast_new_user(user_data)
-        except Exception as e:
-            logger.error(f"Failed to broadcast new user: {e}")
-        
-    else:
-        # Existing user login
-        user_id = stored["existing_user_id"]
-        session_token = f"session_{uuid.uuid4().hex}"
-        
-        logger.info(f"Existing user login: {user_id} via {req.type}: {identifier}")
-    
-    # Create session
-    await db.user_sessions.insert_one({
-        "user_id": user_id,
-        "session_token": session_token,
-        "expires_at": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    })
-    
-    # Get user data
-    user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
-    
-    # Log to Supabase for analytics
+        logger.warning(f"TMDB {what} returned HTTP {resp.status_code}")
+        raise HTTPException(status_code=502, detail="Movie database unavailable")
     try:
-        await supabase.log_user_login(
-            user_id=user_id,
-            email=user.get("email"),
-            phone=user.get("phone"),
-            login_method=req.type,
-            login_success_state=True,
-            session_id=session_token
-        )
-        logger.info(f"Logged login to Supabase for user {user_id}")
-    except Exception as e:
-        logger.error(f"Failed to log to Supabase: {e}")
-    
-    return {
-        "user_id": user_id,
-        "email": user.get("email", ""),
-        "phone": user.get("phone", ""),
-        "name": user.get("name", ""),
-        "picture": user.get("picture", ""),
-        "session_token": session_token,
-        "is_new_user": is_new_user,
-    }
+        data = resp.json()
+    except ValueError:
+        logger.warning(f"TMDB {what} returned a non-JSON body")
+        raise HTTPException(status_code=502, detail="Movie database unavailable")
+    return data if isinstance(data, dict) else {}
 
 
-@api_router.post("/auth/forgot-password")
-async def forgot_password(req: ForgotPasswordRequest):
-    """
-    Send password reset link (mocked).
-    For OTP-based auth, this essentially sends a new OTP for re-verification.
-    """
-    email = req.email.lower().strip()
-    
-    # Check if user exists
-    existing = await db.users.find_one({"email": email})
-    
-    # Always return success to prevent email enumeration
-    logger.info(f"""
-    ================================================================================
-    📧 PASSWORD RESET EMAIL SENT (MOCK)
-    ================================================================================
-    From: noreply@filmcompanion.com
-    To: {email}
-    Subject: Reset your filmydating Password
-    
-    Hi there!
-    
-    {"We received a request to reset your password." if existing else "If you have an account with us, you'll receive further instructions."}
-    
-    {"Click here to reset your password: https://filmcompanion.com/reset?token=mock_token_123" if existing else ""}
-    
-    If you didn't request this, please ignore this email.
-    
-    - The filmydating Team
-    ================================================================================
-    """)
-    
-    return {
-        "success": True,
-        "message": "If an account with that email exists, we've sent a reset link.",
-    }
+def _parse_int_csv(raw: str, field: str) -> List[int]:
+    """Parse a comma-separated list of ints from a query param → 400 on junk."""
+    try:
+        return [int(x) for x in raw.split(',') if x.strip()]
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"{field} must be a comma-separated list of integers")
 
 
-@api_router.get("/auth/me")
-async def get_me(request: Request):
-    token = request.cookies.get("session_token")
-    if not token:
-        auth = request.headers.get("authorization", "")
-        if auth.startswith("Bearer "):
-            token = auth[7:]
-    if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    session = await db.user_sessions.find_one({"session_token": token}, {"_id": 0})
-    if not session:
-        raise HTTPException(status_code=401, detail="Invalid session")
-    expires_str = session["expires_at"]
-    expires_at = datetime.fromisoformat(expires_str) if isinstance(expires_str, str) else expires_str
-    if expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=timezone.utc)
-    if expires_at < datetime.now(timezone.utc):
-        raise HTTPException(status_code=401, detail="Session expired")
-    user = await db.users.find_one({"user_id": session["user_id"]}, {"_id": 0})
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    return user
+def _check_int_range(value: int, field: str, lo: int, hi: int) -> int:
+    """Validate an int query/path param → 400 when outside [lo, hi]."""
+    if value < lo or value > hi:
+        raise HTTPException(status_code=400, detail=f"{field} must be between {lo} and {hi}")
+    return value
 
 
 @api_router.get("/tmdb/search")
-async def search_movies(query: str):
+async def search_movies(query: str, request: Request):
     """Search movies via TMDB API - excludes unreleased movies"""
-    from datetime import datetime
+    EXTERNAL_API_LIMITER.check_or_raise(f"ext:{_actor_key(request)}")
     today = datetime.now().strftime("%Y-%m-%d")
-    
-    async with httpx.AsyncClient() as http_client:
+
+    async with httpx.AsyncClient(timeout=10.0) as http_client:
         resp = await http_client.get(
             "https://api.themoviedb.org/3/search/movie",
             params={"query": query, "language": "en-US", "page": 1},
             headers={"Authorization": f"Bearer {TMDB_ACCESS_TOKEN}"}
         )
-    if resp.status_code != 200:
-        raise HTTPException(status_code=resp.status_code, detail="TMDB error")
-    data = resp.json()
+    data = await _tmdb_json(resp, "search")
     results = []
     for m in data.get("results", [])[:30]:  # Get more to filter
         release_date = m.get("release_date", "")
@@ -946,29 +697,55 @@ async def search_movies(query: str):
 
 
 @api_router.get("/places/autocomplete")
-async def places_autocomplete(input: str):
+async def places_autocomplete(input: str, request: Request):
     """Google Places autocomplete for city search"""
-    async with httpx.AsyncClient() as http_client:
+    EXTERNAL_API_LIMITER.check_or_raise(f"ext:{_actor_key(request)}")
+    if not input or not input.strip():
+        raise HTTPException(status_code=400, detail="input is required")
+    if not GOOGLE_MAPS_API_KEY:
+        raise HTTPException(status_code=503, detail="Location search is not configured")
+    async with httpx.AsyncClient(timeout=10.0) as http_client:
         resp = await http_client.get(
             "https://maps.googleapis.com/maps/api/place/autocomplete/json",
-            params={"input": input, "key": GOOGLE_MAPS_API_KEY, "types": "(cities)"}
+            params={"input": input.strip()[:200], "key": GOOGLE_MAPS_API_KEY, "types": "(cities)"}
         )
-    data = resp.json()
+    if resp.status_code != 200:
+        logger.warning(f"Places autocomplete returned HTTP {resp.status_code}")
+        raise HTTPException(status_code=502, detail="Location service unavailable")
+    try:
+        data = resp.json()
+    except ValueError:
+        raise HTTPException(status_code=502, detail="Location service unavailable")
+    if data.get("status") not in (None, "OK", "ZERO_RESULTS"):
+        logger.warning(f"Places autocomplete status={data.get('status')}")
+        raise HTTPException(status_code=502, detail="Location service unavailable")
     predictions = []
-    for p in data.get("predictions", []):
-        predictions.append({"description": p["description"], "place_id": p["place_id"]})
+    for p in data.get("predictions", []) or []:
+        if p.get("description") and p.get("place_id"):
+            predictions.append({"description": p["description"], "place_id": p["place_id"]})
     return {"predictions": predictions}
 
 
 @api_router.get("/places/geocode")
-async def reverse_geocode(lat: float, lng: float):
+async def reverse_geocode(lat: float, lng: float, request: Request):
     """Reverse geocode coordinates to city name"""
-    async with httpx.AsyncClient() as http_client:
+    EXTERNAL_API_LIMITER.check_or_raise(f"ext:{_actor_key(request)}")
+    if not (-90.0 <= lat <= 90.0 and -180.0 <= lng <= 180.0):
+        raise HTTPException(status_code=400, detail="Invalid coordinates")
+    if not GOOGLE_MAPS_API_KEY:
+        raise HTTPException(status_code=503, detail="Location search is not configured")
+    async with httpx.AsyncClient(timeout=10.0) as http_client:
         resp = await http_client.get(
             "https://maps.googleapis.com/maps/api/geocode/json",
             params={"latlng": f"{lat},{lng}", "key": GOOGLE_MAPS_API_KEY}
         )
-    data = resp.json()
+    if resp.status_code != 200:
+        logger.warning(f"Geocode returned HTTP {resp.status_code}")
+        raise HTTPException(status_code=502, detail="Location service unavailable")
+    try:
+        data = resp.json()
+    except ValueError:
+        raise HTTPException(status_code=502, detail="Location service unavailable")
     if data.get("results"):
         for result in data["results"]:
             for comp in result.get("address_components", []):
@@ -983,24 +760,18 @@ TMDB_GENRE_IDS = {
     'Horror': 27, 'Sci-Fi': 878, 'Drama': 18, 'Documentary': 99,
 }
 
-TMDB_LANG_CODES = {
-    'Hindi': 'hi', 'English': 'en', 'Telugu': 'te', 'Tamil': 'ta',
-    'Malayalam': 'ml', 'Kannada': 'kn', 'Korean': 'ko', 'Bengali': 'bn',
-    'Marathi': 'mr', 'Gujarati': 'gu',
-}
-
-
 @api_router.get("/tmdb/trending")
-async def get_trending_movies(page: int = 1):
+async def get_trending_movies(request: Request, page: int = 1):
     """Get trending movies for the Library screen - excludes unreleased movies"""
+    EXTERNAL_API_LIMITER.check_or_raise(f"ext:{_actor_key(request)}")
+    page = max(1, min(page, 100))
     try:
-        from datetime import datetime
         today = datetime.now().strftime("%Y-%m-%d")
-        
+
         async with httpx.AsyncClient(timeout=10.0) as http_client:
             resp = await http_client.get(
                 "https://api.themoviedb.org/3/trending/movie/week",
-                params={"page": min(page, 100)},
+                params={"page": page},
                 headers={"Authorization": f"Bearer {TMDB_ACCESS_TOKEN}"}
             )
             if resp.status_code == 200:
@@ -1016,14 +787,16 @@ async def get_trending_movies(page: int = 1):
                     data["results"] = released_movies
                     data["total_results"] = len(released_movies)
                 return data
+            logger.warning(f"TMDB trending returned HTTP {resp.status_code}")
             return {"results": [], "page": page, "total_results": 0}
-    except Exception as e:
-        logger.error(f"Error fetching trending movies: {e}")
-        return {"results": [], "page": page, "total_results": 0, "error": str(e)}
+    except Exception:
+        logger.exception("Error fetching trending movies")
+        return {"results": [], "page": page, "total_results": 0, "error": "Movie database unavailable"}
 
 
 @api_router.get("/tmdb/feed")
 async def get_movie_feed(
+    request: Request,
     genres: str = "",
     languages: str = "",
     page: int = 1,
@@ -1032,9 +805,11 @@ async def get_movie_feed(
     liked_genres: str = "",
 ):
     """Get movie feed based on user preferences with adaptive learning"""
-    exclude_ids = set(int(x) for x in exclude.split(',') if x.strip())
+    EXTERNAL_API_LIMITER.check_or_raise(f"ext:{_actor_key(request)}")
+    page = max(1, min(page, 500))
+    exclude_ids = set(_parse_int_csv(exclude, "exclude"))
     genre_names = [g.strip() for g in genres.split(',') if g.strip()]
-    liked_genre_ids = [int(x) for x in liked_genres.split(',') if x.strip()]
+    liked_genre_ids = _parse_int_csv(liked_genres, "liked_genres")
 
     # Build genre list: prioritize liked genres
     genre_id_list = []
@@ -1042,6 +817,18 @@ async def get_movie_feed(
         genre_id_list = liked_genre_ids[:3]
     elif genre_names:
         genre_id_list = [TMDB_GENRE_IDS[g] for g in genre_names if g in TMDB_GENRE_IDS]
+
+    def _results(resp: httpx.Response) -> List[Dict[str, Any]]:
+        # Only trust a 200 with a JSON object body; anything else contributes nothing.
+        if resp.status_code != 200:
+            logger.warning(f"TMDB feed sub-request returned HTTP {resp.status_code}")
+            return []
+        try:
+            body = resp.json()
+        except ValueError:
+            return []
+        items = body.get("results", []) if isinstance(body, dict) else []
+        return [m for m in items if isinstance(m, dict) and m.get("id") is not None]
 
     all_movies = []
     async with httpx.AsyncClient(timeout=10.0) as http_client:
@@ -1054,8 +841,7 @@ async def get_movie_feed(
                         "vote_count.gte": 100, "page": page},
                 headers={"Authorization": f"Bearer {TMDB_ACCESS_TOKEN}"}
             )
-            if resp.status_code == 200:
-                all_movies.extend(resp.json().get("results", []))
+            all_movies.extend(_results(resp))
 
         # 2. Recommendations from seed movie
         if seed_movie_id > 0:
@@ -1064,8 +850,7 @@ async def get_movie_feed(
                 params={"page": 1},
                 headers={"Authorization": f"Bearer {TMDB_ACCESS_TOKEN}"}
             )
-            if resp.status_code == 200:
-                all_movies.extend(resp.json().get("results", []))
+            all_movies.extend(_results(resp))
 
         # 3. Popular fallback
         if len(all_movies) < 10:
@@ -1074,8 +859,7 @@ async def get_movie_feed(
                 params={"page": page},
                 headers={"Authorization": f"Bearer {TMDB_ACCESS_TOKEN}"}
             )
-            if resp.status_code == 200:
-                all_movies.extend(resp.json().get("results", []))
+            all_movies.extend(_results(resp))
 
         # 4. Top rated fallback
         if len(all_movies) < 15:
@@ -1084,8 +868,7 @@ async def get_movie_feed(
                 params={"page": page},
                 headers={"Authorization": f"Bearer {TMDB_ACCESS_TOKEN}"}
             )
-            if resp.status_code == 200:
-                all_movies.extend(resp.json().get("results", []))
+            all_movies.extend(_results(resp))
 
     # Deduplicate, exclude swiped, require poster
     seen = set()
@@ -1095,7 +878,7 @@ async def get_movie_feed(
         if mid not in seen and mid not in exclude_ids and m.get("poster_path"):
             seen.add(mid)
             results.append({
-                "id": mid, "title": m["title"],
+                "id": mid, "title": m.get("title", ""),
                 "poster_path": m.get("poster_path", ""),
                 "backdrop_path": m.get("backdrop_path", ""),
                 "release_date": m.get("release_date", ""),
@@ -1107,24 +890,25 @@ async def get_movie_feed(
 
 
 @api_router.get("/tmdb/movie/{movie_id}")
-async def get_movie_details(movie_id: int):
+async def get_movie_details(movie_id: int, request: Request):
     """Get detailed movie info including cast and crew"""
+    EXTERNAL_API_LIMITER.check_or_raise(f"ext:{_actor_key(request)}")
     async with httpx.AsyncClient(timeout=10.0) as http_client:
         resp = await http_client.get(
             f"https://api.themoviedb.org/3/movie/{movie_id}",
             params={"append_to_response": "credits"},
             headers={"Authorization": f"Bearer {TMDB_ACCESS_TOKEN}"}
         )
-    if resp.status_code != 200:
-        raise HTTPException(status_code=resp.status_code, detail="TMDB error")
-    movie = resp.json()
-    credits = movie.get("credits", {})
-    cast = [{"name": c["name"], "character": c.get("character", "")}
+    if resp.status_code == 404:
+        raise HTTPException(status_code=404, detail="Movie not found")
+    movie = await _tmdb_json(resp, "movie details")
+    credits = movie.get("credits", {}) or {}
+    cast = [{"name": c.get("name", ""), "character": c.get("character", "")}
             for c in credits.get("cast", [])[:10]]
-    directors = [c["name"] for c in credits.get("crew", []) if c.get("job") == "Director"]
-    genres = [g["name"] for g in movie.get("genres", [])]
+    directors = [c.get("name", "") for c in credits.get("crew", []) if c.get("job") == "Director"]
+    genres = [g.get("name", "") for g in movie.get("genres", [])]
     return {
-        "id": movie["id"], "title": movie["title"],
+        "id": movie.get("id", movie_id), "title": movie.get("title", ""),
         "poster_path": movie.get("poster_path", ""),
         "overview": movie.get("overview", ""),
         "release_date": movie.get("release_date", ""),
@@ -1139,21 +923,69 @@ async def get_movie_details(movie_id: int):
 # Recommendation Engine Endpoints
 # =============================================
 
+def _parse_dob(req: UserProfileRequest) -> Optional[date]:
+    """Resolve a date of birth from `dob` (ISO) or the dobDay/Month/Year
+    triplet. Returns None when nothing was sent; raises 400 on garbage."""
+    raw = (req.dob or "").strip()
+    if not raw and req.dobYear and req.dobMonth and req.dobDay:
+        raw = f"{str(req.dobYear).strip()}-{str(req.dobMonth).strip().zfill(2)}-{str(req.dobDay).strip().zfill(2)}"
+    if not raw:
+        return None
+    try:
+        parsed = date.fromisoformat(raw[:10])
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date of birth")
+    if parsed > date.today():
+        raise HTTPException(status_code=400, detail="Invalid date of birth")
+    return parsed
+
+
+def _age_from_dob(dob: date) -> int:
+    today = date.today()
+    return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+
+
 @api_router.post("/user/profile")
-async def save_user_profile(req: UserProfileRequest):
+async def save_user_profile(req: UserProfileRequest, request: Request):
     """
     Save user profile and initialize comprehensive taste vector.
     Called after user completes onboarding.
-    
+
     ENHANCED: Now fetches FULL TMDB details for Top 5 movies to extract:
     - All cast members (actors)
     - All crew (directors, writers, composers, cinematographers)
     - Keywords/tags
     - Production companies and countries
     - Runtime, budget, popularity metrics
-    
+
     This creates a highly accurate initial taste profile.
+
+    AUTH: the body `user_id` is ignored — the session identity is used.
     """
+    req.user_id = request.state.user_id
+
+    # ---- Server-side validation (never trust the client) ----
+    dob = _parse_dob(req)
+    if dob is not None:
+        req.age = _age_from_dob(dob)   # dob wins over the client-supplied age
+    if req.age and req.age < 18:
+        raise HTTPException(status_code=400, detail="You must be 18 or older")
+    if req.age < 0 or req.age > 120:
+        raise HTTPException(status_code=400, detail="Invalid age")
+    req.name = (req.name or "").strip()[:80]
+    req.bio = (req.bio or "")[:1000]
+    if req.locationFull:
+        req.locationFull = req.locationFull.strip()[:300]
+    if req.coordinates is not None:
+        try:
+            lat = float(req.coordinates.get("lat"))
+            lng = float(req.coordinates.get("lng"))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Invalid coordinates")
+        if not (-90.0 <= lat <= 90.0 and -180.0 <= lng <= 180.0):
+            raise HTTPException(status_code=400, detail="Invalid coordinates")
+        req.coordinates = {"lat": lat, "lng": lng}
+
     # Convert topMovies to dict format
     top_movies_data = [m.dict() for m in req.topMovies]
     
@@ -1223,7 +1055,21 @@ async def save_user_profile(req: UserProfileRequest):
         # Metadata
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
-    
+    # PRIVATE fields — only written when sent so a partial save never wipes
+    # them; never projected to other users (see _public_profile_view).
+    if dob is not None:
+        profile_data["dob"] = dob.isoformat()
+    if req.locationFull:
+        profile_data["locationFull"] = req.locationFull
+    if req.coordinates is not None:
+        profile_data["coordinates"] = req.coordinates
+    if req.genderIdentity is not None:
+        profile_data["genderIdentity"] = req.genderIdentity.strip()[:60]
+    if isinstance(req.visibilityToggles, dict):
+        profile_data["visibilityToggles"] = {
+            str(k): bool(v) for k, v in req.visibilityToggles.items()
+        }
+
     # Save to MongoDB (upsert)
     await db.user_profiles.update_one(
         {"user_id": req.user_id},
@@ -1303,13 +1149,11 @@ async def save_user_profile(req: UserProfileRequest):
     except Exception as e:
         logger.error(f"Failed to save to Supabase: {e}")
 
-    # Invalidate global match cache so existing users see the new (or updated)
-    # face in their feed on the next /matches call. Without this, the cached
-    # mock-only list would persist for the entire CACHE_EXPIRY_HOURS window
-    # and the real user would never surface.
+    # Invalidate THIS user's match cache so their next /matches call reflects
+    # the updated profile. (The previous global all-users wipe made every
+    # profile save re-run AI scoring for the whole user base.)
     try:
-        from matchmaking_service import invalidate_all_match_caches
-        await invalidate_all_match_caches()
+        await invalidate_user_cache(req.user_id)
     except Exception as cache_err:
         logger.warning(f"[matchmaking] cache invalidation skipped: {cache_err}")
 
@@ -1336,13 +1180,48 @@ async def save_user_profile(req: UserProfileRequest):
 
 
 @api_router.post("/user/filters")
-async def save_user_filters(req: FiltersRequest):
+async def save_user_filters(req: UserFiltersRequest, request: Request):
     """
-    Save user matching filters and preferences to Supabase.
-    Also saves exclusive toggles and expand_if_run_out settings.
+    Save user matching filters and preferences.
+
+    Source of truth is the Mongo `user_filters` collection (one doc per user,
+    read by matchmaking_service). The Supabase analytics sync is best-effort.
+
+    AUTH: the body `user_id` is ignored — the session identity is used.
     """
+    req.user_id = request.state.user_id
+
+    # Light sanity checks on the numeric ranges
+    if req.age_min is not None and req.age_min < 18:
+        req.age_min = 18
+    if req.age_max is not None and req.age_max < 18:
+        req.age_max = 18
+    if req.age_min is not None and req.age_max is not None and req.age_min > req.age_max:
+        raise HTTPException(status_code=400, detail="age_min cannot exceed age_max")
+    if req.distance_radius is not None and req.distance_radius <= 0:
+        req.distance_radius = None  # 0 / negative == "no cap"
+
+    filters_doc = req.dict()
+    filters_doc["updated_at"] = datetime.now(timezone.utc).isoformat()
+
     try:
-        # Prepare preferences data
+        await db.user_filters.update_one(
+            {"user_id": req.user_id},
+            {"$set": filters_doc},
+            upsert=True,
+        )
+    except Exception:
+        logger.exception("Failed to persist user filters")
+        raise HTTPException(status_code=500, detail="Could not save filters")
+
+    # Filters changed → the cached match list is stale for this user only.
+    try:
+        await invalidate_user_cache(req.user_id)
+    except Exception as cache_err:
+        logger.warning(f"[matchmaking] cache invalidation skipped: {cache_err}")
+
+    # Best-effort analytics sync to Supabase (never fails the request)
+    try:
         preferences_data = {
             "distanceRadius": req.distance_radius,
             "ageRange": f"{req.age_min}-{req.age_max}" if req.age_min and req.age_max else None,
@@ -1365,53 +1244,56 @@ async def save_user_filters(req: FiltersRequest):
             "foodPreference": req.food_preference,
             "intentPreference": req.intent,
         }
-        
-        # Save to Supabase
-        await supabase.save_preferences_and_filters(req.user_id, preferences_data, req.session_id)
-        
-        # Save exclusive toggles if provided
+        await supabase.save_preferences_and_filters(req.user_id, preferences_data, None)
         if req.exclusive_toggles:
-            await supabase.save_exclusive_toggle(req.user_id, req.exclusive_toggles, req.session_id)
-        
-        # Save expand_if_run_out toggles if provided
+            await supabase.save_exclusive_toggle(req.user_id, req.exclusive_toggles, None)
         if req.expand_if_run_out_toggles:
-            await supabase.save_expand_if_run_out(req.user_id, req.expand_if_run_out_toggles, req.session_id)
-        
-        logger.info(f"Saved filters to Supabase for user {req.user_id}")
-        return {"success": True, "message": "Filters saved successfully"}
+            await supabase.save_expand_if_run_out(req.user_id, req.expand_if_run_out_toggles, None)
     except Exception as e:
-        logger.error(f"Failed to save filters to Supabase: {e}")
-        return {"success": False, "error": str(e)}
+        logger.warning(f"Supabase filters sync skipped for user {req.user_id}: {type(e).__name__}")
+
+    logger.info(f"Saved filters for user {req.user_id}")
+    return {"success": True, "message": "Filters saved successfully"}
 
 
 class ModeRequest(BaseModel):
-    user_id: str
+    user_id: str = ""  # ignored — the session identity is used
     mode: str  # 'buddy' or 'date'
 
 
 @api_router.post("/user/mode")
-async def save_user_mode(req: ModeRequest):
+async def save_user_mode(req: ModeRequest, request: Request):
     """Save user's selected mode to Supabase"""
+    req.user_id = request.state.user_id
+    if req.mode not in ("buddy", "date", "movie_buddy", "movie_date", "both"):
+        raise HTTPException(status_code=400, detail="Invalid mode")
     try:
         await supabase.save_mode_selected(req.user_id, req.mode)
         logger.info(f"Saved mode to Supabase for user {req.user_id}: {req.mode}")
         return {"success": True, "message": "Mode saved successfully"}
-    except Exception as e:
-        logger.error(f"Failed to save mode to Supabase: {e}")
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Failed to save mode to Supabase")
+        raise HTTPException(status_code=500, detail="Could not save mode")
 
 
 @api_router.post("/user/swipe")
-async def record_swipe(req: SwipeRequest):
+async def record_swipe(req: SwipeRequest, request: Request):
     """
     Record a swipe action and update user's taste vector.
     This is the core learning mechanism.
-    
+
     ENHANCED:
     - Tracks "didn't watch" movies separately to avoid recommending similar content
     - Extracts comprehensive signals from all TMDB data
     - Uses reasons to understand what user values in films
+
+    AUTH: the body `user_id` is ignored — the session identity is used.
     """
+    req.user_id = request.state.user_id
+    if req.direction not in ("left", "right"):
+        raise HTTPException(status_code=400, detail="direction must be 'left' or 'right'")
+    if req.rating is not None and not (1 <= req.rating <= 5):
+        raise HTTPException(status_code=400, detail="rating must be between 1 and 5")
     # Get movie details from TMDB for extracting features
     async with httpx.AsyncClient(timeout=10.0) as http_client:
         movie_details = await enrich_movie_with_full_details(req.movie_id, http_client)
@@ -1475,7 +1357,7 @@ async def record_swipe(req: SwipeRequest):
         
         # Add negative signals for unwatched content patterns (mild negative weight)
         for genre in movie_details.get("genres", []):
-            genre_key = f"unwatched_genre_{genre.lower().replace(' ', '_').replace('-', '_')}"
+            genre_key = "unwatched_" + genre_vector_key(genre)
             taste_vector.add_signal(genre_key, -0.15)  # Mild negative
         
         for keyword in movie_details.get("keywords", [])[:5]:
@@ -1506,25 +1388,27 @@ async def record_swipe(req: SwipeRequest):
         upsert=True
     )
     
-    # Broadcast swipe to admin dashboard (real-time update)
-    try:
-        # Get user name for display
-        user = await db.users.find_one({"user_id": req.user_id}, {"name": 1})
-        profile = await db.user_profiles.find_one({"user_id": req.user_id}, {"name": 1})
-        user_name = profile.get("name") if profile else (user.get("name") if user else req.user_id)
-        
-        await broadcast_new_swipe({
-            "user_id": req.user_id,
-            "user_name": user_name,
-            "movie_id": req.movie_id,
-            "movie_title": movie_details.get("title", ""),
-            "direction": req.direction,
-            "rating": req.rating,
-            "reason": req.reason,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        })
-    except Exception as e:
-        logger.error(f"Failed to broadcast swipe: {e}")
+    # Broadcast swipe to admin dashboard (real-time update) — skipped entirely
+    # (incl. the two name lookups) when no admin dashboard is connected.
+    if connected_admins:
+        try:
+            # Get user name for display
+            user = await db.users.find_one({"user_id": req.user_id}, {"name": 1})
+            profile = await db.user_profiles.find_one({"user_id": req.user_id}, {"name": 1})
+            user_name = profile.get("name") if profile else (user.get("name") if user else req.user_id)
+
+            await broadcast_new_swipe({
+                "user_id": req.user_id,
+                "user_name": user_name,
+                "movie_id": req.movie_id,
+                "movie_title": movie_details.get("title", ""),
+                "direction": req.direction,
+                "rating": req.rating,
+                "reason": req.reason,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+        except Exception as e:
+            logger.error(f"Failed to broadcast swipe: {e}")
     
     # Save swipe to Supabase for analytics
     try:
@@ -1545,7 +1429,7 @@ async def record_swipe(req: SwipeRequest):
     
     return {
         "success": True,
-        "message": f"Swipe recorded and taste vector updated",
+        "message": "Swipe recorded and taste vector updated",
         "total_swipes": taste_vector.total_swipes,
         "like_count": taste_vector.like_count,
         "dislike_count": taste_vector.dislike_count,
@@ -1554,7 +1438,7 @@ async def record_swipe(req: SwipeRequest):
 
 
 class LibraryAddRequest(BaseModel):
-    user_id: str
+    user_id: str = ""  # ignored — the session identity is used
     movie_id: int
     movie_title: str
     poster_path: Optional[str] = None
@@ -1566,8 +1450,12 @@ class LibraryAddRequest(BaseModel):
 
 
 @api_router.post("/user/library/add")
-async def add_to_library(req: LibraryAddRequest):
-    """Add a movie to the user's personal library with rating"""
+async def add_to_library(req: LibraryAddRequest, request: Request):
+    """Add a movie to the user's personal library with rating
+
+    AUTH: the body `user_id` is ignored — the session identity is used.
+    """
+    req.user_id = request.state.user_id
     # Save to MongoDB
     library_entry = {
         "user_id": req.user_id,
@@ -1633,8 +1521,14 @@ async def add_to_library(req: LibraryAddRequest):
 
 
 @api_router.get("/user/library")
-async def get_user_library(user_id: str):
-    """Get user's personal movie library"""
+async def get_user_library(request: Request, user_id: Optional[str] = None):
+    """Get user's personal movie library
+
+    AUTH: private — `user_id` (optional) must be the caller's own id.
+    """
+    if user_id:
+        require_owner(user_id, request.state.user_id)
+    user_id = request.state.user_id
     library = await db.user_library.find(
         {"user_id": user_id}
     ).sort("updated_at", -1).to_list(length=500)
@@ -1663,13 +1557,16 @@ class MovieInteractionRequest(BaseModel):
 
 
 @api_router.post("/movie/interaction")
-async def record_movie_interaction(req: MovieInteractionRequest):
+async def record_movie_interaction(req: MovieInteractionRequest, request: Request):
     """
     Record a user interaction with a movie.
     This fetches full movie details from TMDB and stores them in Supabase
     ONLY if the movie hasn't been stored before.
     This creates a curated catalog of movies users have actually interacted with.
+
+    AUTH: the body `user_id` is ignored — the session identity is used.
     """
+    req.user_id = request.state.user_id
     try:
         # First check if movie already exists in Supabase
         exists = await supabase.check_movie_exists(req.movie_id)
@@ -1706,20 +1603,21 @@ async def record_movie_interaction(req: MovieInteractionRequest):
                         "movie_title": movie_details.get("title")
                     }
                 else:
+                    logger.warning(f"Catalog save failed for movie {req.movie_id}")
                     return {
                         "success": False,
-                        "error": result.get("error", "Failed to save movie")
+                        "error": "Failed to save movie"
                     }
             else:
                 logger.warning(f"Failed to fetch movie {req.movie_id} from TMDB: {resp.status_code}")
                 return {
                     "success": False,
-                    "error": f"TMDB returned status {resp.status_code}"
+                    "error": "Movie database unavailable"
                 }
-                
-    except Exception as e:
-        logger.error(f"Error recording movie interaction: {e}")
-        return {"success": False, "error": str(e)}
+
+    except Exception:
+        logger.exception("Error recording movie interaction")
+        return {"success": False, "error": "Could not record interaction"}
 
 
 @api_router.get("/movie/catalog/stats")
@@ -1748,17 +1646,22 @@ async def get_catalog_stats():
             "total_movies_in_catalog": total_movies,
             "top_interacted_movies": top_movies.data if top_movies.data else []
         }
-    except Exception as e:
-        logger.error(f"Error getting catalog stats: {e}")
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Error getting catalog stats")
+        return {"success": False, "error": "Catalog stats unavailable"}
 
 
 @api_router.post("/recommendations")
-async def get_recommendations(req: RecommendationRequest):
+async def get_recommendations(req: RecommendationRequest, request: Request):
     """
     Get personalized movie recommendations using cosine similarity.
     This is the main recommendation endpoint.
+
+    AUTH: the body `user_id` is ignored — the session identity is used.
     """
+    req.user_id = request.state.user_id
+    if req.page < 1 or req.limit < 1 or req.limit > 100:
+        raise HTTPException(status_code=400, detail="page must be >= 1 and limit between 1 and 100")
     # Get user's taste vector
     taste_doc = await db.user_taste_vectors.find_one({"user_id": req.user_id})
     
@@ -1832,11 +1735,14 @@ async def get_recommendations(req: RecommendationRequest):
 
 
 @api_router.get("/user/{user_id}/taste-profile")
-async def get_taste_profile(user_id: str):
+async def get_taste_profile(user_id: str, request: Request):
     """
     Get user's taste profile for debugging/display.
     Shows top preferences in each dimension.
+
+    AUTH: private — caller must own this user_id.
     """
+    require_owner(user_id, request.state.user_id)
     taste_doc = await db.user_taste_vectors.find_one({"user_id": user_id})
     
     if not taste_doc:
@@ -1874,8 +1780,13 @@ async def get_taste_profile(user_id: str):
 
 
 @api_router.get("/user/{user_id}/swipe-history")
-async def get_swipe_history(user_id: str, limit: int = 50):
-    """Get user's recent swipe history"""
+async def get_swipe_history(user_id: str, request: Request, limit: int = 50):
+    """Get user's recent swipe history
+
+    AUTH: private — caller must own this user_id.
+    """
+    require_owner(user_id, request.state.user_id)
+    _check_int_range(limit, "limit", 1, 500)
     swipes = await db.user_swipes.find(
         {"user_id": user_id},
         {"_id": 0}
@@ -1936,30 +1847,118 @@ async def reset_user_feed(user_id: str, request: Request):
 @api_router.delete("/user/{user_id}/reset-all")
 async def reset_user_completely(user_id: str, request: Request):
     """
-    Completely reset user - removes profile, taste vector, and swipes.
-    User will need to go through onboarding again.
+    DELETE ACCOUNT — permanently removes the user and their data (Google
+    Play's account-deletion requirement). The app calls this from
+    Profile → Delete account, then wipes local state and signs out.
+
+    Removed: the account + every session, profile, taste vector, swipes,
+    shown/unwatched history, library, filters, photos (Mongo record AND the
+    files in Supabase Storage), conversations + messages + requests the user
+    is part of, Tina sessions/personality, match caches, pending OTPs, and
+    the user's rows in the Supabase analytics tables.
+    Kept on purpose: chat_reports / meeting_reports (trust & safety records).
 
     AUTH: Caller must own this user_id.
     """
     require_owner(user_id, request.state.user_id)
-    # Delete everything
-    profile_result = await db.user_profiles.delete_many({"user_id": user_id})
-    taste_result = await db.user_taste_vectors.delete_many({"user_id": user_id})
-    swipe_result = await db.user_swipes.delete_many({"user_id": user_id})
-    unwatched_result = await db.user_unwatched_patterns.delete_many({"user_id": user_id})
-    
-    logger.info(f"Complete reset for user {user_id}: {profile_result.deleted_count} profiles, "
-                f"{taste_result.deleted_count} taste vectors, {swipe_result.deleted_count} swipes")
-    
+    uid = user_id
+    deleted: Dict[str, int] = {}
+
+    async def _purge(collection: str, query: Dict[str, Any]) -> None:
+        try:
+            res = await db[collection].delete_many(query)
+            deleted[collection] = deleted.get(collection, 0) + res.deleted_count
+        except Exception:
+            logger.exception("[delete-account] %s cleanup failed", collection)
+
+    user_doc = await db.users.find_one({"user_id": uid}, {"_id": 0, "phone": 1}) or {}
+
+    # 1. Photos: storage files first (needs the Mongo record), then the record.
+    for slot in range(1, 6):
+        try:
+            await delete_picture_from_storage(uid, slot)
+        except Exception:
+            logger.warning("[delete-account] photo slot %s cleanup failed", slot)
+
+    def _purge_storage_folder() -> int:
+        # Catch orphaned uploads that are no longer referenced by a slot.
+        from supabase_service import get_supabase_client
+        bucket = get_supabase_client().storage.from_("profile-pictures")
+        names = [o.get("name") for o in (bucket.list(uid) or []) if o.get("name")]
+        if names:
+            bucket.remove([f"{uid}/{n}" for n in names])
+        return len(names)
+
+    try:
+        deleted["storage_files"] = await asyncio.wait_for(asyncio.to_thread(_purge_storage_folder), timeout=20)
+    except Exception:
+        logger.warning("[delete-account] storage folder cleanup skipped")
+    await _purge("user_pictures", {"user_id": uid})
+
+    # 2. Conversations the user is part of (both sides' messages go with it).
+    try:
+        conv_ids = [
+            c["conversation_id"]
+            async for c in db.chat_conversations.find({"participants": uid}, {"_id": 0, "conversation_id": 1})
+            if c.get("conversation_id")
+        ]
+    except Exception:
+        conv_ids = []
+        logger.exception("[delete-account] conversation lookup failed")
+    if conv_ids:
+        await _purge("chat_messages", {"conversation_id": {"$in": conv_ids}})
+    await _purge("chat_messages", {"sender_id": uid})
+    await _purge("chat_conversations", {"participants": uid})
+    await _purge("chat_requests", {"$or": [{"from_user_id": uid}, {"to_user_id": uid}]})
+
+    # 3. Profile, taste, activity, preferences, Tina, caches.
+    for collection in (
+        "user_profiles", "user_taste_vectors", "user_swipes", "user_shown_movies",
+        "user_unwatched_patterns", "user_library", "user_filters",
+        "tina_sessions", "tina_profiles",
+    ):
+        await _purge(collection, {"user_id": uid})
+    await _purge("match_cache", {"$or": [{"user_id": uid}, {"owner_id": uid}]})
+    if user_doc.get("phone"):
+        await _purge("otp_codes", {"identifier": user_doc["phone"]})
+
+    # 4. Supabase analytics copies (best effort; tables may not exist).
+    def _purge_supabase() -> int:
+        from supabase_service import get_supabase_client
+        client = get_supabase_client()
+        targets = [
+            ("user_logged_in", "user_id"), ("user_sign_up_details", "user_id"),
+            ("preferences_and_filters", "user_id"), ("exclusive_toggle", "user_id"),
+            ("expand_if_run_out", "user_id"), ("mode_selected", "user_id"),
+            ("top_5_movies", "user_id"), ("toggle_visibility_profile", "user_id"),
+            ("movie_swipes", "user_id"), ("tina_chat_messages", "user_id"),
+            ("tina_persona_360", "user_id"), ("user_pictures", "user_id"),
+            ("match_events", "user_id"), ("unmatch_events", "user_id"),
+            ("user_chat_messages", "sender_id"), ("report_events", "reporter_id"),
+        ]
+        done = 0
+        for table, column in targets:
+            try:
+                client.table(table).delete().eq(column, uid).execute()
+                done += 1
+            except Exception:
+                logger.warning("[delete-account] supabase %s cleanup skipped", table)
+        return done
+
+    try:
+        deleted["supabase_tables"] = await asyncio.wait_for(asyncio.to_thread(_purge_supabase), timeout=30)
+    except Exception:
+        logger.warning("[delete-account] supabase cleanup skipped")
+
+    # 5. Finally the account itself and every session (logs the user out).
+    await _purge("user_sessions", {"user_id": uid})
+    await _purge("users", {"user_id": uid})
+
+    logger.info("[delete-account] account %s deleted", uid)
     return {
         "success": True,
-        "message": "User completely reset. Please complete onboarding again.",
-        "deleted": {
-            "profiles": profile_result.deleted_count,
-            "taste_vectors": taste_result.deleted_count,
-            "swipes": swipe_result.deleted_count,
-            "unwatched_patterns": unwatched_result.deleted_count,
-        }
+        "message": "Your account and data have been deleted.",
+        "deleted": deleted,
     }
 
 
@@ -1967,21 +1966,18 @@ async def reset_user_completely(user_id: str, request: Request):
 # Admin Dashboard Endpoints
 # =============================================
 
-# Admin credentials (for MVP - in production, use proper auth)
-ADMIN_CREDENTIALS = {
-    "admin@filmcompanion.com": {
-        "password": "admin123",
-        "name": "Admin User",
-        "role": "super_admin",
-    }
-}
+# Single admin account configured via env (settings.py): ADMIN_USERNAME +
+# ADMIN_PASSWORD_HASH (bcrypt). No hardcoded credentials.
 
-# Admin tokens store (in-memory for MVP)
+# Admin tokens store (in-memory; 24h aging enforced by get_current_admin and
+# the Socket.IO connect handler)
 admin_tokens: Dict[str, Dict[str, Any]] = {}
 
 
 class AdminLoginRequest(BaseModel):
-    email: str
+    # The dashboard form historically posts `email`; `username` is preferred.
+    username: Optional[str] = None
+    email: Optional[str] = None
     password: str
 
 
@@ -1990,39 +1986,59 @@ class AdminReportUpdate(BaseModel):
 
 
 @api_router.post("/admin/login")
-async def admin_login(req: AdminLoginRequest):
-    """Admin login endpoint"""
-    admin = ADMIN_CREDENTIALS.get(req.email.lower())
-    if not admin or admin["password"] != req.password:
+async def admin_login(req: AdminLoginRequest, request: Request):
+    """Admin login endpoint (rate-limited per IP)."""
+    LOGIN_ATTEMPT_LIMITER.check_or_raise(f"admin:{client_ip(request)}")
+    if not settings.admin_password_hash:
+        raise HTTPException(status_code=503, detail="Admin login disabled (ADMIN_PASSWORD_HASH not set)")
+
+    username = (req.username or req.email or "").strip()
+    try:
+        # Always run the bcrypt check so timing doesn't reveal the username.
+        # bcrypt only uses the first 72 bytes (bcrypt>=5 raises beyond that).
+        password_ok = bcrypt.checkpw(
+            req.password.encode("utf-8")[:72], settings.admin_password_hash.encode("utf-8")
+        )
+    except ValueError:
+        logger.error("ADMIN_PASSWORD_HASH is not a valid bcrypt hash")
+        raise HTTPException(status_code=503, detail="Admin login disabled (ADMIN_PASSWORD_HASH is invalid)")
+    username_ok = hmac.compare_digest(username.encode("utf-8"), settings.admin_username.encode("utf-8"))
+    if not (username_ok and password_ok):
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    
+
+    admin_name = "Admin"
+    admin_role = "super_admin"
     token = f"admin_{uuid.uuid4().hex}"
     admin_tokens[token] = {
-        "email": req.email.lower(),
-        "name": admin["name"],
-        "role": admin["role"],
+        "username": username,
+        "email": username,
+        "name": admin_name,
+        "role": admin_role,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    
-    # Also store admin in database for role management
-    await db.admins.update_one(
-        {"email": req.email.lower()},
-        {"$set": {
-            "email": req.email.lower(),
-            "name": admin["name"],
-            "role": admin["role"],
-            "last_login": datetime.now(timezone.utc).isoformat(),
-        }},
-        upsert=True
-    )
-    
+
+    # Also store admin in database for role management / last-login audit
+    try:
+        await db.admins.update_one(
+            {"username": username},
+            {"$set": {
+                "username": username,
+                "name": admin_name,
+                "role": admin_role,
+                "last_login": datetime.now(timezone.utc).isoformat(),
+            }},
+            upsert=True
+        )
+    except Exception:
+        logger.exception("Admin last-login audit write failed")
+
     return {
         "token": token,
         "admin": {
-            "id": req.email.lower(),
-            "email": req.email.lower(),
-            "name": admin["name"],
-            "role": admin["role"],
+            "id": username,
+            "email": username,
+            "name": admin_name,
+            "role": admin_role,
         }
     }
 
@@ -2050,16 +2066,16 @@ async def get_admin_metrics():
     other = len(profiles) - male - female
     total_with_gender = male + female + other or 1
     
-    # Total swipes
-    total_swipes = await db.user_swipes.count_documents({})
+    # Swipes today
     swipes_today = await db.user_swipes.count_documents({
         "created_at": {"$gte": today_start.isoformat()}
     })
-    
-    # Total matches (placeholder - matches collection may not exist yet)
+
+    # Total matches = accepted chats (chat_conversations.status == "active")
     try:
-        total_matches = await db.user_matches.count_documents({})
-    except:
+        total_matches = await db.chat_conversations.count_documents({"status": "active"})
+    except Exception:
+        logger.exception("Admin metrics: match count failed")
         total_matches = 0
     
     # Active users (users with swipes in the last 24 hours)
@@ -2098,7 +2114,9 @@ async def get_admin_metrics():
 @api_router.get("/admin/users")
 async def get_admin_users(limit: int = 500, skip: int = 0):
     """Get all users with their complete profiles - merges data from users and user_profiles tables"""
-    
+    _check_int_range(limit, "limit", 1, 1000)
+    _check_int_range(skip, "skip", 0, 1_000_000)
+
     # Get all users from both tables
     auth_users = await db.users.find({}, {"_id": 0}).sort("created_at", -1).to_list(length=1000)
     profile_users = await db.user_profiles.find({}, {"_id": 0}).sort("updated_at", -1).to_list(length=1000)
@@ -2227,6 +2245,7 @@ async def get_admin_users(limit: int = 500, skip: int = 0):
 @api_router.get("/admin/swipes")
 async def get_admin_swipes(limit: int = 500, user_id: str = None):
     """Get all swipes with user info"""
+    _check_int_range(limit, "limit", 1, 1000)
     query = {}
     if user_id:
         query["user_id"] = user_id
@@ -2256,12 +2275,35 @@ async def get_admin_swipes(limit: int = 500, user_id: str = None):
 
 @api_router.get("/admin/matches")
 async def get_admin_matches(limit: int = 500):
-    """Get all matches"""
+    """Get all matches — an accepted chat (chat_conversations.status "active")
+    is a match. Shaped as {user1_id, user2_id, matched_at, ...} for the
+    dashboard's MatchesTab."""
+    limit = max(1, min(limit, 1000))
     try:
-        matches = await db.user_matches.find({}, {"_id": 0}).sort("matched_at", -1).limit(limit).to_list(length=limit)
-    except:
-        matches = []
-    
+        convs = await db.chat_conversations.find(
+            {"status": "active"},
+            {"_id": 0, "conversation_id": 1, "participants": 1, "created_at": 1,
+             "last_message_at": 1, "initiated_by": 1, "meeting_status": 1},
+        ).sort("created_at", -1).limit(limit).to_list(length=limit)
+    except Exception:
+        logger.exception("Admin matches query failed")
+        convs = []
+    matches = []
+    for c in convs:
+        parts = list(c.get("participants") or [])
+        if len(parts) < 2:
+            continue
+        matches.append({
+            "_id": c.get("conversation_id"),
+            "conversation_id": c.get("conversation_id"),
+            "user1_id": parts[0],
+            "user2_id": parts[1],
+            "matched_at": c.get("created_at"),
+            "last_message_at": c.get("last_message_at"),
+            "initiated_by": c.get("initiated_by"),
+            "meeting_status": c.get("meeting_status"),
+        })
+
     # Get user names
     user_ids = []
     for m in matches:
@@ -2287,12 +2329,19 @@ async def get_admin_matches(limit: int = 500):
 
 @api_router.get("/admin/reports")
 async def get_admin_reports(limit: int = 100):
-    """Get user reports for moderation"""
+    """Get user reports for moderation (chat_reports, written by
+    chat_service.report_user and keyed by `report_id`)."""
+    limit = max(1, min(limit, 1000))
     try:
-        reports = await db.user_reports.find({}, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(length=limit)
-    except:
+        reports = await db.chat_reports.find({}, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(length=limit)
+    except Exception:
+        logger.exception("Admin reports query failed")
         reports = []
-    
+    for r in reports:
+        # Dashboard (ReportsTab) reads `id` and `description`.
+        r.setdefault("id", r.get("report_id"))
+        r.setdefault("description", r.get("details") or "")
+
     # Get user names
     user_ids = []
     for r in reports:
@@ -2319,8 +2368,10 @@ async def get_admin_reports(limit: int = 100):
 @api_router.patch("/admin/reports/{report_id}")
 async def update_report_status(report_id: str, req: AdminReportUpdate):
     """Update report status"""
-    result = await db.user_reports.update_one(
-        {"id": report_id},
+    if req.status not in ("pending", "reviewed", "resolved", "dismissed"):
+        raise HTTPException(status_code=400, detail="Invalid status")
+    result = await db.chat_reports.update_one(
+        {"report_id": report_id},
         {"$set": {"status": req.status, "updated_at": datetime.now(timezone.utc).isoformat()}}
     )
     if result.matched_count == 0:
@@ -2331,6 +2382,8 @@ async def update_report_status(report_id: str, req: AdminReportUpdate):
 @api_router.patch("/admin/users/{user_id}/status")
 async def update_user_status(user_id: str, status: str):
     """Update user status (active, inactive, banned)"""
+    if status not in ("active", "inactive", "banned"):
+        raise HTTPException(status_code=400, detail="Invalid status")
     result = await db.users.update_one(
         {"user_id": user_id},
         {"$set": {"status": status, "updated_at": datetime.now(timezone.utc).isoformat()}}
@@ -2361,11 +2414,13 @@ async def ban_user(user_id: str, req: BanUserRequest = None):
         }}
     )
     
-    # Broadcast user update to admin dashboard
-    updated_user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
-    await broadcast_user_updated(updated_user)
-    
-    logger.info(f"User {user_id} has been banned. Reason: {req.reason if req else 'No reason provided'}")
+    # Broadcast user update to admin dashboard (PII stripped in broadcast_user_updated)
+    if connected_admins:
+        updated_user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+        await broadcast_user_updated(updated_user)
+
+    # The free-text reason is moderation content — never logged.
+    logger.info(f"User {user_id} has been banned")
     return {"success": True, "message": f"User {user_id} has been banned"}
 
 
@@ -2389,10 +2444,11 @@ async def unban_user(user_id: str):
         }}
     )
     
-    # Broadcast user update to admin dashboard
-    updated_user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
-    await broadcast_user_updated(updated_user)
-    
+    # Broadcast user update to admin dashboard (PII stripped in broadcast_user_updated)
+    if connected_admins:
+        updated_user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+        await broadcast_user_updated(updated_user)
+
     logger.info(f"User {user_id} has been unbanned")
     return {"success": True, "message": f"User {user_id} has been unbanned"}
 
@@ -2426,69 +2482,109 @@ async def get_user_details(user_id: str):
 
 class MatchRequest(BaseModel):
     """Request for AI-based matches"""
-    user_id: str
+    user_id: str = ""  # ignored — the session identity is used
     filters: Optional[Dict] = None
     limit: int = 15
     force_refresh: bool = False  # If True, bypass cache and regenerate matches
     mode: str = "date"  # 'buddy' or 'date' - determines which mode users to match with
 
 
+def _top_taste_names(weights: Dict[str, Any], prefix: str, n: int = 5) -> List[str]:
+    """Top-n positively weighted names under `prefix` ("actor_", "director_")
+    in a stored taste vector, e.g. "actor_christian_bale" -> "Christian Bale"."""
+    scored = [
+        (key[len(prefix):].replace("_", " ").title(), value)
+        for key, value in weights.items()
+        if key.startswith(prefix) and isinstance(value, (int, float)) and value > 0
+    ]
+    scored.sort(key=lambda item: item[1], reverse=True)
+    return [name for name, _ in scored[:n]]
+
+
 @api_router.post("/matches")
-async def get_matches(req: MatchRequest):
+async def get_matches(req: MatchRequest, request: Request):
     """
     Get AI-matched profiles for a user.
-    
+
     1. Fetches user profile
     2. Applies hard filters (gender, age, language, intent)
     3. Uses LLM to score compatibility based on movie taste
     4. Returns top matches with explanations
+
+    AUTH: the body `user_id` is ignored — the session identity is used.
+    No stored profile → {"matches": [], "reason": "profile_incomplete"}.
     """
+    req.user_id = request.state.user_id
+    if req.limit < 1 or req.limit > 200:
+        raise HTTPException(status_code=400, detail="limit must be between 1 and 200")
+    # force_refresh re-runs the (LLM-backed) scorer: max 3 per 10 min per
+    # user. Over the limit we quietly serve the cached list instead of a 429.
+    force_refresh = req.force_refresh
+    if force_refresh:
+        allowed, _retry = MATCH_REFRESH_LIMITER.hit(f"match_refresh:{req.user_id}")
+        if not allowed:
+            force_refresh = False
     try:
         # Get user profile from database
-        user_profile = await db.user_profiles.find_one({"user_id": req.user_id})
-        
+        user_profile = await db.user_profiles.find_one({"user_id": req.user_id}, {"_id": 0})
+        if not user_profile:
+            return {
+                "success": True,
+                "matches": [],
+                "total_candidates": 0,
+                "cached": False,
+                "reason": "profile_incomplete",
+            }
+
         # Get user's swipe history for taste analysis
         swipes = await db.user_swipes.find(
-            {"user_id": req.user_id}
+            {"user_id": req.user_id}, {"_id": 0, "direction": 1, "movie_genres": 1}
         ).to_list(length=100)
-        
-        # Build taste profile from swipes
+
+        # Build taste profile from swipes (swipe docs store `movie_genres`)
         liked_genres = set()
         disliked_genres = set()
-        liked_movies = []
-        
+
         for swipe in swipes:
+            genres = [g for g in (swipe.get("movie_genres") or []) if isinstance(g, str)]
             if swipe.get("direction") == "right":
-                liked_genres.update(swipe.get("genres", []))
-                liked_movies.append(swipe.get("movie_title", ""))
+                liked_genres.update(genres)
             else:
-                disliked_genres.update(swipe.get("genres", []))
-        
-        # Construct profile for matching
-        # If user has no profile, use defaults that will show women (for demo purposes)
-        has_profile = user_profile is not None
+                disliked_genres.update(genres)
+
+        # Liked actors / directors come from the learned taste vector (if any)
+        taste_doc = await db.user_taste_vectors.find_one(
+            {"user_id": req.user_id}, {"_id": 0, "vector": 1}
+        )
+        weights = ((taste_doc or {}).get("vector") or {}).get("vector") or {}
+        if not isinstance(weights, dict):
+            weights = {}
+
+        # Construct profile for matching — only what the user actually stored
         profile_for_matching = {
             "user_id": req.user_id,
-            "name": user_profile.get("name", "User") if has_profile else "Demo User",
-            "age": user_profile.get("age", 28) if has_profile else 28,
-            "gender": user_profile.get("gender", "Male") if has_profile else "Male",
-            "location": user_profile.get("location", "Mumbai") if has_profile else "Mumbai",
-            "partnerPreference": user_profile.get("partnerPreference", "Women") if has_profile else "Women",
-            "relationshipIntent": user_profile.get("relationshipIntent", ["Long-term relationship"]) if has_profile else ["Long-term relationship"],
-            "genres": user_profile.get("genres", ["Drama", "Sci-Fi", "Thriller"]) if has_profile else ["Drama", "Sci-Fi", "Thriller"],
-            "filmLanguages": user_profile.get("filmLanguages", ["Hindi", "English"]) if has_profile else ["Hindi", "English"],
-            "languagesSpoken": user_profile.get("languagesSpoken", ["Hindi", "English"]) if has_profile else ["Hindi", "English"],
-            "topMovies": user_profile.get("topMovies", []) if has_profile else [{"title": "Inception"}, {"title": "Interstellar"}],
-            "movieFrequency": user_profile.get("movieFrequency", "Weekly") if has_profile else "Weekly",
-            "ottTheatre": user_profile.get("ottTheatre", "Both") if has_profile else "Both",
-            "bio": user_profile.get("bio", "") if has_profile else "Looking for movie companions!",
-            "movieBuddyMode": user_profile.get("movieBuddyMode", False) if has_profile else True,
-            "movieDateMode": user_profile.get("movieDateMode", True) if has_profile else True,
+            "name": user_profile.get("name") or "",
+            "age": user_profile.get("age"),
+            "gender": user_profile.get("gender") or "",
+            "location": user_profile.get("location") or "",
+            "partnerPreference": user_profile.get("partnerPreference") or "",
+            "relationshipIntent": user_profile.get("relationshipIntent") or [],
+            "genres": user_profile.get("genres") or [],
+            "filmLanguages": user_profile.get("filmLanguages") or [],
+            "languagesSpoken": user_profile.get("languagesSpoken") or [],
+            "topMovies": user_profile.get("topMovies") or [],
+            "movieFrequency": user_profile.get("movieFrequency") or "",
+            "ottTheatre": user_profile.get("ottTheatre") or "",
+            "bio": user_profile.get("bio") or "",
+            "movieBuddyMode": bool(user_profile.get("movieBuddyMode", False)),
+            "movieDateMode": bool(user_profile.get("movieDateMode", True)),
+            # Server-side only (distance filter); never echoed to clients.
+            "coordinates": user_profile.get("coordinates"),
             "swipe_history": {
-                "liked_genres": list(liked_genres) if liked_genres else ["Drama", "Sci-Fi", "Thriller"],
+                "liked_genres": list(liked_genres) or list(user_profile.get("genres") or []),
                 "disliked_genres": list(disliked_genres),
-                "liked_actors": ["Leonardo DiCaprio", "Christian Bale"],
-                "liked_directors": ["Christopher Nolan", "Denis Villeneuve"]
+                "liked_actors": _top_taste_names(weights, "actor_"),
+                "liked_directors": _top_taste_names(weights, "director_"),
             }
         }
 
@@ -2503,23 +2599,23 @@ async def get_matches(req: MatchRequest):
                     "extra": tina_profile.get("extra", {}),
                 }
         except Exception as e:
-            logger.warning(f"360 persona fetch failed for matchmaking: {e}")
-        
+            logger.warning(f"360 persona fetch failed for matchmaking: {type(e).__name__}")
+
         # Get matches using AI (with caching)
         matches = await get_matches_for_user(
             user_id=req.user_id,
             user_profile=profile_for_matching,
             filters=req.filters,
-            use_mock_data=True,  # Using mock users for now
-            force_refresh=req.force_refresh,  # Pass cache bypass option
+            use_mock_data=settings.mock_feed_profiles,  # blend mock profiles (env flag)
+            force_refresh=force_refresh,  # Pass cache bypass option (rate-limited)
             mode=req.mode,  # Pass the user's current mode (buddy/date)
             top_n=max(req.limit, 30),  # Plumb the caller's limit all the way
             # down so the AI scorer doesn't silently truncate to 15. Floor at
             # 30 so the cached pool is always rich enough for downstream
             # filtering / pagination.
         )
-        
-        logger.info(f"Found {len(matches)} matches for user {req.user_id} (mode={req.mode}, force_refresh={req.force_refresh})")
+
+        logger.info(f"Found {len(matches)} matches for user {req.user_id} (mode={req.mode}, force_refresh={force_refresh})")
 
         # Audit: log matches_generated event (non-blocking)
         try:
@@ -2527,8 +2623,8 @@ async def get_matches(req: MatchRequest):
                 user_id=req.user_id,
                 event_type="matches_generated",
                 mode=req.mode,
-                source="ai_matchmaking" if req.force_refresh else "cache",
-                payload={"count": len(matches), "limit": req.limit, "force_refresh": req.force_refresh},
+                source="ai_matchmaking" if force_refresh else "cache",
+                payload={"count": len(matches), "limit": req.limit, "force_refresh": force_refresh},
             )
         except Exception as _e:
             logger.debug(f"audit (matches_generated) skipped: {_e}")
@@ -2537,19 +2633,27 @@ async def get_matches(req: MatchRequest):
             "success": True,
             "matches": matches[:req.limit],
             "total_candidates": len(matches),
-            "cached": not req.force_refresh  # Indicate if results may be cached
+            "cached": not force_refresh  # Indicate if results may be cached
         }
-        
-    except Exception as e:
-        logger.error(f"Match error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Match error")
+        raise HTTPException(status_code=500, detail="Could not load matches")
 
 
 @api_router.get("/matches/profile/{user_id}")
-async def get_match_profile(user_id: str, viewer_id: Optional[str] = None):
-    """Get detailed profile of a matched user"""
-    # Audit: log profile_viewed event (non-blocking) when viewer_id provided
-    if viewer_id:
+async def get_match_profile(user_id: str, request: Request, viewer_id: Optional[str] = None):
+    """Get detailed profile of a matched user.
+
+    AUTH: the `viewer_id` query param is ignored — the viewer is the session
+    user. Other users' profiles go through the public whitelist
+    (_public_profile_view); the caller's own id returns the full doc.
+    """
+    viewer_id = request.state.user_id
+    # Audit: log profile_viewed event (non-blocking)
+    if viewer_id != user_id:
         try:
             await supabase.log_match_event(
                 user_id=viewer_id,
@@ -2560,29 +2664,21 @@ async def get_match_profile(user_id: str, viewer_id: Optional[str] = None):
         except Exception as _e:
             logger.debug(f"audit (profile_viewed) skipped: {_e}")
 
-    # First check mock users
-    mock_user = get_mock_user_by_id(user_id)
-    if mock_user:
+    profile = await _profile_for_viewer(user_id, viewer_id)
+    if profile is not None:
         return {
             "success": True,
-            "profile": mock_user
+            "profile": profile
         }
-    
-    # Then check real users in database
-    user_profile = await db.user_profiles.find_one({"user_id": user_id})
-    if user_profile:
-        user_profile.pop("_id", None)
-        return {
-            "success": True,
-            "profile": user_profile
-        }
-    
+
     raise HTTPException(status_code=404, detail="User not found")
 
 
 @api_router.get("/matches/mock-users")
 async def get_mock_users():
-    """Get all mock users for testing (admin endpoint)"""
+    """Get all mock users for testing (DEV-ONLY: ENABLE_DEV_ROUTES)"""
+    if not settings.enable_dev_routes:
+        raise HTTPException(status_code=404, detail="Not found")
     users = get_all_mock_users()
     return {
         "success": True,
@@ -2596,43 +2692,38 @@ async def get_mock_users():
 # =============================================
 
 @api_router.get("/user/profile/{user_id}")
-async def get_user_profile_by_id(user_id: str):
-    """Get user profile by ID (supports mock users for testing)"""
-    # First check mock users
-    mock_user = get_mock_user_by_id(user_id)
-    if mock_user:
+async def get_user_profile_by_id(user_id: str, request: Request):
+    """Get user profile by ID (supports mock users for testing).
+
+    AUTH: your own id → the full stored profile; anyone else's → the public,
+    visibility-filtered whitelist (_public_profile_view).
+    """
+    viewer_id = request.state.user_id
+    profile = await _profile_for_viewer(user_id, viewer_id)
+    if profile is not None:
         return {
             "success": True,
-            "profile": mock_user
+            "profile": profile
         }
-    
-    # Then check real users in database
-    user_profile = await db.user_profiles.find_one({"user_id": user_id}, {"_id": 0})
-    if user_profile:
-        return {
-            "success": True,
-            "profile": user_profile
-        }
-    
-    # Check basic user info
-    user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+
+    # Check basic user info (account exists but no profile saved yet)
+    user = await db.users.find_one({"user_id": user_id}, {"_id": 0, "name": 1, "email": 1})
     if user:
+        basic = {"user_id": user_id, "name": user.get("name", "Unknown")}
+        if user_id == viewer_id:
+            basic["email"] = user.get("email")
         return {
-            "success": True, 
-            "profile": {
-                "user_id": user_id,
-                "name": user.get("name", "Unknown"),
-                "email": user.get("email"),
-            }
+            "success": True,
+            "profile": basic
         }
-    
+
     raise HTTPException(status_code=404, detail="User not found")
 
 
 class PictureUploadRequest(BaseModel):
     """Request to upload a profile picture"""
     user_id: str
-    session_id: str
+    session_id: Optional[str] = None  # legacy audit tag; clients no longer send it
     picture_number: int  # 1-5
     image_data: str  # Base64 encoded image
     content_type: str = "image/jpeg"
@@ -2641,8 +2732,14 @@ class PictureUploadRequest(BaseModel):
 class PicturesUpdateRequest(BaseModel):
     """Request to update multiple pictures at once"""
     user_id: str
-    session_id: str
+    session_id: Optional[str] = None  # legacy audit tag; clients no longer send it
     pictures: Dict[str, Optional[str]]  # {"picture_1": "base64...", "picture_2": "base64...", ...}
+
+
+def _reject_oversized_picture(image_data: Optional[str]) -> None:
+    """413 before any base64 decoding when the payload is over the cap."""
+    if image_data and len(image_data) > PICTURE_MAX_B64_CHARS:
+        raise HTTPException(status_code=413, detail="Image too large (max 5 MB)")
 
 
 @api_router.post("/user/pictures/upload")
@@ -2654,6 +2751,7 @@ async def upload_picture(req: PictureUploadRequest, request: Request):
     AUTH: req.user_id must match the authenticated user.
     """
     require_owner(req.user_id, request.state.user_id)
+    _reject_oversized_picture(req.image_data)
     try:
         if req.picture_number < 1 or req.picture_number > 5:
             raise HTTPException(status_code=400, detail="picture_number must be between 1 and 5")
@@ -2668,14 +2766,14 @@ async def upload_picture(req: PictureUploadRequest, request: Request):
         )
         if not picture_url:
             # The service returns None for: invalid base64, oversized file
-            # (>15MB), or unsupported MIME. Return a 400 (client error) with
-            # a clearer message so the frontend can show something better
-            # than the generic "Upload Failed. Please try again."
+            # or unsupported MIME. Return a 400 (client error) with a clearer
+            # message so the frontend can show something better than the
+            # generic "Upload Failed. Please try again."
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    "Could not process this image. Make sure it's a JPEG, PNG, "
-                    "HEIC, WEBP or GIF under 15 MB and try again."
+                    "Could not process this image. Make sure it's a JPEG, PNG "
+                    "or WEBP under 5 MB and try again."
                 ),
             )
 
@@ -2696,9 +2794,12 @@ async def upload_picture(req: PictureUploadRequest, request: Request):
         }
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Picture upload error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except PhotoStorageUnavailable:
+        logger.exception("Picture upload: photo storage unavailable")
+        raise HTTPException(status_code=503, detail="Photo storage unavailable")
+    except Exception:
+        logger.exception("Picture upload error")
+        raise HTTPException(status_code=500, detail="Could not upload picture")
 
 
 @api_router.post("/user/pictures/upload-batch")
@@ -2710,19 +2811,23 @@ async def upload_pictures_batch(req: PicturesUpdateRequest, request: Request):
     AUTH: req.user_id must match the authenticated user.
     """
     require_owner(req.user_id, request.state.user_id)
+    if len(req.pictures) > 5:
+        raise HTTPException(status_code=400, detail="At most 5 pictures per batch")
+    for image_data in req.pictures.values():
+        _reject_oversized_picture(image_data)
     try:
         picture_urls = {}
         errors = []
-        
+
         for key, image_data in req.pictures.items():
             if not image_data:
                 continue
-                
+
             # Extract picture number from key (e.g., "picture_1" -> 1)
             try:
                 picture_number = int(key.split("_")[1])
-            except:
-                errors.append(f"Invalid key format: {key}")
+            except (IndexError, ValueError):
+                errors.append(f"Invalid key format: {key[:20]}")
                 continue
             
             if picture_number < 1 or picture_number > 5:
@@ -2783,18 +2888,37 @@ async def upload_pictures_batch(req: PicturesUpdateRequest, request: Request):
             "picture_urls": picture_urls,
             "errors": errors if errors else None
         }
-        
+
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Batch picture upload error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except PhotoStorageUnavailable:
+        logger.exception("Batch picture upload: photo storage unavailable")
+        raise HTTPException(status_code=503, detail="Photo storage unavailable")
+    except Exception:
+        logger.exception("Batch picture upload error")
+        raise HTTPException(status_code=500, detail="Could not upload pictures")
+
+
+_EMPTY_PICTURE_SLOTS = {f"picture_{i}": None for i in range(1, 6)}
 
 
 @api_router.get("/user/pictures/{user_id}")
-async def get_pictures(user_id: str):
-    """Get all pictures for a user"""
+async def get_pictures(user_id: str, request: Request):
+    """Get all pictures for a user.
+
+    AUTH: anyone logged in may view profile photos (they're public profile
+    content), but for OTHER users the owner's visibility toggles are applied
+    through _public_profile_view — a hidden `pictures` field returns empty
+    slots.
+    """
     try:
+        if user_id != request.state.user_id and not get_mock_user_by_id(user_id):
+            owner = await db.user_profiles.find_one(
+                {"user_id": user_id}, {"_id": 0, "visibilityToggles": 1}
+            ) or {}
+            if "pictures" not in _public_profile_view({**owner, "pictures": True}):
+                return {"success": True, "pictures": dict(_EMPTY_PICTURE_SLOTS), "count": 0}
+
         # First check for mock user with profile_picture
         mock_user = get_mock_user_by_id(user_id)
         if mock_user and mock_user.get("profile_picture"):
@@ -2840,22 +2964,26 @@ async def get_pictures(user_id: str):
             "count": count,
             "last_modified": pictures.get("last_modified_ts")
         }
-        
-    except Exception as e:
-        logger.error(f"Get pictures error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+
+    except Exception:
+        logger.exception("Get pictures error")
+        raise HTTPException(status_code=500, detail="Could not load pictures")
 
 
 @api_router.delete("/user/pictures/{user_id}/{picture_number}")
-async def delete_picture(user_id: str, picture_number: int, session_id: str = ""):
-    """Delete a specific picture"""
+async def delete_picture(user_id: str, picture_number: int, request: Request, session_id: str = ""):
+    """Delete a specific picture
+
+    AUTH: caller must own this user_id.
+    """
+    require_owner(user_id, request.state.user_id)
     try:
         if picture_number < 1 or picture_number > 5:
             raise HTTPException(status_code=400, detail="picture_number must be between 1 and 5")
-        
+
         # Delete from storage
-        deleted = await delete_picture_from_storage(user_id, picture_number)
-        
+        await delete_picture_from_storage(user_id, picture_number)
+
         # Update database to set picture to null
         await update_single_picture(
             user_id=user_id,
@@ -2868,64 +2996,89 @@ async def delete_picture(user_id: str, picture_number: int, session_id: str = ""
             "success": True,
             "deleted_picture": picture_number
         }
-        
+
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Delete picture error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Delete picture error")
+        raise HTTPException(status_code=500, detail="Could not delete picture")
 
 
 # ============== CHAT ENDPOINTS ==============
 
+# AUTH (all chat models): the actor id field (sender_id / user_id /
+# reporter_id) is ignored and overwritten with the session identity, so it
+# defaults to "" — clients may omit it or send a stale value.
 class SendMessageRequest(BaseModel):
-    sender_id: str
+    sender_id: str = ""
     receiver_id: str
     content: str
     message_type: str = "text"  # text, image, voice, gif
     media_url: Optional[str] = None
 
 class AcceptDeclineRequest(BaseModel):
-    user_id: str
+    user_id: str = ""
     conversation_id: str
 
 class UnmatchRequest(BaseModel):
-    user_id: str
+    user_id: str = ""
     other_user_id: str
     reason: Optional[str] = None
 
 class ReportRequest(BaseModel):
-    reporter_id: str
+    reporter_id: str = ""
     reported_id: str
     reason: str
     details: Optional[str] = None
 
 class MeetingStatusRequest(BaseModel):
-    user_id: str
+    user_id: str = ""
     other_user_id: str
     did_meet: bool
     was_same_person: Optional[bool] = None
 
 class MeetingReportRequest(BaseModel):
     conversation_id: str
-    user_id: str
+    user_id: str = ""
     did_meet: bool
     verification_result: Optional[str] = None  # 'yes', 'no', 'partially'
     reported_at: str
 
 class IceBreakerRequest(BaseModel):
-    user_id: str
+    user_id: str = ""
     match_user_id: str
 
 class ReplySuggestionsRequest(BaseModel):
-    user_id: str
+    user_id: str = ""
     conversation_id: str
 
 
+async def _ai_profile(user_id: str, viewer_id: str) -> Dict[str, Any]:
+    """Profile handed to the chat AI helpers: the viewer's own doc minus the
+    private location/dob fields, or another user's public whitelist."""
+    profile = await _profile_for_viewer(user_id, viewer_id)
+    if not profile:
+        return {"user_id": user_id}
+    if user_id == viewer_id:
+        profile = _public_profile_view({**profile, "visibilityToggles": {}})
+    return profile
+
+
 @api_router.post("/chat/meeting-report")
-async def api_meeting_report(req: MeetingReportRequest):
-    """Record a meeting verification report"""
+async def api_meeting_report(req: MeetingReportRequest, request: Request):
+    """Record a meeting verification report
+
+    AUTH: the body `user_id` is ignored — the session identity is used, and
+    the caller must be a participant of the conversation (else 404).
+    """
+    req.user_id = request.state.user_id
     try:
+        conv = await db.chat_conversations.find_one(
+            {"conversation_id": req.conversation_id, "participants": req.user_id},
+            {"_id": 1},
+        )
+        if not conv:
+            raise ChatAccessDenied()
         report = {
             "conversation_id": req.conversation_id,
             "user_id": req.user_id,
@@ -2941,7 +3094,7 @@ async def api_meeting_report(req: MeetingReportRequest):
         # Update conversation with meeting status if they met
         if req.did_meet:
             await db.chat_conversations.update_one(
-                {"conversation_id": req.conversation_id},
+                {"conversation_id": req.conversation_id, "participants": req.user_id},
                 {"$set": {
                     "meeting_status": "reported",
                     "verification_status": req.verification_result
@@ -2965,55 +3118,75 @@ async def api_meeting_report(req: MeetingReportRequest):
 
         logger.info(f"Meeting report saved for conversation {req.conversation_id}")
         return {"success": True}
-    except Exception as e:
-        logger.error(f"Meeting report error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except (HTTPException, ChatAccessDenied):
+        raise
+    except Exception:
+        logger.exception("Meeting report error")
+        raise HTTPException(status_code=500, detail="Could not save meeting report")
 
 
 @api_router.get("/chat/conversations/{user_id}")
-async def api_get_conversations(user_id: str):
+async def api_get_conversations(user_id: str, request: Request):
     """Get all active conversations for a user.
 
-    Side effect: ensures the demo Anjali/Priya unmatched conversations exist
-    for this user so they can test the post-unmatch flow directly from the
-    main Chat tab. The seed function is idempotent and skips if already done.
-    (Auto-seed restored June 30, 2026 — the previous gating env var/header
-    has been removed.)
+    Side effect (only when MOCK_SEED_CHATS is on): ensures the demo
+    Anjali/Priya unmatched conversations exist for this user so they can test
+    the post-unmatch flow directly from the main Chat tab. The seed function
+    is idempotent and skips if already done.
+
+    AUTH: caller must own this user_id.
     """
+    require_owner(user_id, request.state.user_id)
     try:
         # Best-effort seed; never block conversation fetch if seeding fails
-        try:
-            await seed_unmatched_for_user(db, user_id)
-        except Exception as seed_err:
-            logger.warning(f"Auto-seed unmatched mocks failed for {user_id}: {seed_err}")
+        if settings.mock_seed_chats:
+            try:
+                await seed_unmatched_for_user(db, user_id)
+            except Exception as seed_err:
+                logger.warning(f"Auto-seed unmatched mocks failed for {user_id}: {type(seed_err).__name__}")
 
         conversations = await get_conversations(user_id)
         return {"success": True, "conversations": conversations}
-    except Exception as e:
-        logger.error(f"Get conversations error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except ChatAccessDenied:
+        raise
+    except Exception:
+        logger.exception("Get conversations error")
+        raise HTTPException(status_code=500, detail="Could not load conversations")
 
 
 @api_router.get("/chat/requests/{user_id}")
-async def api_get_message_requests(user_id: str):
-    """Get pending message requests for a user"""
+async def api_get_message_requests(user_id: str, request: Request):
+    """Get pending message requests for a user
+
+    AUTH: caller must own this user_id.
+    """
+    require_owner(user_id, request.state.user_id)
     try:
         requests = await get_message_requests(user_id)
         return {"success": True, "requests": requests}
-    except Exception as e:
-        logger.error(f"Get message requests error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except ChatAccessDenied:
+        raise
+    except Exception:
+        logger.exception("Get message requests error")
+        raise HTTPException(status_code=500, detail="Could not load message requests")
 
 
 @api_router.get("/chat/messages/{conversation_id}")
-async def api_get_messages(conversation_id: str, limit: int = 50, before: Optional[str] = None):
-    """Get messages for a conversation"""
+async def api_get_messages(conversation_id: str, request: Request, limit: int = 50, before: Optional[str] = None):
+    """Get messages for a conversation
+
+    AUTH: only a participant may read it (chat_service raises
+    ChatAccessDenied → 404 otherwise).
+    """
+    _check_int_range(limit, "limit", 1, 200)
     try:
-        messages = await get_messages(conversation_id, limit, before)
+        messages = await get_messages(conversation_id, request.state.user_id, limit, before)
         return {"success": True, "messages": messages}
-    except Exception as e:
-        logger.error(f"Get messages error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except ChatAccessDenied:
+        raise
+    except Exception:
+        logger.exception("Get messages error")
+        raise HTTPException(status_code=500, detail="Could not load messages")
 
 
 # Helper function for AI auto-reply (runs in background)
@@ -3041,14 +3214,21 @@ async def trigger_ai_auto_reply(
             content=ai_reply
         )
         
-        logger.info(f"AI auto-reply sent in conversation {conversation_id}: {ai_reply[:50]}...")
+        logger.info(f"AI auto-reply sent in conversation {conversation_id}")
     except Exception as e:
-        logger.error(f"Error generating AI auto-reply: {e}")
+        logger.error(f"Error generating AI auto-reply: {type(e).__name__}")
 
 
 @api_router.post("/chat/send")
-async def api_send_message(req: SendMessageRequest, background_tasks: BackgroundTasks):
-    """Send a message and optionally trigger AI auto-reply for testing"""
+async def api_send_message(req: SendMessageRequest, request: Request, background_tasks: BackgroundTasks):
+    """Send a message and optionally trigger the mock-bot auto-reply.
+
+    AUTH: the body `sender_id` is ignored — the session identity is used.
+    Self-send → 400; closed / non-participant conversation → 404.
+    """
+    req.sender_id = request.state.user_id
+    if req.receiver_id == req.sender_id:
+        raise HTTPException(status_code=400, detail="Cannot message yourself")
     try:
         message = await send_message(
             sender_id=req.sender_id,
@@ -3057,10 +3237,10 @@ async def api_send_message(req: SendMessageRequest, background_tasks: Background
             message_type=req.message_type,
             media_url=req.media_url
         )
-        
-        # For testing: trigger AI auto-reply after a short delay
-        # This simulates the match replying back
-        if req.receiver_id.startswith("mock_"):
+
+        # Mock bots (MOCK_BOT_REPLIES): trigger an AI auto-reply after a short
+        # delay. This simulates the match replying back.
+        if settings.mock_bot_replies and req.receiver_id.startswith("mock_"):
             # Get match profile for context
             mock_profiles = {
                 "mock_user_001": {
@@ -3108,18 +3288,27 @@ async def api_send_message(req: SendMessageRequest, background_tasks: Background
             )
         
         return {
-            "success": True, 
+            "success": True,
             "message": message,
             "conversation_status": message.get("conversation_status", "pending")
         }
-    except Exception as e:
-        logger.error(f"Send message error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except ChatAccessDenied:
+        raise
+    except ValueError as e:
+        # chat_service's own validation messages (e.g. "Cannot message yourself")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        logger.exception("Send message error")
+        raise HTTPException(status_code=500, detail="Could not send message")
 
 
 @api_router.post("/chat/accept")
-async def api_accept_request(req: AcceptDeclineRequest):
-    """Accept a message request"""
+async def api_accept_request(req: AcceptDeclineRequest, request: Request):
+    """Accept a message request
+
+    AUTH: the body `user_id` is ignored — the session identity is used.
+    """
+    req.user_id = request.state.user_id
     try:
         success = await accept_message_request(req.user_id, req.conversation_id)
         # Audit: chat request accepted (reuses match_events table)
@@ -3133,14 +3322,20 @@ async def api_accept_request(req: AcceptDeclineRequest):
         except Exception as audit_err:
             logger.warning(f"[audit] accept request log failed: {audit_err}")
         return {"success": success}
-    except Exception as e:
-        logger.error(f"Accept request error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except ChatAccessDenied:
+        raise
+    except Exception:
+        logger.exception("Accept request error")
+        raise HTTPException(status_code=500, detail="Could not accept request")
 
 
 @api_router.post("/chat/decline")
-async def api_decline_request(req: AcceptDeclineRequest):
-    """Decline a message request"""
+async def api_decline_request(req: AcceptDeclineRequest, request: Request):
+    """Decline a message request
+
+    AUTH: the body `user_id` is ignored — the session identity is used.
+    """
+    req.user_id = request.state.user_id
     try:
         success = await decline_message_request(req.user_id, req.conversation_id)
         try:
@@ -3153,25 +3348,37 @@ async def api_decline_request(req: AcceptDeclineRequest):
         except Exception as audit_err:
             logger.warning(f"[audit] decline request log failed: {audit_err}")
         return {"success": success}
-    except Exception as e:
-        logger.error(f"Decline request error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except ChatAccessDenied:
+        raise
+    except Exception:
+        logger.exception("Decline request error")
+        raise HTTPException(status_code=500, detail="Could not decline request")
 
 
 @api_router.post("/chat/unmatch")
-async def api_unmatch(req: UnmatchRequest):
-    """Unmatch with a user"""
+async def api_unmatch(req: UnmatchRequest, request: Request):
+    """Unmatch with a user
+
+    AUTH: the body `user_id` is ignored — the session identity is used.
+    """
+    req.user_id = request.state.user_id
     try:
         success = await unmatch_user(req.user_id, req.other_user_id, req.reason)
         return {"success": success}
-    except Exception as e:
-        logger.error(f"Unmatch error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except ChatAccessDenied:
+        raise
+    except Exception:
+        logger.exception("Unmatch error")
+        raise HTTPException(status_code=500, detail="Could not unmatch")
 
 
 @api_router.post("/chat/report")
-async def api_report_user(req: ReportRequest):
-    """Report a user"""
+async def api_report_user(req: ReportRequest, request: Request):
+    """Report a user
+
+    AUTH: the body `reporter_id` is ignored — the session identity is used.
+    """
+    req.reporter_id = request.state.user_id
     try:
         report = await report_user(
             reporter_id=req.reporter_id,
@@ -3180,14 +3387,23 @@ async def api_report_user(req: ReportRequest):
             details=req.details
         )
         return {"success": True, "report": report}
-    except Exception as e:
-        logger.error(f"Report user error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except ChatAccessDenied:
+        raise
+    except ValueError as e:
+        # chat_service's own validation messages (e.g. "Cannot report yourself")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        logger.exception("Report user error")
+        raise HTTPException(status_code=500, detail="Could not submit report")
 
 
 @api_router.post("/chat/meeting-status")
-async def api_set_meeting_status(req: MeetingStatusRequest):
-    """Set meeting verification status"""
+async def api_set_meeting_status(req: MeetingStatusRequest, request: Request):
+    """Set meeting verification status
+
+    AUTH: the body `user_id` is ignored — the session identity is used.
+    """
+    req.user_id = request.state.user_id
     try:
         success = await set_meeting_status(
             user_id=req.user_id,
@@ -3210,83 +3426,109 @@ async def api_set_meeting_status(req: MeetingStatusRequest):
         except Exception as audit_err:
             logger.warning(f"[audit] meeting status log failed: {audit_err}")
         return {"success": success}
-    except Exception as e:
-        logger.error(f"Set meeting status error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except ChatAccessDenied:
+        raise
+    except Exception:
+        logger.exception("Set meeting status error")
+        raise HTTPException(status_code=500, detail="Could not update meeting status")
 
 
 @api_router.post("/chat/read/{conversation_id}")
-async def api_mark_read(conversation_id: str, user_id: str = ""):
-    """Mark messages as read"""
-    # Guard: user_id must be a non-empty string. Previously a missing/empty
-    # value caused a 500 deep inside the Mongo update path.
-    if not user_id or not user_id.strip():
-        raise HTTPException(status_code=400, detail="user_id query parameter is required")
+async def api_mark_read(conversation_id: str, request: Request, user_id: str = ""):
+    """Mark messages as read
+
+    AUTH: the `user_id` query param is ignored (legacy) — the session
+    identity is used; non-participants get 404.
+    """
+    user_id = request.state.user_id
     if not conversation_id or not conversation_id.strip():
         raise HTTPException(status_code=400, detail="conversation_id is required")
     try:
         success = await mark_messages_read(user_id, conversation_id)
         return {"success": success}
-    except Exception as e:
-        logger.error(f"Mark read error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except ChatAccessDenied:
+        raise
+    except Exception:
+        logger.exception("Mark read error")
+        raise HTTPException(status_code=500, detail="Could not mark messages read")
 
 
 @api_router.post("/chat/ice-breakers")
-async def api_get_ice_breakers(req: IceBreakerRequest):
-    """Get AI-generated ice breaker suggestions"""
+async def api_get_ice_breakers(req: IceBreakerRequest, request: Request):
+    """Get AI-generated ice breaker suggestions
+
+    AUTH: the body `user_id` is ignored — the session identity is used. The
+    match is only seen through the public profile whitelist. LLM-limited.
+    """
+    req.user_id = request.state.user_id
+    LLM_LIMITER.check_or_raise(f"llm:{req.user_id}")
     try:
-        # Get user profiles
-        user_profile = {"user_id": req.user_id, "name": "User", "genres": ["Drama", "Sci-Fi"]}
-        match_profile = get_mock_user_by_id(req.match_user_id)
-        
-        if not match_profile:
+        # Get user profiles (sender's own + the match's public view)
+        user_profile = await _ai_profile(req.user_id, req.user_id)
+        match_profile = await _ai_profile(req.match_user_id, req.user_id)
+        if not match_profile.get("name"):
             match_profile = {"name": "Match", "genres": ["Drama"], "topMovies": []}
-        
+
         ice_breakers = await generate_ice_breakers(user_profile, match_profile)
         return {"success": True, "ice_breakers": ice_breakers}
-    except Exception as e:
-        logger.error(f"Ice breakers error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Ice breakers error")
+        raise HTTPException(status_code=500, detail="Could not generate ice breakers")
 
 
 @api_router.post("/chat/reply-suggestions")
-async def api_get_reply_suggestions(req: ReplySuggestionsRequest):
-    """Get AI-generated reply suggestions"""
+async def api_get_reply_suggestions(req: ReplySuggestionsRequest, request: Request):
+    """Get AI-generated reply suggestions
+
+    AUTH: the body `user_id` is ignored — the session identity is used; only
+    a participant of the conversation gets suggestions (else 404).
+    LLM-limited.
+    """
+    req.user_id = request.state.user_id
+    LLM_LIMITER.check_or_raise(f"llm:{req.user_id}")
     try:
-        # Get messages and profiles
-        messages = await get_messages(req.conversation_id, limit=10)
-        user_profile = {"user_id": req.user_id, "name": "User", "genres": ["Drama", "Sci-Fi"]}
-        
+        # Get messages (participant-checked) and profiles
+        messages = await get_messages(req.conversation_id, req.user_id, limit=10)
+        user_profile = await _ai_profile(req.user_id, req.user_id)
+
         # Get other user from conversation
-        match_profile = {"name": "Match", "genres": ["Drama"]}
-        
+        conv = await db.chat_conversations.find_one(
+            {"conversation_id": req.conversation_id}, {"_id": 0, "participants": 1}
+        ) or {}
+        other_id = next((p for p in (conv.get("participants") or []) if p != req.user_id), None)
+        match_profile = await _ai_profile(other_id, req.user_id) if other_id else {}
+        if not match_profile.get("name"):
+            match_profile = {"name": "Match", "genres": ["Drama"]}
+
         suggestions = await generate_reply_suggestions(
             conversation_messages=list(reversed(messages)),
             user_profile=user_profile,
             match_profile=match_profile
         )
         return {"success": True, "suggestions": suggestions}
-    except Exception as e:
-        logger.error(f"Reply suggestions error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except ChatAccessDenied:
+        raise
+    except Exception:
+        logger.exception("Reply suggestions error")
+        raise HTTPException(status_code=500, detail="Could not generate suggestions")
 
 
 @api_router.post("/chat/init-mock/{user_id}")
-async def api_init_mock_conversations(user_id: str):
+async def api_init_mock_conversations(user_id: str, request: Request):
     """Seed mock_user_001/002/003 conversations into a user's inbox.
 
-    Restored as default behavior (June 30, 2026) so new test users get
-    convenient default chats to play with. Previously gated by
-    DEV_SEED_MOCK_CHATS — flag removed.
+    DEV-ONLY (ENABLE_DEV_ROUTES); caller must own this user_id.
     """
+    if not settings.enable_dev_routes:
+        raise HTTPException(status_code=404, detail="Not found")
+    require_owner(user_id, request.state.user_id)
     try:
         mock_users = get_all_mock_users()[:3]
         await create_mock_conversations(user_id, mock_users)
         return {"success": True, "message": "Mock conversations created"}
-    except Exception as e:
-        logger.error(f"Init mock conversations error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Init mock conversations error")
+        raise HTTPException(status_code=500, detail="Could not create mock conversations")
 
 
 # =============================================
@@ -3294,7 +3536,7 @@ async def api_init_mock_conversations(user_id: str):
 # =============================================
 
 @api_router.get("/user/match-history/{user_id}")
-async def api_get_match_history(user_id: str):
+async def api_get_match_history(user_id: str, request: Request):
     """
     Get complete match history for a user.
     This is a differentiating trust & safety feature that allows users to:
@@ -3302,84 +3544,108 @@ async def api_get_match_history(user_id: str):
     - Report users even after they've unmatched
     - View read-only chat history if they were unmatched by someone
 
-    Side effect: ensures the demo Anjali/Priya unmatched conversations exist
-    for this user so they can manually test the post-unmatch flows. The seed
-    function is idempotent and skips if already done. (Auto-seed restored
-    June 30, 2026 — the previous DEV_SEED_MOCK_UNMATCHED gate has been removed.)
+    Side effect (only when MOCK_SEED_CHATS is on): ensures the demo
+    Anjali/Priya unmatched conversations exist for this user so they can
+    manually test the post-unmatch flows. The seed function is idempotent
+    and skips if already done.
+
+    AUTH: caller must own this user_id.
     """
+    require_owner(user_id, request.state.user_id)
     try:
         # Best-effort seed; never block history fetch if seeding fails
-        try:
-            await seed_unmatched_for_user(db, user_id)
-        except Exception as seed_err:
-            logger.warning(f"Auto-seed unmatched mocks failed for {user_id}: {seed_err}")
+        if settings.mock_seed_chats:
+            try:
+                await seed_unmatched_for_user(db, user_id)
+            except Exception as seed_err:
+                logger.warning(f"Auto-seed unmatched mocks failed for {user_id}: {type(seed_err).__name__}")
 
         history = await get_match_history(user_id)
         return {"success": True, "history": history, "total": len(history)}
-    except Exception as e:
-        logger.error(f"Get match history error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except ChatAccessDenied:
+        raise
+    except Exception:
+        logger.exception("Get match history error")
+        raise HTTPException(status_code=500, detail="Could not load match history")
 
 
 @api_router.post("/dev/seed-unmatched-mocks/{user_id}")
-async def api_seed_unmatched_mocks(user_id: str):
+async def api_seed_unmatched_mocks(user_id: str, request: Request):
     """
-    DEV-ONLY: Seeds two recognisable mock users (Anjali Iyer & Priya Bhatia)
-    with realistic chat history with the given user, then marks both
-    conversations as unmatched (by them).
+    DEV-ONLY (ENABLE_DEV_ROUTES): Seeds two recognisable mock users (Anjali
+    Iyer & Priya Bhatia) with realistic chat history with the given user,
+    then marks both conversations as unmatched (by them).
     Used to manually test the Match History + post-unmatch flows.
+
+    AUTH: caller must own this user_id.
     """
+    if not settings.enable_dev_routes:
+        raise HTTPException(status_code=404, detail="Not found")
+    require_owner(user_id, request.state.user_id)
     try:
         result = await seed_unmatched_for_user(db, user_id)
         return result
-    except Exception as e:
-        logger.error(f"Seed unmatched mocks error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Seed unmatched mocks error")
+        raise HTTPException(status_code=500, detail="Could not seed mock conversations")
 
 
 @api_router.get("/chat/conversation-access/{conversation_id}")
-async def api_check_conversation_access(conversation_id: str, user_id: str):
+async def api_check_conversation_access(conversation_id: str, request: Request, user_id: str = ""):
     """
     Check if a user can view a conversation and in what mode.
     Returns whether the conversation is read-only (for users who were unmatched).
+
+    AUTH: the `user_id` query param is ignored (legacy) — the session
+    identity is used.
     """
+    user_id = request.state.user_id
     try:
         access = await can_user_view_conversation(user_id, conversation_id)
         return access
-    except Exception as e:
-        logger.error(f"Check conversation access error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except ChatAccessDenied:
+        raise
+    except Exception:
+        logger.exception("Check conversation access error")
+        raise HTTPException(status_code=500, detail="Could not check conversation access")
 
 
 @api_router.get("/chat/unmatched/{conversation_id}")
-async def api_get_unmatched_conversation(conversation_id: str, user_id: str):
+async def api_get_unmatched_conversation(conversation_id: str, request: Request, user_id: str = ""):
     """
     Get details of an unmatched conversation for read-only viewing.
     Only available to users who were unmatched (not the ones who initiated).
+
+    AUTH: the `user_id` query param is ignored (legacy) — the session
+    identity is used.
     """
+    user_id = request.state.user_id
     try:
         conv = await get_unmatched_conversation(user_id, conversation_id)
         if conv is None:
             raise HTTPException(status_code=404, detail="Conversation not found or access denied")
         return {"success": True, "conversation": conv}
-    except HTTPException:
+    except (HTTPException, ChatAccessDenied):
         raise
-    except Exception as e:
-        logger.error(f"Get unmatched conversation error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Get unmatched conversation error")
+        raise HTTPException(status_code=500, detail="Could not load conversation")
 
 
 class DeleteChatRequest(BaseModel):
-    user_id: str
+    user_id: str = ""  # ignored — the session identity is used
     conversation_id: str
 
 
 @api_router.post("/chat/delete")
-async def api_delete_chat(req: DeleteChatRequest):
+async def api_delete_chat(req: DeleteChatRequest, request: Request):
     """
     Delete chat history from a user's view.
     This is a soft delete - the other user's view and any reports are not affected.
+
+    AUTH: the body `user_id` is ignored — the session identity is used.
     """
+    req.user_id = request.state.user_id
     try:
         success = await delete_chat_history(req.user_id, req.conversation_id)
         if success:
@@ -3396,11 +3662,11 @@ async def api_delete_chat(req: DeleteChatRequest):
             return {"success": True, "message": "Chat deleted successfully"}
         else:
             raise HTTPException(status_code=400, detail="Could not delete chat")
-    except HTTPException:
+    except (HTTPException, ChatAccessDenied):
         raise
-    except Exception as e:
-        logger.error(f"Delete chat error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Delete chat error")
+        raise HTTPException(status_code=500, detail="Could not delete chat")
 
 
 # =============================================
@@ -3409,7 +3675,7 @@ async def api_delete_chat(req: DeleteChatRequest):
 
 class TinaChatRequest(BaseModel):
     """Request model for Tina chat"""
-    user_id: str
+    user_id: str = ""  # ignored — the session identity is used
     user_name: Optional[str] = ""
     message: str = ""
     selected_option: Optional[str] = None
@@ -3455,6 +3721,7 @@ async def tina_chat_endpoint(req: TinaChatRequest, request: Request):
             f"user_id={session_uid!r}. Using session identity."
         )
     req.user_id = session_uid
+    LLM_LIMITER.check_or_raise(f"llm:{req.user_id}")
     try:
         result = await process_tina_message(
             user_id=req.user_id,
@@ -3504,20 +3771,22 @@ async def tina_chat_endpoint(req: TinaChatRequest, request: Request):
             logger.debug(f"audit (tina chat) skipped: {_e}")
 
         return result
-    except Exception as e:
-        logger.error(f"Tina chat error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Tina chat error")
+        raise HTTPException(status_code=500, detail="Tina is unavailable right now")
 
 
 @api_router.get("/tina/greeting")
 async def tina_greeting_endpoint(user_name: str = ""):
     """Get Tina's initial greeting message."""
     try:
-        greeting = await get_tina_greeting(user_name)
+        greeting = await get_tina_greeting(user_name[:80])
         return {"success": True, "greeting": greeting}
-    except Exception as e:
-        logger.error(f"Tina greeting error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Tina greeting error")
+        raise HTTPException(status_code=500, detail="Tina is unavailable right now")
 
 
 @api_router.get("/tina/missing-fields/{user_id}")
@@ -3527,9 +3796,9 @@ async def tina_missing_fields_endpoint(user_id: str, request: Request):
     try:
         missing = await get_missing_fields(user_id)
         return {"success": True, "missing_fields": missing, "count": len(missing)}
-    except Exception as e:
-        logger.error(f"Get missing fields error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Get missing fields error")
+        raise HTTPException(status_code=500, detail="Could not load missing fields")
 
 
 @api_router.get("/tina/profile-data/{user_id}")
@@ -3539,9 +3808,9 @@ async def tina_profile_data_endpoint(user_id: str, request: Request):
     try:
         data = await get_collected_profile_data(user_id)
         return {"success": True, "profile_data": data}
-    except Exception as e:
-        logger.error(f"Get Tina profile data error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Get Tina profile data error")
+        raise HTTPException(status_code=500, detail="Could not load profile data")
 
 
 @api_router.delete("/tina/session/{user_id}")
@@ -3551,13 +3820,13 @@ async def tina_clear_session_endpoint(user_id: str, request: Request):
     try:
         await clear_tina_session(user_id)
         return {"success": True, "message": "Tina session cleared"}
-    except Exception as e:
-        logger.error(f"Clear Tina session error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Clear Tina session error")
+        raise HTTPException(status_code=500, detail="Could not clear Tina session")
 
 
 class WelcomeBackRequest(BaseModel):
-    user_id: str
+    user_id: str = ""  # ignored — the session identity is used
     user_name: str = ""
     is_onboarding_complete: bool = False
     collected_fields: List[str] = []  # Fields already collected from frontend
@@ -3582,6 +3851,8 @@ async def tina_welcome_back_endpoint(req: WelcomeBackRequest, request: Request):
             f"session user_id={session_uid!r}. Using session identity."
         )
     req.user_id = session_uid
+    # LLM-backed opener → shares the per-user LLM budget.
+    LLM_LIMITER.check_or_raise(f"llm:{req.user_id}")
     try:
         result = await generate_welcome_back_message(
             user_id=req.user_id,
@@ -3590,9 +3861,9 @@ async def tina_welcome_back_endpoint(req: WelcomeBackRequest, request: Request):
             collected_fields_list=req.collected_fields,
         )
         return {"success": True, **result}
-    except Exception as e:
-        logger.error(f"Welcome back error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Welcome back error")
+        raise HTTPException(status_code=500, detail="Tina is unavailable right now")
 
 
 @api_router.get("/tina/onboarding-status/{user_id}")
@@ -3602,9 +3873,9 @@ async def tina_onboarding_status_endpoint(user_id: str, request: Request):
     try:
         status = await get_user_onboarding_status(user_id)
         return {"success": True, **status}
-    except Exception as e:
-        logger.error(f"Onboarding status error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Onboarding status error")
+        raise HTTPException(status_code=500, detail="Could not load onboarding status")
 
 
 @api_router.get("/tina/field-options")
@@ -3620,9 +3891,9 @@ async def tina_field_options_endpoint():
                 "priority": config.get("priority", 100),
             }
         return {"success": True, "fields": fields}
-    except Exception as e:
-        logger.error(f"Get field options error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Get field options error")
+        raise HTTPException(status_code=500, detail="Could not load field options")
 
 
 # ---------------------------------------------------------------------------
@@ -3637,7 +3908,7 @@ class TinaSpeakRequest(BaseModel):
 @api_router.get("/tina/voice/status")
 async def tina_voice_status_endpoint():
     """Tells the client whether voice mode is currently available."""
-    return {"enabled": tina_voice_enabled()}
+    return {"enabled": is_voice_enabled()}
 
 
 @api_router.post("/tina/voice/speak")
@@ -3650,16 +3921,18 @@ async def tina_voice_speak_endpoint(req: TinaSpeakRequest, request: Request):
     try:
         if not req.text or not req.text.strip():
             raise HTTPException(status_code=400, detail="text is required")
+        if not is_voice_enabled():
+            raise HTTPException(status_code=503, detail="Voice service is not configured")
         # Per-user rate limit so ElevenLabs quota can't be drained by a single
         # compromised session or runaway client retry.
         TTS_LIMITER.check_or_raise(f"tts:{getattr(request.state, 'user_id', 'anon')}")
-        audio_data_uri = tina_synthesize_speech(req.text, req.voice_id)
+        audio_data_uri = await synthesize_speech(req.text, req.voice_id)
         return {"success": True, "audio": audio_data_uri}
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Tina TTS error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Tina TTS error")
+        raise HTTPException(status_code=500, detail="Voice synthesis failed")
 
 
 @api_router.get("/tina/voice/speak-stream")
@@ -3678,41 +3951,40 @@ async def tina_voice_speak_stream_endpoint(
     the only way native `<audio src=>` players can pass auth (no header
     support). Rate-limited per user via TTS_LIMITER.
     """
-    from fastapi.responses import StreamingResponse
     if not text or not text.strip():
         raise HTTPException(status_code=400, detail="text is required")
-    if not tina_voice_enabled():
+    if not is_voice_enabled():
         raise HTTPException(status_code=503, detail="Voice service is not configured")
     TTS_LIMITER.check_or_raise(f"tts:{getattr(request.state, 'user_id', 'anon')}")
 
-    # Eagerly drain the first MP3 chunk from ElevenLabs BEFORE constructing
+    # Eagerly pull the first MP3 chunk from ElevenLabs BEFORE constructing
     # the StreamingResponse. Any auth / quota / config error will surface
     # here as a clean 5xx instead of a 200 with a broken stream body.
+    agen = stream_speech(text, voice_id)
     try:
-        upstream = tina_stream_speech(text, voice_id)
-        first_chunk = next(upstream, b"")
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Tina TTS stream init failed: {e}")
-        raise HTTPException(status_code=502, detail=f"TTS upstream error: {e}")
-    if not first_chunk:
+        first = await agen.__anext__()
+    except StopAsyncIteration:
         raise HTTPException(status_code=502, detail="TTS upstream returned empty audio")
+    except Exception:
+        logger.exception("Tina TTS stream init failed")
+        raise HTTPException(status_code=502, detail="Voice service unavailable")
 
-    def _stitched_stream():
+    async def _relay():
         # Replay the first chunk we already fetched, then continue draining
         # the rest. Errors mid-stream can only be logged — by this point the
         # client already has a 200 + audio/mpeg response.
         try:
-            yield first_chunk
-            for chunk in upstream:
+            yield first
+            async for chunk in agen:
                 if chunk:
                     yield chunk
         except Exception as e:
-            logger.warning(f"Tina TTS stream interrupted mid-flight: {e}")
+            logger.warning(f"Tina TTS stream interrupted mid-flight: {type(e).__name__}")
+        finally:
+            await agen.aclose()  # release the upstream stream on disconnect
 
     return StreamingResponse(
-        _stitched_stream(),
+        _relay(),
         media_type="audio/mpeg",
         headers={
             # Cache aggressively for identical replies (rare but cheap),
@@ -3725,19 +3997,27 @@ async def tina_voice_speak_stream_endpoint(
 
 
 @api_router.post("/tina/voice/transcribe")
-async def tina_voice_transcribe_endpoint(audio: UploadFile = File(...)):
-    """Convert a user-recorded clip to text (ElevenLabs Scribe)."""
+async def tina_voice_transcribe_endpoint(request: Request, audio: UploadFile = File(...)):
+    """Convert a user-recorded clip to text (ElevenLabs Scribe).
+
+    Rate-limited per user via STT_LIMITER (20/min).
+    """
+    if not is_voice_enabled():
+        raise HTTPException(status_code=503, detail="Voice service is not configured")
+    STT_LIMITER.check_or_raise(f"stt:{_actor_key(request)}")
     try:
-        raw = await audio.read()
+        raw = await audio.read(STT_MAX_AUDIO_BYTES + 1)
         if not raw:
             raise HTTPException(status_code=400, detail="Empty audio file")
-        text = tina_transcribe_audio(raw, filename=audio.filename or "tina_voice.m4a")
+        if len(raw) > STT_MAX_AUDIO_BYTES:
+            raise HTTPException(status_code=413, detail="Audio clip too large")
+        text = await transcribe_audio(raw, filename=(audio.filename or "tina_voice.m4a")[:100])
         return {"success": True, "text": text}
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Tina STT error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Tina STT error")
+        raise HTTPException(status_code=500, detail="Transcription failed")
 
 
 # ---------------------------------------------------------------------------
@@ -3750,7 +4030,7 @@ class Tina360Answer(BaseModel):
 
 
 class Tina360SubmitRequest(BaseModel):
-    user_id: str
+    user_id: str = ""  # ignored — the session identity is used
     answers: List[Tina360Answer]
     # Optional explicit extras like favourite genres/tropes captured during chat
     favourite_genres: Optional[List[str]] = None
@@ -3788,19 +4068,22 @@ async def tina_360_questions_endpoint():
             },
             "total_questions": len(public_questions),
         }
-    except Exception as e:
-        logger.error(f"360 questions error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("360 questions error")
+        raise HTTPException(status_code=500, detail="Could not load questions")
 
 
 @api_router.post("/tina/360/submit")
-async def tina_360_submit_endpoint(req: Tina360SubmitRequest):
+async def tina_360_submit_endpoint(req: Tina360SubmitRequest, request: Request):
     """
     Take the user's 8 answers, compute the hidden 360° personality profile,
     persist it to `tina_profiles` and return ONLY the public-safe parts
     (archetype, intent split, primary love language) plus a fun reveal copy.
     The raw scores/vector are NEVER returned to the client.
+
+    AUTH: the body `user_id` is ignored — the session identity is used.
     """
+    req.user_id = request.state.user_id
     try:
         answers_dict = [
             {"question_id": a.question_id, "option_key": a.option_key}
@@ -3843,21 +4126,40 @@ async def tina_360_submit_endpoint(req: Tina360SubmitRequest):
         }
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"360 submit error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("360 submit error")
+        raise HTTPException(status_code=500, detail="Could not save your answers")
 
 
 @api_router.get("/tina/360/profile/{user_id}")
-async def tina_360_profile_endpoint(user_id: str):
+async def tina_360_profile_endpoint(user_id: str, request: Request):
     """
     Returns the *public-safe* personality summary for a user. Hidden vector
     and intermediate scores are intentionally stripped.
+
+    AUTH: your own id → the full summary; anyone else's → only the
+    archetype / love language, filtered by the owner's visibility toggles
+    through _public_profile_view.
     """
     try:
         doc = await get_tina_personality(user_id)
         if not doc:
             return {"success": True, "exists": False}
+        if user_id != request.state.user_id:
+            owner = await db.user_profiles.find_one(
+                {"user_id": user_id}, {"_id": 0, "visibilityToggles": 1}
+            ) or {}
+            public = _public_profile_view({
+                **owner,
+                "archetype": doc.get("archetype"),
+                "primary_love_language": doc.get("primary_love_language"),
+            })
+            return {
+                "success": True,
+                "exists": True,
+                "archetype": public.get("archetype"),
+                "primary_love_language": public.get("primary_love_language"),
+            }
         return {
             "success": True,
             "exists": True,
@@ -3867,10 +4169,14 @@ async def tina_360_profile_endpoint(user_id: str):
             "questions_answered": doc.get("questions_answered", []),
             "computed_at": doc.get("computed_at"),
         }
-    except Exception as e:
-        logger.error(f"360 profile fetch error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("360 profile fetch error")
+        raise HTTPException(status_code=500, detail="Could not load personality profile")
 
+
+# Auth routes (auth_routes.py) mount under /api/auth/* — must be attached to
+# api_router BEFORE api_router itself is included into the app.
+api_router.include_router(auth_router)
 
 # Include router after all routes are defined
 app.include_router(api_router)
@@ -3883,25 +4189,13 @@ socket_app = socketio.ASGIApp(sio, app)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    # Lock CORS to known origins. Read from env so prod can extend without
-    # code changes. Wildcard "*" + allow_credentials=True is browser-rejected
-    # AND a CSRF foot-gun, so we never use it.
-    #
-    # Defaults intentionally cover:
-    #   - Emergent preview tunnels (regex below)
-    #   - Emergent published hosts *.emergent.host / *.emergent.sh (regex)
-    #   - Localhost dev preview
-    #   - React Native / Expo Go (has no Origin header, so CORS doesn't apply)
-    # Any additional prod domain (e.g. a custom domain) must be added via the
-    # ALLOWED_ORIGINS env var — comma-separated, no trailing slashes.
-    allow_origins=[o.strip() for o in os.getenv(
-        "ALLOWED_ORIGINS",
-        "http://localhost:3000,http://localhost:19006,http://127.0.0.1:3000"
-    ).split(",") if o.strip()],
-    allow_origin_regex=os.getenv(
-        "ALLOWED_ORIGIN_REGEX",
-        r"^https://[a-z0-9-]+\.(preview\.emergentagent\.com|emergent\.host|emergent\.sh|emergentagent\.com)$",
-    ),
+    # Lock CORS to known origins (settings.py: ALLOWED_ORIGINS, comma-separated,
+    # no trailing slashes; optional ALLOWED_ORIGIN_REGEX). Wildcard "*" +
+    # allow_credentials=True is browser-rejected AND a CSRF foot-gun, so we
+    # never use it. Only the admin web dashboard / local web preview need
+    # this — the Android app sends no Origin header, so CORS doesn't apply.
+    allow_origins=settings.allowed_origins,
+    allow_origin_regex=settings.allowed_origin_regex or None,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allow_headers=[
         "Authorization",
@@ -3919,18 +4213,66 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 
+# (collection, keys, extra create_index kwargs). create_index is idempotent for
+# an identical spec; a conflicting pre-existing index or duplicate data under a
+# unique key only logs a warning so boot never fails on it. otp_codes indexes
+# are owned by auth_routes.py.
+_MONGO_INDEXES = [
+    ("user_sessions", [("session_token", 1)], {"unique": True}),
+    ("user_sessions", [("expires_at", 1)], {}),
+    ("users", [("user_id", 1)], {"unique": True}),
+    ("users", [("email", 1)], {}),
+    ("users", [("phone", 1)], {}),
+    ("users", [("google_sub", 1)], {}),
+    ("users", [("status", 1)], {}),
+    ("match_cache", [("owner_id", 1)], {}),
+    ("user_profiles", [("user_id", 1)], {"unique": True}),
+    ("user_taste_vectors", [("user_id", 1)], {}),
+    ("user_swipes", [("user_id", 1), ("created_at", 1)], {}),
+    ("user_shown_movies", [("user_id", 1)], {}),
+    ("chat_conversations", [("conversation_id", 1)], {"unique": True}),
+    ("chat_conversations", [("participants", 1)], {}),
+    ("chat_messages", [("conversation_id", 1), ("created_at", 1)], {}),
+    ("chat_requests", [("to_user_id", 1)], {}),
+    ("chat_reports", [("reported_id", 1)], {}),
+    ("chat_reports", [("reporter_id", 1)], {}),
+    ("match_cache", [("user_id", 1)], {}),
+    ("tina_sessions", [("user_id", 1)], {}),
+    ("tina_profiles", [("user_id", 1)], {}),
+    ("user_pictures", [("user_id", 1)], {}),
+    ("user_filters", [("user_id", 1)], {"unique": True}),
+]
+
+
+async def _ensure_indexes() -> None:
+    """Create the Mongo indexes the hot query paths rely on (idempotent)."""
+    for coll, keys, opts in _MONGO_INDEXES:
+        try:
+            await db[coll].create_index(keys, **opts)
+        except ConnectionFailure as exc:
+            # Unreachable cluster: don't stall boot 5s per index — bail out.
+            logger.warning(f"Mongo unreachable, skipping index creation: {type(exc).__name__}")
+            return
+        except Exception as exc:
+            logger.warning(
+                f"Index {coll}{[k for k, _ in keys]} not created: {type(exc).__name__}: {exc}"
+            )
+
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize services on startup"""
     # Wire the centralised security deps to Mongo + admin tokens store.
     # Done FIRST so any subsequent startup task can rely on auth being live.
     set_security_db(db)
+    configure_auth(db, on_new_user=broadcast_new_user)
     set_admin_tokens_provider(lambda: admin_tokens)
     logger.info(
-        "Security subsystem initialised (INSECURE_DEV_AUTH=%s, ALLOWED_ORIGINS=%s)",
-        INSECURE_DEV_AUTH,
-        os.getenv("ALLOWED_ORIGINS", "<default>"),
+        "Security subsystem initialised (ALLOWED_ORIGINS=%s)",
+        ",".join(settings.allowed_origins) or "<none>",
     )
+
+    await _ensure_indexes()
 
     # Pass MongoDB db to picture service
     set_mongodb_db(db)

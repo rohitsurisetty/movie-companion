@@ -2,17 +2,52 @@
 Supabase Database Service - VERSIONED/AUDIT TRAIL MODE
 Every modification creates a NEW ROW instead of updating.
 This enables full history tracking and analytics.
+
+supabase-py is a SYNC client: every `.execute()` reached from an async
+function goes through `await _run(lambda: ...)` (asyncio.to_thread) so a slow
+Supabase never blocks the event loop, and the client carries short HTTP
+timeouts (PostgREST 10 s, storage 15 s).
 """
 import os
+import asyncio
 import logging
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Callable
 from dotenv import load_dotenv
 from supabase import create_client, Client
+
+# Client-side HTTP timeouts. supabase-py >= 2.8 needs SyncClientOptions for
+# the sync client (the base ClientOptions lacks `.storage` and makes
+# create_client fail); older SDKs only have ClientOptions. If neither imports
+# or the kwargs are rejected, get_supabase_client() falls back to no options.
+try:
+    from supabase.lib.client_options import SyncClientOptions as _ClientOptions
+except Exception:  # pragma: no cover - older SDK layout
+    try:
+        from supabase.lib.client_options import ClientOptions as _ClientOptions
+    except Exception:
+        _ClientOptions = None
 
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+
+async def _run(fn: Callable[[], Any]) -> Any:
+    """Run a blocking supabase-py call (e.g. `lambda: q.execute()`) in a
+    worker thread so it never blocks the event loop."""
+    return await asyncio.to_thread(fn)
+
+
+def _err(e: BaseException) -> str:
+    """PII-safe error summary for logs / return values. PostgREST `details`
+    can echo row values (e.g. "Key (email)=(...) already exists") so only the
+    exception type, code and message are kept."""
+    code = getattr(e, "code", None)
+    message = getattr(e, "message", None)
+    if code or message:
+        return f"{type(e).__name__}({code}): {str(message)[:200]}"
+    return f"{type(e).__name__}: {str(e)[:200]}"
 
 # Initialize Supabase client
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -24,13 +59,28 @@ SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY")
 
 supabase: Optional[Client] = None
 
+def _create_client() -> Client:
+    """create_client() with short HTTP timeouts; SDK defaults (120 s
+    PostgREST) if this SDK version rejects the options."""
+    if _ClientOptions is not None:
+        try:
+            return create_client(
+                SUPABASE_URL,
+                SUPABASE_KEY,
+                options=_ClientOptions(postgrest_client_timeout=10, storage_client_timeout=15),
+            )
+        except Exception as e:
+            logger.warning(f"Supabase client options rejected, using SDK defaults: {_err(e)}")
+    return create_client(SUPABASE_URL, SUPABASE_KEY)
+
+
 def get_supabase_client() -> Client:
     """Get or create Supabase client"""
     global supabase
     if supabase is None:
         if not SUPABASE_URL or not SUPABASE_KEY:
             raise ValueError("SUPABASE_URL and SUPABASE_KEY must be set in environment")
-        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+        supabase = _create_client()
         logger.info("Supabase client initialized")
     return supabase
 
@@ -58,8 +108,13 @@ def get_latest_row(table: str, user_id: str) -> Optional[Dict[str, Any]]:
             return result.data[0]
         return None
     except Exception as e:
-        logger.error(f"Error getting latest row from {table}: {e}")
+        logger.error(f"Error getting latest row from {table}: {_err(e)}")
         return None
+
+
+async def _latest_row(table: str, user_id: str) -> Optional[Dict[str, Any]]:
+    """get_latest_row() off the event loop (for the async save_* functions)."""
+    return await _run(lambda: get_latest_row(table, user_id))
 
 
 def merge_with_previous(previous: Optional[Dict], new_data: Dict, exclude_keys: List[str] = None) -> Dict:
@@ -115,12 +170,12 @@ async def log_user_login(
             "session_id": session_id
         }
         
-        result = client.table("user_logged_in").insert(data).execute()
+        result = await _run(lambda: client.table("user_logged_in").insert(data).execute())
         logger.info(f"Logged login for user {user_id}")
         return {"success": True, "data": result.data}
     except Exception as e:
-        logger.error(f"Error logging user login: {e}")
-        return {"success": False, "error": str(e)}
+        logger.error(f"Error logging user login: {_err(e)}")
+        return {"success": False, "error": _err(e)}
 
 
 # ============== USER SIGNUP DATA (VERSIONED) ==============
@@ -166,7 +221,7 @@ async def save_user_signup_data(user_id: str, profile_data: Dict[str, Any], sess
         ts = get_current_timestamp()
         
         # Get the latest existing row for this user
-        previous = get_latest_row("user_sign_up_details", user_id)
+        previous = await _latest_row("user_sign_up_details", user_id)
         
         # Build new data from incoming profile
         new_data = {
@@ -221,12 +276,12 @@ async def save_user_signup_data(user_id: str, profile_data: Dict[str, Any], sess
         new_data.pop("id", None)
         
         # Always INSERT new row
-        result = client.table("user_sign_up_details").insert(new_data).execute()
+        result = await _run(lambda: client.table("user_sign_up_details").insert(new_data).execute())
         logger.info(f"Inserted new signup data row for user {user_id}")
         return {"success": True, "data": result.data}
     except Exception as e:
-        logger.error(f"Error saving user signup data: {e}")
-        return {"success": False, "error": str(e)}
+        logger.error(f"Error saving user signup data: {_err(e)}")
+        return {"success": False, "error": _err(e)}
 
 
 # ============== TOP 5 MOVIES (VERSIONED) ==============
@@ -240,7 +295,8 @@ async def save_top_movies(user_id: str, movies: List[Dict[str, Any]], session_id
         client = get_supabase_client()
         ts = get_current_timestamp()
         
-        # Always insert new rows for each movie
+        # Always insert new rows for each movie (one bulk insert = one round trip)
+        rows = []
         for idx, movie in enumerate(movies[:5], 1):
             data = {
                 "user_id": user_id,
@@ -252,13 +308,15 @@ async def save_top_movies(user_id: str, movies: List[Dict[str, Any]], session_id
                 "last_modified_date": ts["date"],
                 "session_id": session_id
             }
-            client.table("top_5_movies").insert(data).execute()
-        
-        logger.info(f"Inserted {len(movies)} top movies rows for user {user_id}")
+            rows.append(data)
+        if rows:
+            await _run(lambda: client.table("top_5_movies").insert(rows).execute())
+
+        logger.info(f"Inserted {len(rows)} top movies rows for user {user_id}")
         return {"success": True}
     except Exception as e:
-        logger.error(f"Error saving top movies: {e}")
-        return {"success": False, "error": str(e)}
+        logger.error(f"Error saving top movies: {_err(e)}")
+        return {"success": False, "error": _err(e)}
 
 
 # ============== MOVIE SWIPES (ALWAYS NEW ROW) ==============
@@ -285,12 +343,12 @@ async def save_movie_swipe(
             "reason_given": ",".join(reasons) if reasons else None
         }
         
-        result = client.table("movie_swipes").insert(data).execute()
+        result = await _run(lambda: client.table("movie_swipes").insert(data).execute())
         logger.info(f"Inserted swipe for user {user_id}: {movie_name} -> {swiped_direction}")
         return {"success": True, "data": result.data}
     except Exception as e:
-        logger.error(f"Error saving movie swipe: {e}")
-        return {"success": False, "error": str(e)}
+        logger.error(f"Error saving movie swipe: {_err(e)}")
+        return {"success": False, "error": _err(e)}
 
 
 # ============== PREFERENCES AND FILTERS (VERSIONED) ==============
@@ -325,7 +383,7 @@ async def save_preferences_and_filters(user_id: str, preferences: Dict[str, Any]
         ts = get_current_timestamp()
         
         # Get latest existing row
-        previous = get_latest_row("preferences_and_filters", user_id)
+        previous = await _latest_row("preferences_and_filters", user_id)
         
         new_data = {
             "user_id": user_id,
@@ -366,12 +424,12 @@ async def save_preferences_and_filters(user_id: str, preferences: Dict[str, Any]
         
         new_data.pop("id", None)
         
-        result = client.table("preferences_and_filters").insert(new_data).execute()
+        result = await _run(lambda: client.table("preferences_and_filters").insert(new_data).execute())
         logger.info(f"Inserted preferences row for user {user_id}")
         return {"success": True, "data": result.data}
     except Exception as e:
-        logger.error(f"Error saving preferences: {e}")
-        return {"success": False, "error": str(e)}
+        logger.error(f"Error saving preferences: {_err(e)}")
+        return {"success": False, "error": _err(e)}
 
 
 # ============== EXCLUSIVE TOGGLE (VERSIONED) ==============
@@ -405,7 +463,7 @@ async def save_exclusive_toggle(user_id: str, toggles: Dict[str, bool], session_
         client = get_supabase_client()
         ts = get_current_timestamp()
         
-        previous = get_latest_row("exclusive_toggle", user_id)
+        previous = await _latest_row("exclusive_toggle", user_id)
         
         new_data = {
             "user_id": user_id,
@@ -446,12 +504,12 @@ async def save_exclusive_toggle(user_id: str, toggles: Dict[str, bool], session_
         
         new_data.pop("id", None)
         
-        result = client.table("exclusive_toggle").insert(new_data).execute()
+        result = await _run(lambda: client.table("exclusive_toggle").insert(new_data).execute())
         logger.info(f"Inserted exclusive toggles row for user {user_id}")
         return {"success": True, "data": result.data}
     except Exception as e:
-        logger.error(f"Error saving exclusive toggles: {e}")
-        return {"success": False, "error": str(e)}
+        logger.error(f"Error saving exclusive toggles: {_err(e)}")
+        return {"success": False, "error": _err(e)}
 
 
 # ============== EXPAND IF RUN OUT (VERSIONED) ==============
@@ -485,7 +543,7 @@ async def save_expand_if_run_out(user_id: str, toggles: Dict[str, bool], session
         client = get_supabase_client()
         ts = get_current_timestamp()
         
-        previous = get_latest_row("expand_if_run_out", user_id)
+        previous = await _latest_row("expand_if_run_out", user_id)
         
         new_data = {
             "user_id": user_id,
@@ -526,12 +584,12 @@ async def save_expand_if_run_out(user_id: str, toggles: Dict[str, bool], session
         
         new_data.pop("id", None)
         
-        result = client.table("expand_if_run_out").insert(new_data).execute()
+        result = await _run(lambda: client.table("expand_if_run_out").insert(new_data).execute())
         logger.info(f"Inserted expand settings row for user {user_id}")
         return {"success": True, "data": result.data}
     except Exception as e:
-        logger.error(f"Error saving expand settings: {e}")
-        return {"success": False, "error": str(e)}
+        logger.error(f"Error saving expand settings: {_err(e)}")
+        return {"success": False, "error": _err(e)}
 
 
 # ============== MODE SELECTED (VERSIONED) ==============
@@ -550,12 +608,12 @@ async def save_mode_selected(user_id: str, mode: str) -> Dict[str, Any]:
             "mode_selected": mode
         }
         
-        result = client.table("mode_selected").insert(data).execute()
+        result = await _run(lambda: client.table("mode_selected").insert(data).execute())
         logger.info(f"Inserted mode row for user {user_id}: {mode}")
         return {"success": True, "data": result.data}
     except Exception as e:
-        logger.error(f"Error saving mode: {e}")
-        return {"success": False, "error": str(e)}
+        logger.error(f"Error saving mode: {_err(e)}")
+        return {"success": False, "error": _err(e)}
 
 
 # ============== TOGGLE VISIBILITY PROFILE (VERSIONED) ==============
@@ -591,7 +649,7 @@ async def save_visibility_toggles(user_id: str, toggles: Dict[str, bool], sessio
         client = get_supabase_client()
         ts = get_current_timestamp()
         
-        previous = get_latest_row("toggle_visibility_profile", user_id)
+        previous = await _latest_row("toggle_visibility_profile", user_id)
         
         new_data = {
             "user_id": user_id,
@@ -634,12 +692,12 @@ async def save_visibility_toggles(user_id: str, toggles: Dict[str, bool], sessio
         
         new_data.pop("id", None)
         
-        result = client.table("toggle_visibility_profile").insert(new_data).execute()
+        result = await _run(lambda: client.table("toggle_visibility_profile").insert(new_data).execute())
         logger.info(f"Inserted visibility toggles row for user {user_id}")
         return {"success": True, "data": result.data}
     except Exception as e:
-        logger.error(f"Error saving visibility toggles: {e}")
-        return {"success": False, "error": str(e)}
+        logger.error(f"Error saving visibility toggles: {_err(e)}")
+        return {"success": False, "error": _err(e)}
 
 
 # ============== MOVIE LIBRARY (GLOBAL CATALOG) ==============
@@ -657,11 +715,11 @@ async def save_movie_to_library(movie_data: Dict[str, Any]) -> Dict[str, Any]:
         
         movie_id = movie_data.get("id")
         if not movie_id:
-            logger.warning(f"Movie data missing ID, skipping library save")
+            logger.warning("Movie data missing ID, skipping library save")
             return {"success": False, "error": "Missing movie ID"}
         
         # Check if movie already exists
-        existing = client.table("movie_library").select("movie_id").eq("movie_id", movie_id).execute()
+        existing = await _run(lambda: client.table("movie_library").select("movie_id").eq("movie_id", movie_id).execute())
         if existing.data:
             logger.debug(f"Movie {movie_id} already in library, skipping")
             return {"success": True, "message": "Movie already exists", "data": existing.data}
@@ -787,19 +845,19 @@ async def save_movie_to_library(movie_data: Dict[str, Any]) -> Dict[str, Any]:
         # Try inserting with extended columns first, fall back to base columns if needed
         try:
             merged_data = {**data, **extended_data}
-            result = client.table("movie_library").insert(merged_data).execute()
+            result = await _run(lambda: client.table("movie_library").insert(merged_data).execute())
             logger.info(f"Saved movie to library with extended data: {movie_data.get('title')} (ID: {movie_id})")
             return {"success": True, "data": result.data}
         except Exception as ext_err:
             # Extended columns don't exist, use base data only
-            logger.warning(f"Extended columns not available, using base data: {ext_err}")
-            result = client.table("movie_library").insert(data).execute()
+            logger.warning(f"Extended columns not available, using base data: {_err(ext_err)}")
+            result = await _run(lambda: client.table("movie_library").insert(data).execute())
             logger.info(f"Saved movie to library: {movie_data.get('title')} (ID: {movie_id})")
             return {"success": True, "data": result.data}
         
     except Exception as e:
-        logger.error(f"Error saving movie to library: {e}")
-        return {"success": False, "error": str(e)}
+        logger.error(f"Error saving movie to library: {_err(e)}")
+        return {"success": False, "error": _err(e)}
 
 
 async def increment_movie_interaction(movie_id: int) -> Dict[str, Any]:
@@ -808,28 +866,28 @@ async def increment_movie_interaction(movie_id: int) -> Dict[str, Any]:
         client = get_supabase_client()
         
         # Get current count
-        existing = client.table("movie_library").select("interaction_count").eq("movie_id", movie_id).execute()
+        existing = await _run(lambda: client.table("movie_library").select("interaction_count").eq("movie_id", movie_id).execute())
         if existing.data:
             current_count = existing.data[0].get("interaction_count", 0) or 0
-            result = client.table("movie_library").update({
+            result = await _run(lambda: client.table("movie_library").update({
                 "interaction_count": current_count + 1,
                 "last_interaction_ts": datetime.utcnow().isoformat()
-            }).eq("movie_id", movie_id).execute()
+            }).eq("movie_id", movie_id).execute())
             return {"success": True, "data": result.data}
         return {"success": False, "error": "Movie not found"}
     except Exception as e:
-        logger.error(f"Error incrementing movie interaction: {e}")
-        return {"success": False, "error": str(e)}
+        logger.error(f"Error incrementing movie interaction: {_err(e)}")
+        return {"success": False, "error": _err(e)}
 
 
 async def check_movie_exists(movie_id: int) -> bool:
     """Check if a movie exists in the library"""
     try:
         client = get_supabase_client()
-        result = client.table("movie_library").select("movie_id").eq("movie_id", movie_id).execute()
+        result = await _run(lambda: client.table("movie_library").select("movie_id").eq("movie_id", movie_id).execute())
         return bool(result.data)
     except Exception as e:
-        logger.error(f"Error checking movie existence: {e}")
+        logger.error(f"Error checking movie existence: {_err(e)}")
         return False
 
 
@@ -840,17 +898,22 @@ async def check_movie_exists(movie_id: int) -> bool:
 # =====================================================================
 
 
-def _safe_audit_insert(table: str, row: Dict[str, Any]) -> Dict[str, Any]:
-    """Insert into an audit table. Never raises - just logs warning if it
-    fails (e.g. migration SQL not yet applied)."""
+async def _safe_audit_insert(table: str, row: Dict[str, Any]) -> Dict[str, Any]:
+    """Insert into an audit table off the event loop. NEVER raises - logs a
+    PII-safe warning and returns {"success": False, ...} on any failure
+    (Supabase not configured, migration SQL not applied, timeout, ...)."""
     try:
         client = get_supabase_client()
         # Drop None-only sparse fields? Keep nullable so we have explicit history.
-        result = client.table(table).insert(row).execute()
-        return {"success": True, "data": result.data}
+        result = await _run(lambda: client.table(table).insert(row).execute())
+        return {"success": True, "data": getattr(result, "data", None)}
     except Exception as e:
-        logger.warning(f"[audit] insert into {table} failed (non-blocking): {e}")
-        return {"success": False, "error": str(e)}
+        try:
+            summary = _err(e)
+            logger.warning(f"[audit] insert into {table} failed (non-blocking): {summary}")
+        except Exception:  # pragma: no cover - logging must never raise either
+            summary = "audit insert failed"
+        return {"success": False, "error": summary}
 
 
 # ----- PICTURES AUDIT ----------------------------------------------------
@@ -880,7 +943,7 @@ async def log_picture_event(
         "last_modified_ts": ts["timestamp"],
         "last_modified_date": ts["date"],
     }
-    return _safe_audit_insert("user_pictures", row)
+    return await _safe_audit_insert("user_pictures", row)
 
 
 # ----- TINA CHAT AUDIT ---------------------------------------------------
@@ -920,7 +983,7 @@ async def log_tina_chat_message(
         "last_modified_ts": ts["timestamp"],
         "last_modified_date": ts["date"],
     }
-    return _safe_audit_insert("tina_chat_messages", row)
+    return await _safe_audit_insert("tina_chat_messages", row)
 
 
 async def log_tina_persona_360(
@@ -948,7 +1011,7 @@ async def log_tina_persona_360(
         "last_modified_ts": ts["timestamp"],
         "last_modified_date": ts["date"],
     }
-    return _safe_audit_insert("tina_persona_360", row)
+    return await _safe_audit_insert("tina_persona_360", row)
 
 
 # ----- USER-TO-USER CHAT AUDIT ------------------------------------------
@@ -974,7 +1037,7 @@ async def log_user_chat_message(
         "last_modified_ts": ts["timestamp"],
         "last_modified_date": ts["date"],
     }
-    return _safe_audit_insert("user_chat_messages", row)
+    return await _safe_audit_insert("user_chat_messages", row)
 
 
 # ----- MATCH / UNMATCH / REPORT AUDIT -----------------------------------
@@ -1002,7 +1065,7 @@ async def log_match_event(
         "last_modified_ts": ts["timestamp"],
         "last_modified_date": ts["date"],
     }
-    return _safe_audit_insert("match_events", row)
+    return await _safe_audit_insert("match_events", row)
 
 
 async def log_unmatch_event(
@@ -1020,7 +1083,7 @@ async def log_unmatch_event(
         "last_modified_ts": ts["timestamp"],
         "last_modified_date": ts["date"],
     }
-    return _safe_audit_insert("unmatch_events", row)
+    return await _safe_audit_insert("unmatch_events", row)
 
 
 async def log_report_event(
@@ -1040,7 +1103,7 @@ async def log_report_event(
         "last_modified_ts": ts["timestamp"],
         "last_modified_date": ts["date"],
     }
-    return _safe_audit_insert("report_events", row)
+    return await _safe_audit_insert("report_events", row)
 
 
 # ----- STORAGE BUCKET HELPER (profile pictures) -------------------------
@@ -1071,7 +1134,7 @@ def upload_image_to_supabase_storage(
 
         # Supabase storage upload
         # NB: the storage3 SDK expects file_options as a dict of strings
-        res = client.storage.from_(bucket).upload(
+        client.storage.from_(bucket).upload(
             path=path,
             file=image_bytes,
             file_options={"content-type": content_type or "image/jpeg", "upsert": "true"},
@@ -1084,7 +1147,7 @@ def upload_image_to_supabase_storage(
         logger.info(f"[storage] uploaded {path} → {public_url}")
         return {"storage_path": path, "public_url": public_url}
     except Exception as e:
-        logger.warning(f"[storage] upload failed (non-blocking): {e}")
+        logger.warning(f"[storage] upload failed (non-blocking): {_err(e)}")
         return None
 
 
@@ -1097,5 +1160,5 @@ def delete_image_from_supabase_storage(
         client.storage.from_(bucket).remove([storage_path])
         return True
     except Exception as e:
-        logger.warning(f"[storage] delete failed (non-blocking): {e}")
+        logger.warning(f"[storage] delete failed (non-blocking): {_err(e)}")
         return False

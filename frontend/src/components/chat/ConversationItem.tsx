@@ -30,7 +30,6 @@ export const ConversationItem: React.FC<Props> = ({ conversation, onPress }) => 
           size={56}
           imageUrl={isUnmatched ? undefined : user?.avatar}
         />
-        {!isPending && !isUnmatched && <View style={styles.onlineDot} />}
         {isUnmatched && (
           <View style={styles.lockBadge}>
             <Ionicons name="lock-closed" size={11} color="#FFF" />
@@ -91,7 +90,6 @@ export const ConversationItem: React.FC<Props> = ({ conversation, onPress }) => 
 const styles = StyleSheet.create({
   conversationItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: COLORS.border },
   conversationAvatar: { position: 'relative' },
-  onlineDot: { position: 'absolute', bottom: 2, right: 2, width: 14, height: 14, borderRadius: 7, backgroundColor: COLORS.online, borderWidth: 2, borderColor: COLORS.bg },
   conversationContent: { flex: 1, marginLeft: 14 },
   conversationHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   conversationName: { fontSize: 16, fontWeight: '500', color: COLORS.text, flex: 1 },

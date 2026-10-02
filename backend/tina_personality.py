@@ -22,11 +22,13 @@ USAGE
 
 from __future__ import annotations
 
-import os
+import asyncio
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
 from dotenv import load_dotenv
+
+from settings import settings
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -549,14 +551,25 @@ async def save_tina_personality(user_id: str, profile: Dict[str, Any]) -> None:
             {"$set": doc},
             upsert=True,
         )
-        # Audit log to Supabase (best-effort, public-safe fields only)
+        # Audit log to Supabase (best-effort, public-safe fields only).
+        # Run on a worker thread: the Supabase client is synchronous.
         try:
-            import supabase_service as supa
-            await supa.log_tina_persona_360(user_id, profile)
+            await asyncio.to_thread(_audit_persona_360, user_id, profile)
         except Exception as _e:
             logger.debug(f"audit (tina_persona_360) skipped: {_e}")
     except Exception as e:
         logger.error(f"save_tina_personality error: {e}")
+
+
+def _audit_persona_360(user_id: str, profile: Dict[str, Any]) -> None:
+    """Blocking Supabase audit insert — call via asyncio.to_thread.
+
+    supabase_service.log_tina_persona_360 is declared async but performs a
+    synchronous HTTP insert inside, so it gets its own short-lived event loop
+    on the worker thread instead of stalling the server's loop.
+    """
+    import supabase_service as supa
+    asyncio.run(supa.log_tina_persona_360(user_id, profile))
 
 
 async def get_tina_personality(user_id: str) -> Optional[Dict[str, Any]]:
@@ -667,7 +680,6 @@ def _dim_to_label(dim: str) -> str:
 
 import httpx
 
-_TMDB_BEARER = os.getenv("TMDB_ACCESS_TOKEN", "")
 _GENRE_CACHE: Optional[List[Dict[str, Any]]] = None
 
 
@@ -687,7 +699,8 @@ async def get_dynamic_movie_genres(limit: int = 10) -> List[Dict[str, Any]]:
         {"id": 878, "name": "Sci-Fi"}, {"id": 16, "name": "Animation"},
         {"id": 99, "name": "Documentary"}, {"id": 9648, "name": "Mystery"},
     ]
-    if not _TMDB_BEARER:
+    token = settings.tmdb_access_token
+    if not token:
         _GENRE_CACHE = fallback
         return fallback[:limit]
     try:
@@ -695,7 +708,7 @@ async def get_dynamic_movie_genres(limit: int = 10) -> List[Dict[str, Any]]:
             r = await client.get(
                 "https://api.themoviedb.org/3/genre/movie/list",
                 params={"language": "en-US"},
-                headers={"Authorization": f"Bearer {_TMDB_BEARER}"},
+                headers={"Authorization": f"Bearer {token}"},
             )
             if r.status_code == 200:
                 data = r.json()

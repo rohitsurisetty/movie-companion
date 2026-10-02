@@ -1,19 +1,37 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Image, Alert, ActivityIndicator,
   ScrollView, Platform,
 } from 'react-native';
+import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { COLORS, SPACING, BORDER_RADIUS } from '../theme';
-import { getAuth } from '../store';
+import { apiUrl, getUserId } from '../store';
 
-const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+// Photos are downscaled + re-encoded on-device; the original is never sent.
+const UPLOAD_MAX_WIDTH = 1080;
+const SLOT_COUNT = 5;
+
+// Alert title/message for a failed upload. The backend `detail` is shown for
+// 4xx errors only (5xx details can carry internals).
+const uploadErrorText = (status: number, detail: unknown): [string, string] => {
+  const msg = typeof detail === 'string' ? detail : '';
+  if (status === 413) return ['Photo too large', msg || 'Please choose a smaller photo.'];
+  if (status === 429) return ['Please wait', 'Too many uploads right now. Please try again shortly.'];
+  if (status === 503) return ['Upload unavailable', 'Photo storage is temporarily unavailable. Please try again in a few minutes.'];
+  if (status === 401 || status === 404) return ['Session expired', 'Please sign back in to upload photos.'];
+  if (status >= 400 && status < 500 && msg) return ['Upload Failed', msg];
+  return ['Upload Failed', 'Failed to upload picture. Please try again.'];
+};
 
 interface PhotoUploadStepProps {
   userId?: string;
-  onNext: (pictures?: string[]) => void;
-  onBack?: () => void;
+  /** Called with the uploaded photo URLs in slot order (always an array). */
+  onComplete: (pictures: string[]) => void;
+  /** Photos already uploaded earlier in this flow, so back/forward doesn't force a re-upload. */
+  initialPictures?: string[];
 }
 
 interface PictureSlot {
@@ -23,48 +41,65 @@ interface PictureSlot {
   uploaded: boolean;
 }
 
-export default function PhotoUploadStep({ userId: propUserId, onNext, onBack }: PhotoUploadStepProps) {
+// Slot N <-> server picture_N; seeded in order from previously uploaded URLs.
+const buildSlots = (urls: (string | null | undefined)[] = []): PictureSlot[] =>
+  Array.from({ length: SLOT_COUNT }, (_, i) => {
+    const uri = typeof urls[i] === 'string' && urls[i] ? (urls[i] as string) : null;
+    return { index: i + 1, uri, uploading: false, uploaded: !!uri };
+  });
+
+export default function PhotoUploadStep({ userId: propUserId, onComplete, initialPictures }: PhotoUploadStepProps) {
+  const router = useRouter();
   const [userId, setUserId] = useState<string>(propUserId || '');
-  const [sessionId, setSessionId] = useState<string>('');
-  const [pictures, setPictures] = useState<PictureSlot[]>([
-    { index: 1, uri: null, uploading: false, uploaded: false },
-    { index: 2, uri: null, uploading: false, uploaded: false },
-    { index: 3, uri: null, uploading: false, uploaded: false },
-    { index: 4, uri: null, uploading: false, uploaded: false },
-    { index: 5, uri: null, uploading: false, uploaded: false },
-  ]);
+  const [pictures, setPictures] = useState<PictureSlot[]>(() =>
+    buildSlots(Array.isArray(initialPictures) ? initialPictures.filter(Boolean) : []),
+  );
+  // Set as soon as the user adds/removes a photo, so the background server
+  // sync below can never overwrite their changes.
+  const touchedRef = useRef(false);
 
   const uploadedCount = pictures.filter(p => p.uri && p.uploaded).length;
-  const canContinue = uploadedCount >= 1;
+  const isUploading = pictures.some(p => p.uploading);
+  const canContinue = uploadedCount >= 1 && !isUploading;
 
   useEffect(() => {
-    // Prefer the propUserId passed by the parent (onboarding) since it's
-    // sourced from getUserId() which already reads getAuth(). If the prop
-    // is empty (parent's getUserId race finished after our first render),
-    // fall back to initAuth() so we still pick up the storage value.
-    if (propUserId) {
-      setUserId(propUserId);
-      setSessionId(`session_${Date.now()}`);
-      return;
-    }
-    initAuth();
+    let cancelled = false;
+    (async () => {
+      // Prefer the id passed by onboarding (from getUserId()). Never fabricate
+      // one: no id = not signed in, handled when an upload is attempted.
+      const uid = propUserId || (await getUserId());
+      if (cancelled || !uid) return;
+      setUserId(uid);
+      await syncFromServer(uid, () => cancelled);
+    })();
+    return () => { cancelled = true; };
   }, [propUserId]);
 
-  const initAuth = async () => {
-    const auth = await getAuth();
-    if (auth?.user_id) {
-      setUserId(auth.user_id);
-      setSessionId(auth.session_id || `session_${Date.now()}`);
-      return;
+  // The server's slot mapping is authoritative (removePicture deletes by slot
+  // number); initialPictures only seeds the first render. Ignored once the user
+  // has changed a slot, on any error, or when the server has none (so a
+  // storage hiccup never forces a re-upload).
+  const syncFromServer = async (uid: string, isCancelled: () => boolean) => {
+    try {
+      const response = await fetch(apiUrl(`/api/user/pictures/${uid}`));
+      if (!response.ok) return;
+      const data = await response.json().catch(() => null);
+      const server = data?.success ? data.pictures : null;
+      if (!server || typeof server !== 'object' || isCancelled() || touchedRef.current) return;
+      const urls = Array.from({ length: SLOT_COUNT }, (_, i) => server[`picture_${i + 1}`]);
+      if (!urls.some((u) => typeof u === 'string' && u)) return;
+      setPictures(buildSlots(urls));
+    } catch (error) {
+      // Offline etc. — keep the seeded photos.
     }
-    // No usable auth → DON'T fabricate a user_${Date.now()} id. The backend
-    // now enforces require_owner: the body user_id MUST match the
-    // session_token's resolved identity. A made-up id always 404s. Surface
-    // the missing auth to the user so they can re-login instead of silently
-    // failing every upload.
-    console.warn('[PhotoUploadStep] No auth user_id in storage — uploads will be blocked until user re-logs in.');
-    setUserId('');
-    setSessionId(`session_${Date.now()}`);
+  };
+
+  const resetSlot = (slotIndex: number) => {
+    setPictures(prev => prev.map(p =>
+      p.index === slotIndex
+        ? { ...p, uri: null, uploading: false, uploaded: false }
+        : p
+    ));
   };
 
   const showImageOptions = (slotIndex: number) => {
@@ -80,23 +115,35 @@ export default function PhotoUploadStep({ userId: propUserId, onNext, onBack }: 
         { text: 'Take Photo', onPress: () => pickImage(slotIndex, 'camera') },
         { text: 'Choose from Gallery', onPress: () => pickImage(slotIndex, 'gallery') },
         { text: 'Cancel', style: 'cancel' },
-      ]
+      ],
+      { cancelable: true }
     );
   };
 
   const pickImage = async (slotIndex: number, source: 'camera' | 'gallery') => {
+    let previewing = false;
     try {
       let result: ImagePicker.ImagePickerResult;
 
+      // No `base64` from the picker: the original can be many MB. A resized
+      // copy is encoded below and only that is sent.
       const options: ImagePicker.ImagePickerOptions = {
         mediaTypes: ['images'],
         allowsEditing: true,
         aspect: [4, 5],
         quality: 0.8,
-        base64: true,
       };
 
       if (source === 'camera') {
+        // Ask for the camera only when the user actually wants to use it.
+        const permission = await ImagePicker.requestCameraPermissionsAsync();
+        if (!permission.granted) {
+          Alert.alert(
+            'Camera access needed',
+            'Allow camera access in your phone settings to take a photo, or choose one from your gallery.'
+          );
+          return;
+        }
         result = await ImagePicker.launchCameraAsync(options);
       } else {
         result = await ImagePicker.launchImageLibraryAsync(options);
@@ -104,82 +151,72 @@ export default function PhotoUploadStep({ userId: propUserId, onNext, onBack }: 
 
       if (!result.canceled && result.assets[0]) {
         const asset = result.assets[0];
-        
-        if (asset.fileSize && asset.fileSize > 10 * 1024 * 1024) {
-          Alert.alert('File Too Large', 'Please select an image under 10MB.');
-          return;
-        }
+        touchedRef.current = true;
 
-        setPictures(prev => prev.map(p => 
-          p.index === slotIndex 
+        // Local preview while resizing + uploading.
+        setPictures(prev => prev.map(p =>
+          p.index === slotIndex
             ? { ...p, uri: asset.uri, uploading: true, uploaded: false }
             : p
         ));
+        previewing = true;
 
-        await uploadPicture(slotIndex, asset.base64!, asset.mimeType || 'image/jpeg');
+        const resized = await manipulateAsync(
+          asset.uri,
+          asset.width && asset.width <= UPLOAD_MAX_WIDTH ? [] : [{ resize: { width: UPLOAD_MAX_WIDTH } }],
+          { compress: 0.75, format: SaveFormat.JPEG, base64: true }
+        );
+        if (!resized.base64) throw new Error('Image processing failed');
+
+        await uploadPicture(slotIndex, resized.base64, 'image/jpeg');
       }
     } catch (error) {
       console.error('Error picking image:', error);
+      if (previewing) resetSlot(slotIndex);
       Alert.alert('Error', 'Failed to select image. Please try again.');
     }
   };
 
   const uploadPicture = async (slotIndex: number, base64Data: string, contentType: string) => {
-    // Guard rail: never POST without a real authenticated user_id. The
-    // backend enforces require_owner — any made-up id always 404s and
-    // surfaces as "Not found" to the user.
-    const isLegitUserId = userId && userId.startsWith('user_') && !/^user_\d{13,}$/.test(userId);
-    if (!isLegitUserId) {
-      Alert.alert(
-        'Session expired',
-        'Please sign back in before uploading photos.',
-      );
-      setPictures(prev => prev.map(p =>
-        p.index === slotIndex ? { ...p, uri: null, uploading: false, uploaded: false } : p
-      ));
+    // Never upload under a made-up id: no id means not signed in.
+    const uid = userId || (await getUserId());
+    if (!uid) {
+      resetSlot(slotIndex);
+      Alert.alert('Session expired', 'Please sign back in before uploading photos.');
+      router.replace('/');
       return;
     }
     try {
-      const response = await fetch(`${API_BASE}/api/user/pictures/upload`, {
+      // Auth header is added by the global fetch wrapper; no session id in the body.
+      const response = await fetch(apiUrl('/api/user/pictures/upload'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          user_id: userId,
-          session_id: sessionId,
+          user_id: uid,
           picture_number: slotIndex,
           image_data: base64Data,
           content_type: contentType,
         }),
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => null);
 
-      if (response.ok && data.success) {
-        setPictures(prev => prev.map(p => 
-          p.index === slotIndex 
+      if (response.ok && data?.success && data.picture_url) {
+        // Use the server URL (the local file uri was only a preview).
+        setPictures(prev => prev.map(p =>
+          p.index === slotIndex
             ? { ...p, uri: data.picture_url, uploading: false, uploaded: true }
             : p
         ));
       } else {
-        // Surface the backend's actual error detail (e.g. "Could not process
-        // this image — make sure it's a JPEG/PNG/HEIC under 15 MB") instead
-        // of the previous opaque "Upload failed" string. 401/404 still get a
-        // user-friendly translation.
-        let msg: string = data?.detail || 'Upload failed';
-        if (response.status === 401) msg = 'Session expired. Please sign back in.';
-        else if (response.status === 404) msg = 'Authentication mismatch. Please sign back in.';
-        else if (response.status === 429) msg = 'Too many uploads — please wait a moment.';
-        throw new Error(msg);
+        const [title, message] = uploadErrorText(response.status, data?.detail);
+        Alert.alert(title, message);
+        resetSlot(slotIndex);
       }
     } catch (error) {
       console.error('Upload error:', error);
-      const friendly = (error as Error)?.message || 'Please try again.';
-      Alert.alert('Upload Failed', friendly);
-      setPictures(prev => prev.map(p => 
-        p.index === slotIndex 
-          ? { ...p, uri: null, uploading: false, uploaded: false }
-          : p
-      ));
+      Alert.alert('Upload Failed', 'Failed to upload picture. Please check your connection and try again.');
+      resetSlot(slotIndex);
     }
   };
 
@@ -193,29 +230,34 @@ export default function PhotoUploadStep({ userId: propUserId, onNext, onBack }: 
           text: 'Remove',
           style: 'destructive',
           onPress: async () => {
+            touchedRef.current = true;
+            const uid = userId || (await getUserId());
+            if (!uid) {
+              router.replace('/');
+              return;
+            }
             try {
-              await fetch(`${API_BASE}/api/user/pictures/${userId}/${slotIndex}`, {
+              const response = await fetch(apiUrl(`/api/user/pictures/${uid}/${slotIndex}`), {
                 method: 'DELETE',
               });
-              setPictures(prev => prev.map(p => 
-                p.index === slotIndex 
-                  ? { ...p, uri: null, uploading: false, uploaded: false }
-                  : p
-              ));
+              if (!response.ok) throw new Error(`HTTP ${response.status}`);
+              resetSlot(slotIndex);
             } catch (error) {
               console.error('Delete error:', error);
+              Alert.alert('Error', 'Failed to remove photo. Please try again.');
             }
           },
         },
-      ]
+      ],
+      { cancelable: true }
     );
   };
 
   const handleContinue = () => {
     const uploadedPictures = pictures
       .filter(p => p.uri && p.uploaded)
-      .map(p => p.uri!);
-    onNext(uploadedPictures);
+      .map(p => p.uri as string);
+    onComplete(uploadedPictures);
   };
 
   const renderSlot = (slot: PictureSlot, isMain: boolean) => (
@@ -408,7 +450,7 @@ const styles = StyleSheet.create({
   bottomContainer: {
     paddingTop: SPACING.m,
     paddingBottom: SPACING.xl,
-    backgroundColor: COLORS.bgMain,
+    backgroundColor: COLORS.bg,
   },
   continueBtn: {
     backgroundColor: COLORS.primary,

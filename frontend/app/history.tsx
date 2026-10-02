@@ -13,16 +13,32 @@
 
 import React, { useState, useEffect } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, FlatList, 
-  ActivityIndicator, Modal, Image, Pressable, ScrollView, TextInput,
+  View, Text, StyleSheet, TouchableOpacity, FlatList,
+  ActivityIndicator, Modal, Pressable, ScrollView, TextInput, RefreshControl, Alert,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { getUserId, useUserStore } from '../src/store';
+import { apiUrl, getUserId, useUserStore } from '../src/store';
 import { Avatar } from '../src/components/Avatar';
 
-const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+// User-facing copy for a failed request (429 = rate limited)
+const requestErrorMessage = (status?: number) =>
+  status === 429
+    ? 'Too many requests. Please try again shortly.'
+    : 'Something went wrong. Check your connection and try again.';
+
+// A hung request must not leave a spinner (or a locked modal) forever
+const fetchWithTimeout = async (url: string, init: RequestInit = {}, ms = 15000) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+};
 
 const COLORS = {
   primary: '#E50914',
@@ -128,13 +144,13 @@ const HistoryItem = ({
       accessibilityLabel={`Match history row for ${item.other_user_name}`}
     >
       <View style={styles.historyAvatar}>
-        {/* Show avatar for active matches or if user was unmatched by other */}
-        {(isActive || wasUnmatched) && item.other_user_avatar ? (
+        {/* Show avatar for active matches (initials when there's no photo) or if user was unmatched by other */}
+        {isActive || (wasUnmatched && item.other_user_avatar) ? (
           <Avatar name={item.other_user_name} size={56} imageUrl={item.other_user_avatar} />
         ) : wasUnmatched ? (
           // Show generic avatar with name initial for unmatched (no photo)
           <View style={styles.noPhotoAvatar}>
-            <Text style={styles.noPhotoInitial}>{item.other_user_name.charAt(0).toUpperCase()}</Text>
+            <Text style={styles.noPhotoInitial}>{(item.other_user_name || '?').charAt(0).toUpperCase()}</Text>
           </View>
         ) : (
           // User initiated unmatch - grayed out
@@ -174,21 +190,27 @@ const ReportModal = ({
   visible: boolean;
   onClose: () => void;
   userName: string;
-  onReport: (reason: string, details: string) => void;
+  /** Resolves true once the report is filed; false = failed (caller already alerted). */
+  onReport: (reason: string, details: string) => Promise<boolean>;
 }) => {
-  const insets = useSafeAreaInsets();
   const [step, setStep] = useState<'intro' | 'reasons' | 'details' | 'done'>('intro');
   const [selectedReason, setSelectedReason] = useState('');
   const [details, setDetails] = useState('');
-  
+  const [submitting, setSubmitting] = useState(false);
+
   if (!visible) return null;
-  
-  const handleSubmit = () => {
-    onReport(selectedReason, details);
-    setStep('done');
+
+  const handleSubmit = async () => {
+    if (submitting) return;
+    setSubmitting(true);
+    const ok = await onReport(selectedReason, details);
+    setSubmitting(false);
+    // Only confirm when the server accepted it; on failure stay here so the user can retry
+    if (ok) setStep('done');
   };
-  
+
   const handleClose = () => {
+    if (submitting) return;
     setStep('intro');
     setSelectedReason('');
     setDetails('');
@@ -206,8 +228,14 @@ const ReportModal = ({
           <Text style={styles.reportHeaderTitle}>Report</Text>
           <View style={{ width: 44 }} />
         </View>
-        
-        <ScrollView style={styles.reportContent} showsVerticalScrollIndicator={false}>
+
+        {/* keyboard-controller's KAV: RN's breaks in edge-to-edge APK builds */}
+        <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
+        <ScrollView
+          style={styles.reportContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
           {step === 'intro' && (
             <View style={styles.reportIntro}>
               <View style={styles.reportIconCircle}>
@@ -284,11 +312,23 @@ const ReportModal = ({
               />
               <Text style={styles.reportDetailsCount}>{details.length}/500</Text>
               
-              <TouchableOpacity style={styles.reportSubmitBtn} onPress={handleSubmit}>
-                <Text style={styles.reportSubmitBtnText}>Submit Report</Text>
+              <TouchableOpacity
+                style={[styles.reportSubmitBtn, submitting && { opacity: 0.6 }]}
+                onPress={handleSubmit}
+                disabled={submitting}
+              >
+                {submitting ? (
+                  <ActivityIndicator color="#FFF" size="small" />
+                ) : (
+                  <Text style={styles.reportSubmitBtnText}>Submit Report</Text>
+                )}
               </TouchableOpacity>
-              
-              <TouchableOpacity style={styles.reportBackBtn} onPress={() => setStep('reasons')}>
+
+              <TouchableOpacity
+                style={styles.reportBackBtn}
+                onPress={() => setStep('reasons')}
+                disabled={submitting}
+              >
                 <Ionicons name="arrow-back" size={16} color={COLORS.textMuted} />
                 <Text style={styles.reportBackBtnText}>Back</Text>
               </TouchableOpacity>
@@ -310,6 +350,7 @@ const ReportModal = ({
             </View>
           )}
         </ScrollView>
+        </KeyboardAvoidingView>
       </SafeAreaView>
     </Modal>
   );
@@ -321,41 +362,54 @@ const DidYouMeetModal = ({
   onClose,
   otherUserName,
   conversationId,
-  userId,
+  otherUserId,
 }: {
   visible: boolean;
   onClose: () => void;
   otherUserName: string;
   conversationId: string;
-  userId: string;
+  otherUserId: string;
 }) => {
   const [didMeet, setDidMeet] = useState<boolean | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const insets = useSafeAreaInsets();
-  
+
   if (!visible) return null;
-  
+
   const handleSubmit = async (met: boolean) => {
+    if (submitting || !otherUserId) return;
     setSubmitting(true);
+    let status: number | undefined;
+    let ok = false;
     try {
-      await fetch(`${API_BASE}/api/chat/meeting-status`, {
+      // The backend identifies the conversation by the two participants
+      // (caller = session user); other_user_id is required.
+      const res = await fetchWithTimeout(apiUrl('/api/chat/meeting-status'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          user_id: userId,
+          other_user_id: otherUserId,
           conversation_id: conversationId,
           did_meet: met,
         }),
       });
-      setDidMeet(met);
+      ok = res.ok;
+      status = res.status;
     } catch (error) {
-      console.error('Error setting meeting status:', error);
+      console.warn('Error setting meeting status:', error);
     } finally {
       setSubmitting(false);
     }
+    if (ok) {
+      setDidMeet(met);
+    } else {
+      // Stay on the question so the user can retry
+      Alert.alert("Couldn't save your answer", requestErrorMessage(status));
+    }
   };
-  
+
   const handleClose = () => {
+    if (submitting) return;
     setDidMeet(null);
     onClose();
   };
@@ -557,10 +611,12 @@ const UnmatchedActionSheet = ({
 
 export default function HistoryScreen() {
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const [userId, setUserId] = useState('');
   const [history, setHistory] = useState<MatchHistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  // Non-null when the last load failed (shown as an error state with Retry)
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedItem, setSelectedItem] = useState<MatchHistoryItem | null>(null);
   const [showActiveActions, setShowActiveActions] = useState(false);
   const [showUnmatchedActions, setShowUnmatchedActions] = useState(false);
@@ -601,24 +657,40 @@ export default function HistoryScreen() {
   
   const initializeScreen = async () => {
     const id = await getUserId();
+    if (!id) {
+      // Not logged in - never call the API with an empty/fabricated id
+      router.replace('/');
+      return;
+    }
     setUserId(id);
     await fetchHistory(id);
   };
-  
-  const fetchHistory = async (id: string) => {
+
+  // pull = pull-to-refresh (keeps the current list on screen while loading)
+  const fetchHistory = async (id: string, { pull = false } = {}) => {
+    if (!id) return;
+    let failure: string | null = null;
     try {
-      setLoading(true);
-      const response = await fetch(`${API_BASE}/api/user/match-history/${id}`);
+      if (pull) setRefreshing(true);
+      else setLoading(true);
+      const response = await fetchWithTimeout(apiUrl(`/api/user/match-history/${encodeURIComponent(id)}`));
       if (response.ok) {
         const data = await response.json();
         setHistory(data.history || []);
+      } else {
+        failure = requestErrorMessage(response.status);
       }
     } catch (error) {
-      console.error('Error fetching match history:', error);
+      console.warn('Error fetching match history:', error);
+      failure = requestErrorMessage();
     } finally {
+      setLoadError(failure);
       setLoading(false);
+      setRefreshing(false);
     }
   };
+
+  const handleRefresh = () => fetchHistory(userId, { pull: true });
   
   const handleItemPress = (item: MatchHistoryItem) => {
     setSelectedItem(item);
@@ -663,10 +735,20 @@ export default function HistoryScreen() {
     
     // For read-only chat, check access first
     try {
-      const response = await fetch(
-        `${API_BASE}/api/chat/conversation-access/${selectedItem.conversation_id}?user_id=${userId}`
+      // The server uses the session identity (user_id query param is legacy/ignored)
+      const response = await fetchWithTimeout(
+        apiUrl(`/api/chat/conversation-access/${encodeURIComponent(selectedItem.conversation_id)}`)
       );
-      if (response.ok) {
+      if (!response.ok) {
+        showAlert({
+          title: response.status === 404 ? 'Chat Unavailable' : 'Error',
+          message: response.status === 404
+            ? 'Sorry, this chat is no longer available.'
+            : requestErrorMessage(response.status),
+          iconName: response.status === 404 ? 'information-circle-outline' : 'alert-circle-outline',
+          iconColor: response.status === 404 ? COLORS.warning : COLORS.primary,
+        });
+      } else {
         const access = await response.json();
         if (access.can_view) {
           // Create conversation data with read-only flag
@@ -698,7 +780,7 @@ export default function HistoryScreen() {
         }
       }
     } catch (error) {
-      console.error('Error checking chat access:', error);
+      console.warn('Error checking chat access:', error);
       showAlert({
         title: 'Error',
         message: 'Could not access chat. Please try again.',
@@ -717,11 +799,14 @@ export default function HistoryScreen() {
     setShowReportModal(true);
   };
   
-  const handleReport = async (reason: string, details: string) => {
-    if (!selectedItem) return;
-    
+  // Resolves true only when the server filed the report. Failures use the native
+  // Alert: it shows above the open report Modal (a sibling Modal can't).
+  const handleReport = async (reason: string, details: string): Promise<boolean> => {
+    if (!selectedItem) return false;
+
+    let status: number | undefined;
     try {
-      await fetch(`${API_BASE}/api/chat/report`, {
+      const res = await fetchWithTimeout(apiUrl('/api/chat/report'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -731,15 +816,13 @@ export default function HistoryScreen() {
           details: details || null
         })
       });
+      if (res.ok) return true;
+      status = res.status;
     } catch (error) {
-      console.error('Error submitting report:', error);
-      showAlert({
-        title: 'Error',
-        message: 'Could not submit report. Please try again.',
-        iconName: 'alert-circle-outline',
-        iconColor: COLORS.primary,
-      });
+      console.warn('Error submitting report:', error);
     }
+    Alert.alert('Report not sent', `${requestErrorMessage(status)} Your report was not submitted.`);
+    return false;
   };
   
   const handleDidYouMeet = () => {
@@ -767,105 +850,48 @@ export default function HistoryScreen() {
       return;
     }
     setDeletingChat(true);
+    let status: number | undefined;
+    let removed = false;
     try {
-      const res = await fetch(`${API_BASE}/api/chat/delete`, {
+      const res = await fetchWithTimeout(apiUrl('/api/chat/delete'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          user_id: userId,
           conversation_id: item.conversation_id,
         }),
       });
-
-      if (res.ok) {
-        // Remove from local state immediately for snappy UX
-        setHistory((prev) => prev.filter((h) => h.conversation_id !== item.conversation_id));
-        setDeleteConfirmItem(null);
-      } else {
-        // Treat 400 (already deleted) the same as success to keep UX consistent
-        if (res.status === 400) {
-          setHistory((prev) => prev.filter((h) => h.conversation_id !== item.conversation_id));
-          setDeleteConfirmItem(null);
-        } else {
-          showAlert({
-            title: 'Error',
-            message: 'Could not delete chat history. Please try again.',
-            iconName: 'alert-circle-outline',
-            iconColor: COLORS.primary,
-          });
-          setDeleteConfirmItem(null);
-        }
-      }
+      status = res.status;
+      // Server semantics: 400 = already deleted for this user (nothing modified),
+      // 404 = conversation gone / not a participant. Either way it's no longer in
+      // this user's history, so drop it locally. Anything else is a real failure.
+      removed = res.ok || res.status === 400 || res.status === 404;
     } catch (err) {
-      console.error('Delete chat history error:', err);
-      showAlert({
-        title: 'Error',
-        message: 'Could not delete chat history. Please try again.',
-        iconName: 'alert-circle-outline',
-        iconColor: COLORS.primary,
-      });
-      setDeleteConfirmItem(null);
+      console.warn('Delete chat history error:', err);
     } finally {
       setDeletingChat(false);
+      setDeleteConfirmItem(null);
     }
-  };
-
-  // Dev-only helper to seed mock unmatched conversations (Anjali + Priya)
-  const handleSeedMockData = async () => {
-    if (!userId) return;
-    showAlert({
-      title: 'Seed Test Data',
-      message:
-        'This will create two mock unmatched conversations (Anjali Iyer & Priya Bhatia) with chat history. Continue?',
-      confirmText: 'Seed',
-      cancelText: 'Cancel',
-      iconName: 'flask-outline',
-      iconColor: COLORS.warning,
-      onConfirm: async () => {
-        try {
-          const res = await fetch(`${API_BASE}/api/dev/seed-unmatched-mocks/${userId}`, {
-            method: 'POST',
-          });
-          if (res.ok) {
-            await fetchHistory(userId);
-            showAlert({
-              title: 'Done',
-              message: "Mock data seeded. Pull to refresh if you don't see it.",
-              iconName: 'checkmark-circle-outline',
-              iconColor: COLORS.success || '#4CAF50',
-            });
-          } else {
-            showAlert({
-              title: 'Error',
-              message: 'Could not seed mock data.',
-              iconName: 'alert-circle-outline',
-              iconColor: COLORS.primary,
-            });
-          }
-        } catch (e) {
-          console.error('Seed error', e);
-          showAlert({
-            title: 'Error',
-            message: 'Could not seed mock data.',
-            iconName: 'alert-circle-outline',
-            iconColor: COLORS.primary,
-          });
-        }
-      },
-    });
+    if (removed) {
+      // Remove from local state immediately for snappy UX
+      setHistory((prev) => prev.filter((h) => h.conversation_id !== item.conversation_id));
+    } else {
+      Alert.alert('Chat not deleted', `${requestErrorMessage(status)} Your chat history was not deleted.`);
+    }
   };
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity
+          onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)/profile'))}
+          style={styles.backBtn}
+        >
           <Ionicons name="chevron-back" size={28} color={COLORS.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Match History</Text>
-        <TouchableOpacity onPress={handleSeedMockData} style={styles.backBtn}>
-          <Ionicons name="flask-outline" size={22} color={COLORS.textMuted} />
-        </TouchableOpacity>
+        {/* Spacer keeps the title centred */}
+        <View style={styles.backBtn} />
       </View>
       
       {/* Info Banner */}
@@ -882,14 +908,6 @@ export default function HistoryScreen() {
           <ActivityIndicator size="large" color={COLORS.primary} />
           <Text style={styles.loadingText}>Loading history...</Text>
         </View>
-      ) : history.length === 0 ? (
-        <View style={styles.emptyState}>
-          <Ionicons name="time-outline" size={64} color={COLORS.textMuted} />
-          <Text style={styles.emptyTitle}>No Match History</Text>
-          <Text style={styles.emptySubtitle}>
-            Your past matches will appear here once you start matching with people.
-          </Text>
-        </View>
       ) : (
         <FlatList
           data={history}
@@ -897,8 +915,46 @@ export default function HistoryScreen() {
           renderItem={({ item }) => (
             <HistoryItem item={item} onPress={() => handleItemPress(item)} />
           )}
-          contentContainerStyle={styles.listContent}
+          contentContainerStyle={[styles.listContent, history.length === 0 && styles.listContentEmpty]}
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor={COLORS.primary}
+              colors={[COLORS.primary]}
+              progressBackgroundColor={COLORS.bgCard}
+            />
+          }
+          ListHeaderComponent={
+            // A refresh failed but we still have the previous list
+            loadError && history.length > 0 ? (
+              <TouchableOpacity style={styles.errorBanner} onPress={handleRefresh} testID="history-refresh-error">
+                <Ionicons name="alert-circle-outline" size={18} color={COLORS.warning} />
+                <Text style={styles.errorBannerText}>Couldn&apos;t refresh. Tap to retry.</Text>
+              </TouchableOpacity>
+            ) : null
+          }
+          ListEmptyComponent={
+            loadError ? (
+              <View style={styles.emptyState}>
+                <Ionicons name="cloud-offline-outline" size={64} color={COLORS.textMuted} />
+                <Text style={styles.emptyTitle}>Couldn&apos;t load history</Text>
+                <Text style={styles.emptySubtitle}>{loadError}</Text>
+                <TouchableOpacity style={styles.retryBtn} onPress={() => fetchHistory(userId)} testID="history-retry">
+                  <Text style={styles.retryBtnText}>Retry</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={styles.emptyState}>
+                <Ionicons name="time-outline" size={64} color={COLORS.textMuted} />
+                <Text style={styles.emptyTitle}>No Match History</Text>
+                <Text style={styles.emptySubtitle}>
+                  Your past matches will appear here once you start matching with people.
+                </Text>
+              </View>
+            )
+          }
         />
       )}
       
@@ -937,7 +993,7 @@ export default function HistoryScreen() {
         onClose={() => { setShowDidYouMeetModal(false); setSelectedItem(null); }}
         otherUserName={selectedItem?.other_user_name || 'this person'}
         conversationId={selectedItem?.conversation_id || ''}
-        userId={userId}
+        otherUserId={selectedItem?.other_user_id || ''}
       />
 
       {/* Cross-platform Alert Modal (replaces Alert.alert which is a no-op on web) */}
@@ -1131,6 +1187,38 @@ const styles = StyleSheet.create({
   },
   listContent: {
     paddingVertical: 8,
+  },
+  // Lets the empty/error state centre itself inside the (pull-to-refresh) list
+  listContentEmpty: {
+    flexGrow: 1,
+  },
+  retryBtn: {
+    marginTop: 20,
+    paddingVertical: 12,
+    paddingHorizontal: 32,
+    borderRadius: 24,
+    backgroundColor: COLORS.primary,
+  },
+  retryBtnText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: COLORS.text,
+  },
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255, 184, 0, 0.12)',
+  },
+  errorBannerText: {
+    flex: 1,
+    fontSize: 13,
+    color: COLORS.warning,
   },
   historyItem: {
     flexDirection: 'row',
@@ -1535,119 +1623,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#FFF',
-  },
-  // Profile Modal
-  profileModal: {
-    flex: 1,
-    backgroundColor: COLORS.bg,
-  },
-  profileHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-  },
-  profileCloseBtn: {
-    width: 44,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  profileHeaderTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: COLORS.text,
-  },
-  profileLoading: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  profileScroll: {
-    flex: 1,
-  },
-  profilePhotoGallery: {
-    width: '100%',
-    aspectRatio: 1,
-    position: 'relative',
-  },
-  profileMainPhoto: {
-    width: '100%',
-    height: '100%',
-  },
-  profilePhotoDots: {
-    position: 'absolute',
-    bottom: 16,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  profilePhotoDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: 'rgba(255,255,255,0.5)',
-  },
-  profilePhotoDotActive: {
-    backgroundColor: '#FFF',
-    width: 24,
-  },
-  profileInfo: {
-    padding: 20,
-  },
-  profileName: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: COLORS.text,
-    marginBottom: 8,
-  },
-  profileLocation: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginBottom: 20,
-  },
-  profileLocationText: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-  },
-  profileSection: {
-    marginTop: 20,
-  },
-  profileSectionTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.textMuted,
-    marginBottom: 8,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-  },
-  profileBio: {
-    fontSize: 16,
-    color: COLORS.text,
-    lineHeight: 24,
-  },
-  profileTags: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  profileTag: {
-    backgroundColor: COLORS.bgCard,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  profileTagText: {
-    fontSize: 14,
-    color: COLORS.text,
   },
   // ============ DELETE CONFIRMATION MODAL ============
   deleteConfirmOverlay: {

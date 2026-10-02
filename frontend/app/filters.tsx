@@ -1,6 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView, Modal,
+  View, Text, TouchableOpacity, StyleSheet, ScrollView, Modal, BackHandler,
+  NativeSyntheticEvent, NativeScrollEvent,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -11,6 +12,11 @@ import { COLORS, SPACING, BORDER_RADIUS } from '../src/theme';
 import { FiltersData, initialFiltersData, FilterSection, HeightFilter, AgeFilter } from '../src/types';
 import { saveFilters, getFilters } from '../src/store';
 import { shadow } from '../src/utils/shadow';
+import {
+  LANGUAGES, GENRES, OTT_OPTIONS, FILM_LANGUAGES, RELIGIONS, ZODIAC_SIGNS, SIBLINGS_OPTS,
+  EDUCATION_OPTS, TRAVEL_OPTS, SMOKING_OPTS, DRINKING_OPTS, EXERCISE_OPTS, PETS_OPTS,
+  FAMILY_OPTS, MARITAL_STATUSES, FOOD_PREFS, RELATIONSHIP_INTENTS,
+} from '../src/components/profile/constants';
 
 const MAX_KM = 500;
 const ITEM_HEIGHT = 44;
@@ -27,40 +33,62 @@ type FilterConfig = {
   options: string[];
 };
 
+// Options MUST be the exact strings the profile editor stores (canonical lists),
+// otherwise the backend's set matching never finds anyone.
 const FILTER_CONFIGS: FilterConfig[] = [
-  { key: 'languages', title: 'Languages They Speak', options: ['English', 'Hindi', 'Telugu', 'Tamil', 'Kannada', 'Malayalam', 'Bengali', 'Marathi', 'Gujarati', 'Punjabi', 'Urdu'] },
-  { key: 'genres', title: 'Favourite Genres', options: ['Action', 'Romance', 'Comedy', 'Thriller', 'Horror', 'Sci-Fi', 'Drama', 'Documentary'] },
-  { key: 'ottTheatre', title: 'OTT/Theatre Preference', options: ['OTT Lover', 'Theatre Enthusiast', 'Both'] },
-  { key: 'filmLanguages', title: 'Languages They Watch', options: ['English', 'Hindi', 'Telugu', 'Tamil', 'Kannada', 'Malayalam', 'Korean', 'Japanese', 'Spanish', 'French'] },
-  { key: 'religion', title: 'Religion', options: ['Hindu', 'Muslim', 'Christian', 'Sikh', 'Buddhist', 'Jain', 'Atheist', 'Other', 'Prefer not to say'] },
-  { key: 'zodiac', title: 'Zodiac Sign', options: ['Aries', 'Taurus', 'Gemini', 'Cancer', 'Leo', 'Virgo', 'Libra', 'Scorpio', 'Sagittarius', 'Capricorn', 'Aquarius', 'Pisces'] },
-  { key: 'siblings', title: 'Siblings', options: ['Only child', 'Has siblings'] },
-  { key: 'education', title: 'Education', options: ['High School', "Bachelor's", "Master's", 'PhD', 'Other'] },
-  { key: 'travel', title: 'Travel Frequency', options: ['Frequently', 'Occasionally', 'Rarely', 'Never'] },
-  { key: 'smoking', title: 'Smoking Preference', options: ['Non-smoker', 'Occasional smoker', 'Regular smoker'] },
-  { key: 'drinking', title: 'Drinking Preference', options: ['Non-drinker', 'Social drinker', 'Regular drinker'] },
-  { key: 'exercise', title: 'Exercise Preference', options: ['Regularly', 'Occasionally', 'Rarely'] },
-  { key: 'pets', title: 'Pets Preference', options: ['Love pets', 'Okay with pets', 'Prefer no pets'] },
-  { key: 'familyPlanning', title: 'Family Planning', options: ['Want kids', "Don't want kids", 'Open to kids', 'Not sure yet'] },
-  { key: 'maritalStatus', title: 'Marital Status', options: ['Single', 'Divorced', 'Separated', 'Widowed'] },
-  { key: 'foodPreference', title: 'Food Preference', options: ['Vegetarian', 'Non-vegetarian', 'Vegan', 'Eggetarian', 'Jain'] },
-  { key: 'intent', title: 'Intent Preference', options: ['Casual', 'Friendship', 'Serious relationship', 'Exploring'] },
+  { key: 'languages', title: 'Languages They Speak', options: LANGUAGES },
+  { key: 'genres', title: 'Favourite Genres', options: GENRES },
+  { key: 'ottTheatre', title: 'OTT/Theatre Preference', options: OTT_OPTIONS },
+  { key: 'filmLanguages', title: 'Languages They Watch', options: FILM_LANGUAGES },
+  { key: 'religion', title: 'Religion', options: RELIGIONS },
+  { key: 'zodiac', title: 'Zodiac Sign', options: ZODIAC_SIGNS },
+  { key: 'siblings', title: 'Siblings', options: SIBLINGS_OPTS },
+  { key: 'education', title: 'Education', options: EDUCATION_OPTS },
+  { key: 'travel', title: 'Travel Frequency', options: TRAVEL_OPTS },
+  { key: 'smoking', title: 'Smoking Preference', options: SMOKING_OPTS },
+  { key: 'drinking', title: 'Drinking Preference', options: DRINKING_OPTS },
+  { key: 'exercise', title: 'Exercise Preference', options: EXERCISE_OPTS },
+  { key: 'pets', title: 'Pets Preference', options: PETS_OPTS },
+  { key: 'familyPlanning', title: 'Family Planning', options: FAMILY_OPTS },
+  { key: 'maritalStatus', title: 'Marital Status', options: MARITAL_STATUSES },
+  { key: 'foodPreference', title: 'Food Preference', options: FOOD_PREFS },
+  { key: 'intent', title: 'Intent Preference', options: RELATIONSHIP_INTENTS },
 ];
+
+// Saved filters from older builds can hold legacy option strings ('Non-smoker',
+// 'OTT Lover', …) that no chip shows. Keep only canonical values; a section left
+// with nothing valid falls back to the default (everything selected).
+const sanitizeSavedFilters = (saved: FiltersData): FiltersData => {
+  const out: FiltersData = { ...initialFiltersData, ...saved };
+  for (const config of FILTER_CONFIGS) {
+    const section = out[config.key] as FilterSection | undefined;
+    if (!section || !Array.isArray(section.selected)) {
+      (out as any)[config.key] = initialFiltersData[config.key];
+      continue;
+    }
+    const valid = section.selected.filter((v) => config.options.includes(v));
+    if (valid.length !== section.selected.length) {
+      (out as any)[config.key] = {
+        ...section,
+        selected: valid.length > 0 ? valid : [...config.options],
+      };
+    }
+  }
+  return out;
+};
 
 // ============================================
 // SMOOTH DISTANCE SLIDER
 // ============================================
-function DistanceSliderComponent({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+// onChange = live value while dragging (UI only); onComplete = final value on release (persisted).
+function DistanceSliderComponent({ value, onChange, onComplete }: {
+  value: number; onChange: (v: number) => void; onComplete: (v: number) => void;
+}) {
   // Convert -1 (infinite) to max slider value
   const sliderValue = value < 0 ? MAX_KM + 1 : value;
-  
-  const handleChange = (val: number) => {
-    if (val > MAX_KM) {
-      onChange(-1); // Infinite
-    } else {
-      onChange(Math.round(val));
-    }
-  };
+
+  // Anything past MAX_KM means infinite (-1)
+  const toRadius = (val: number) => (val > MAX_KM ? -1 : Math.round(val));
 
   const label = value < 0 ? 'Infinite distance' : `${value} km`;
 
@@ -72,7 +100,8 @@ function DistanceSliderComponent({ value, onChange }: { value: number; onChange:
         minimumValue={1}
         maximumValue={MAX_KM + 1}
         value={sliderValue}
-        onValueChange={handleChange}
+        onValueChange={(val) => onChange(toRadius(val))}
+        onSlidingComplete={(val) => onComplete(toRadius(val))}
         minimumTrackTintColor={COLORS.primary}
         maximumTrackTintColor={COLORS.border}
         thumbTintColor={COLORS.primary}
@@ -89,7 +118,18 @@ function DistanceSliderComponent({ value, onChange }: { value: number; onChange:
 // ============================================
 // SMOOTH AGE RANGE SLIDER - Dual Thumb Range Slider
 // ============================================
-function AgeRangeSliderComponent({ value, onChange }: { value: AgeFilter; onChange: (v: AgeFilter) => void }) {
+// Custom marker component for the thumbs (module level: a component defined inside
+// the slider is a new type every render, so the thumbs remounted on every drag tick)
+const AgeSliderMarker = () => (
+  <View style={rangeSliderStyles.marker}>
+    <View style={rangeSliderStyles.markerInner} />
+  </View>
+);
+
+// onChange = live values while dragging (UI only); onComplete = final values on release (persisted).
+function AgeRangeSliderComponent({ value, onChange, onComplete }: {
+  value: AgeFilter; onChange: (v: AgeFilter) => void; onComplete: (v: AgeFilter) => void;
+}) {
   const MIN_AGE = 18;
   const MAX_AGE = 60;
 
@@ -97,12 +137,9 @@ function AgeRangeSliderComponent({ value, onChange }: { value: AgeFilter; onChan
     onChange({ ...value, min: values[0], max: values[1] });
   };
 
-  // Custom marker component for the thumbs
-  const CustomMarker = () => (
-    <View style={rangeSliderStyles.marker}>
-      <View style={rangeSliderStyles.markerInner} />
-    </View>
-  );
+  const handleValuesChangeFinish = (values: number[]) => {
+    onComplete({ ...value, min: values[0], max: values[1] });
+  };
 
   return (
     <View style={sliderStyles.container}>
@@ -116,13 +153,14 @@ function AgeRangeSliderComponent({ value, onChange }: { value: AgeFilter; onChan
           step={1}
           sliderLength={280}
           onValuesChange={handleValuesChange}
+          onValuesChangeFinish={handleValuesChangeFinish}
           selectedStyle={rangeSliderStyles.selectedTrack}
           unselectedStyle={rangeSliderStyles.unselectedTrack}
           trackStyle={rangeSliderStyles.track}
           markerStyle={rangeSliderStyles.markerStyle}
           pressedMarkerStyle={rangeSliderStyles.pressedMarkerStyle}
           containerStyle={rangeSliderStyles.containerStyle}
-          customMarker={CustomMarker}
+          customMarker={AgeSliderMarker}
           snapped
           allowOverlap={false}
           minMarkerOverlapDistance={10}
@@ -232,9 +270,45 @@ const sliderStyles = StyleSheet.create({
 // ============================================
 // iOS WHEEL PICKER - Height with Min ≤ Max validation
 // ============================================
+// Each wheel column edits one HeightFilter field
+type WheelKey = 'minFeet' | 'minInches' | 'maxFeet' | 'maxInches' | 'minCm' | 'maxCm';
+const WHEEL_ITEMS: Record<WheelKey, number[]> = {
+  minFeet: FEET, minInches: INCHES, maxFeet: FEET, maxInches: INCHES, minCm: CM_VALUES, maxCm: CM_VALUES,
+};
+// Index shown when the stored value isn't on the wheel
+const WHEEL_DEFAULT_IDX: Record<WheelKey, number> = {
+  minFeet: 1, minInches: 0, maxFeet: 3, maxInches: 0, minCm: 30, maxCm: 70,
+};
+const wheelIndex = (key: WheelKey, v: HeightFilter) => {
+  const i = WHEEL_ITEMS[key].indexOf(v[key]);
+  return i >= 0 ? i : WHEEL_DEFAULT_IDX[key];
+};
+
+// ft/in <-> cm, clamped to what the wheels can show
+const clampNum = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
+const toCm = (feet: number, inches: number) =>
+  clampNum(Math.round((feet * 12 + inches) * 2.54), CM_VALUES[0], CM_VALUES[CM_VALUES.length - 1]);
+const toFeetInches = (cm: number) => {
+  const total = clampNum(Math.round(cm / 2.54), FEET[0] * 12, FEET[FEET.length - 1] * 12 + 11);
+  return { feet: Math.floor(total / 12), inches: total % 12 };
+};
+// The backend prefers height_*_cm, so the unit not being edited is always derived
+// from the one that is (otherwise ft/in edits were ignored server-side).
+const syncHeightUnits = (v: HeightFilter, fromMetric: boolean): HeightFilter => {
+  if (fromMetric) {
+    const lo = toFeetInches(v.minCm);
+    const hi = toFeetInches(v.maxCm);
+    return { ...v, minFeet: lo.feet, minInches: lo.inches, maxFeet: hi.feet, maxInches: hi.inches };
+  }
+  return { ...v, minCm: toCm(v.minFeet, v.minInches), maxCm: toCm(v.maxFeet, v.maxInches) };
+};
+
 function HeightWheelPicker({ value, onChange }: { value: HeightFilter; onChange: (v: HeightFilter) => void }) {
   const [isMetric, setIsMetric] = useState(value.unit === 'metric');
-  
+  // Latest value for scroll callbacks/timers (two quick commits must not overwrite each other)
+  const valueRef = useRef(value);
+  valueRef.current = value;
+
   // Refs for scroll views
   const minFeetRef = useRef<ScrollView>(null);
   const minInchRef = useRef<ScrollView>(null);
@@ -242,119 +316,117 @@ function HeightWheelPicker({ value, onChange }: { value: HeightFilter; onChange:
   const maxInchRef = useRef<ScrollView>(null);
   const minCmRef = useRef<ScrollView>(null);
   const maxCmRef = useRef<ScrollView>(null);
+  const wheelRefs: Record<WheelKey, React.RefObject<ScrollView | null>> = {
+    minFeet: minFeetRef, minInches: minInchRef, maxFeet: maxFeetRef,
+    maxInches: maxInchRef, minCm: minCmRef, maxCm: maxCmRef,
+  };
 
   // Calculate indices
-  const minFeetIdx = FEET.indexOf(value.minFeet) >= 0 ? FEET.indexOf(value.minFeet) : 1;
-  const minInchIdx = value.minInches || 0;
-  const maxFeetIdx = FEET.indexOf(value.maxFeet) >= 0 ? FEET.indexOf(value.maxFeet) : 3;
-  const maxInchIdx = value.maxInches || 0;
-  const minCmIdx = CM_VALUES.indexOf(value.minCm) >= 0 ? CM_VALUES.indexOf(value.minCm) : 30;
-  const maxCmIdx = CM_VALUES.indexOf(value.maxCm) >= 0 ? CM_VALUES.indexOf(value.maxCm) : 70;
+  const minFeetIdx = wheelIndex('minFeet', value);
+  const minInchIdx = wheelIndex('minInches', value);
+  const maxFeetIdx = wheelIndex('maxFeet', value);
+  const maxInchIdx = wheelIndex('maxInches', value);
+  const minCmIdx = wheelIndex('minCm', value);
+  const maxCmIdx = wheelIndex('maxCm', value);
 
   // Helper to convert ft/in to total inches for comparison
   const toTotalInches = (feet: number, inches: number) => feet * 12 + inches;
-  
+
   // State for error message
   const [heightError, setHeightError] = useState<string | null>(null);
+  const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Pending drag-end commits per wheel (cancelled when a momentum scroll follows)
+  const dragEndTimers = useRef<Partial<Record<WheelKey, ReturnType<typeof setTimeout>>>>({});
 
-  // Scroll to initial positions
+  useEffect(() => () => {
+    if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+    Object.values(dragEndTimers.current).forEach((t) => clearTimeout(t));
+  }, []);
+
+  // Scroll to the current values whenever the wheels (re)appear
   useEffect(() => {
-    setTimeout(() => {
-      if (isMetric) {
-        minCmRef.current?.scrollTo({ y: minCmIdx * ITEM_HEIGHT, animated: false });
-        maxCmRef.current?.scrollTo({ y: maxCmIdx * ITEM_HEIGHT, animated: false });
-      } else {
-        minFeetRef.current?.scrollTo({ y: minFeetIdx * ITEM_HEIGHT, animated: false });
-        minInchRef.current?.scrollTo({ y: minInchIdx * ITEM_HEIGHT, animated: false });
-        maxFeetRef.current?.scrollTo({ y: maxFeetIdx * ITEM_HEIGHT, animated: false });
-        maxInchRef.current?.scrollTo({ y: maxInchIdx * ITEM_HEIGHT, animated: false });
-      }
+    const t = setTimeout(() => {
+      const keys: WheelKey[] = isMetric ? ['minCm', 'maxCm'] : ['minFeet', 'minInches', 'maxFeet', 'maxInches'];
+      keys.forEach((k) => {
+        wheelRefs[k].current?.scrollTo({ y: wheelIndex(k, valueRef.current) * ITEM_HEIGHT, animated: false });
+      });
     }, 100);
+    return () => clearTimeout(t);
   }, [isMetric]);
 
-  // Validation: Ensure min ≤ max
-  const validateAndUpdate = (newValue: HeightFilter) => {
-    const minTotal = toTotalInches(newValue.minFeet, newValue.minInches);
-    const maxTotal = toTotalInches(newValue.maxFeet, newValue.maxInches);
-    
-    if (minTotal <= maxTotal) {
-      setHeightError(null);
-      onChange(newValue);
-    } else {
-      setHeightError('Minimum height cannot be greater than maximum height');
-      // Auto-clear error after 2 seconds
-      setTimeout(() => setHeightError(null), 2000);
+  const showHeightError = () => {
+    setHeightError('Minimum height cannot be greater than maximum height');
+    // Auto-clear error after 2 seconds
+    if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+    errorTimerRef.current = setTimeout(() => setHeightError(null), 2000);
+  };
+
+  // Validation: Ensure min ≤ max (in the unit being edited)
+  const isValidRange = (v: HeightFilter, metric: boolean) =>
+    metric
+      ? v.minCm <= v.maxCm
+      : toTotalInches(v.minFeet, v.minInches) <= toTotalInches(v.maxFeet, v.maxInches);
+
+  // Centre a wheel on an item; skipped when already there so a settled wheel
+  // never triggers another commit
+  const alignWheel = (key: WheelKey, idx: number, fromY?: number) => {
+    const y = idx * ITEM_HEIGHT;
+    if (fromY === undefined || Math.abs(fromY - y) > 1) {
+      wheelRefs[key].current?.scrollTo({ y, animated: true });
     }
   };
 
-  const validateAndUpdateCm = (newValue: HeightFilter) => {
-    if (newValue.minCm <= newValue.maxCm) {
-      setHeightError(null);
-      onChange(newValue);
-    } else {
-      setHeightError('Minimum height cannot be greater than maximum height');
-      setTimeout(() => setHeightError(null), 2000);
+  // Commit the item a wheel came to rest on
+  const commitWheel = (key: WheelKey, y: number) => {
+    const items = WHEEL_ITEMS[key];
+    const idx = Math.max(0, Math.min(items.length - 1, Math.round(y / ITEM_HEIGHT)));
+    const current = valueRef.current;
+    if (items[idx] === current[key]) {
+      alignWheel(key, idx, y); // unchanged - just centre a wheel left between two items
+      return;
     }
+    const metric = key === 'minCm' || key === 'maxCm';
+    const next: HeightFilter = { ...current, [key]: items[idx] };
+    if (!isValidRange(next, metric)) {
+      showHeightError();
+      // Rejected: spin the wheel back to the value that is still in effect
+      alignWheel(key, wheelIndex(key, current));
+      return;
+    }
+    setHeightError(null);
+    const synced = syncHeightUnits(next, metric);
+    valueRef.current = synced;
+    onChange(synced);
+    alignWheel(key, idx, y);
   };
 
-  const handleMinFeetScroll = (e: any) => {
-    const y = e.nativeEvent.contentOffset.y;
-    const idx = Math.round(y / ITEM_HEIGHT);
-    const clampedIdx = Math.max(0, Math.min(FEET.length - 1, idx));
-    const newFeet = FEET[clampedIdx];
-    if (newFeet !== value.minFeet) {
-      validateAndUpdate({ ...value, minFeet: newFeet });
-    }
-  };
+  // Scroll wiring for one wheel. A slow drag without a fling never fires
+  // onMomentumScrollEnd, so drag end commits too - deferred, and cancelled if a
+  // momentum scroll follows (that one commits where it stops).
+  const wheelHandlers = (key: WheelKey) => ({
+    onScrollEndDrag: (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const y = e.nativeEvent.contentOffset.y;
+      clearTimeout(dragEndTimers.current[key]);
+      dragEndTimers.current[key] = setTimeout(() => commitWheel(key, y), 120);
+    },
+    onMomentumScrollBegin: () => clearTimeout(dragEndTimers.current[key]),
+    onMomentumScrollEnd: (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      clearTimeout(dragEndTimers.current[key]);
+      commitWheel(key, e.nativeEvent.contentOffset.y);
+    },
+  });
 
-  const handleMinInchScroll = (e: any) => {
-    const y = e.nativeEvent.contentOffset.y;
-    const idx = Math.round(y / ITEM_HEIGHT);
-    const clampedIdx = Math.max(0, Math.min(INCHES.length - 1, idx));
-    const newInch = INCHES[clampedIdx];
-    if (newInch !== value.minInches) {
-      validateAndUpdate({ ...value, minInches: newInch });
-    }
-  };
-
-  const handleMaxFeetScroll = (e: any) => {
-    const y = e.nativeEvent.contentOffset.y;
-    const idx = Math.round(y / ITEM_HEIGHT);
-    const clampedIdx = Math.max(0, Math.min(FEET.length - 1, idx));
-    const newFeet = FEET[clampedIdx];
-    if (newFeet !== value.maxFeet) {
-      validateAndUpdate({ ...value, maxFeet: newFeet });
-    }
-  };
-
-  const handleMaxInchScroll = (e: any) => {
-    const y = e.nativeEvent.contentOffset.y;
-    const idx = Math.round(y / ITEM_HEIGHT);
-    const clampedIdx = Math.max(0, Math.min(INCHES.length - 1, idx));
-    const newInch = INCHES[clampedIdx];
-    if (newInch !== value.maxInches) {
-      validateAndUpdate({ ...value, maxInches: newInch });
-    }
-  };
-
-  const handleMinCmScroll = (e: any) => {
-    const y = e.nativeEvent.contentOffset.y;
-    const idx = Math.round(y / ITEM_HEIGHT);
-    const clampedIdx = Math.max(0, Math.min(CM_VALUES.length - 1, idx));
-    const newCm = CM_VALUES[clampedIdx];
-    if (newCm !== value.minCm) {
-      validateAndUpdateCm({ ...value, minCm: newCm });
-    }
-  };
-
-  const handleMaxCmScroll = (e: any) => {
-    const y = e.nativeEvent.contentOffset.y;
-    const idx = Math.round(y / ITEM_HEIGHT);
-    const clampedIdx = Math.max(0, Math.min(CM_VALUES.length - 1, idx));
-    const newCm = CM_VALUES[clampedIdx];
-    if (newCm !== value.maxCm) {
-      validateAndUpdateCm({ ...value, maxCm: newCm });
-    }
+  // ft/in <-> cm toggle converts the values shown in the old unit into the new one
+  const switchUnit = (metric: boolean) => {
+    if (metric === isMetric) return;
+    setHeightError(null);
+    setIsMetric(metric);
+    const next: HeightFilter = {
+      ...syncHeightUnits(valueRef.current, !metric),
+      unit: metric ? 'metric' : 'imperial',
+    };
+    valueRef.current = next;
+    onChange(next);
   };
 
   const minDisplay = isMetric ? `${value.minCm} cm` : `${value.minFeet}'${value.minInches}"`;
@@ -366,13 +438,13 @@ function HeightWheelPicker({ value, onChange }: { value: HeightFilter; onChange:
       <View style={wheelStyles.toggleRow}>
         <TouchableOpacity
           style={[wheelStyles.toggleBtn, !isMetric && wheelStyles.toggleBtnActive]}
-          onPress={() => { setIsMetric(false); onChange({ ...value, unit: 'imperial' }); }}
+          onPress={() => switchUnit(false)}
         >
           <Text style={[wheelStyles.toggleText, !isMetric && wheelStyles.toggleTextActive]}>ft/in</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[wheelStyles.toggleBtn, isMetric && wheelStyles.toggleBtnActive]}
-          onPress={() => { setIsMetric(true); onChange({ ...value, unit: 'metric' }); }}
+          onPress={() => switchUnit(true)}
         >
           <Text style={[wheelStyles.toggleText, isMetric && wheelStyles.toggleTextActive]}>cm</Text>
         </TouchableOpacity>
@@ -404,7 +476,7 @@ function HeightWheelPicker({ value, onChange }: { value: HeightFilter; onChange:
                     showsVerticalScrollIndicator={false}
                     snapToInterval={ITEM_HEIGHT}
                     decelerationRate="fast"
-                    onMomentumScrollEnd={handleMinFeetScroll}
+                    {...wheelHandlers('minFeet')}
                     contentContainerStyle={{ paddingVertical: ITEM_HEIGHT }}
                     nestedScrollEnabled
                   >
@@ -429,7 +501,7 @@ function HeightWheelPicker({ value, onChange }: { value: HeightFilter; onChange:
                     showsVerticalScrollIndicator={false}
                     snapToInterval={ITEM_HEIGHT}
                     decelerationRate="fast"
-                    onMomentumScrollEnd={handleMinInchScroll}
+                    {...wheelHandlers('minInches')}
                     contentContainerStyle={{ paddingVertical: ITEM_HEIGHT }}
                     nestedScrollEnabled
                   >
@@ -461,7 +533,7 @@ function HeightWheelPicker({ value, onChange }: { value: HeightFilter; onChange:
                     showsVerticalScrollIndicator={false}
                     snapToInterval={ITEM_HEIGHT}
                     decelerationRate="fast"
-                    onMomentumScrollEnd={handleMaxFeetScroll}
+                    {...wheelHandlers('maxFeet')}
                     contentContainerStyle={{ paddingVertical: ITEM_HEIGHT }}
                     nestedScrollEnabled
                   >
@@ -486,7 +558,7 @@ function HeightWheelPicker({ value, onChange }: { value: HeightFilter; onChange:
                     showsVerticalScrollIndicator={false}
                     snapToInterval={ITEM_HEIGHT}
                     decelerationRate="fast"
-                    onMomentumScrollEnd={handleMaxInchScroll}
+                    {...wheelHandlers('maxInches')}
                     contentContainerStyle={{ paddingVertical: ITEM_HEIGHT }}
                     nestedScrollEnabled
                   >
@@ -516,7 +588,7 @@ function HeightWheelPicker({ value, onChange }: { value: HeightFilter; onChange:
                 showsVerticalScrollIndicator={false}
                 snapToInterval={ITEM_HEIGHT}
                 decelerationRate="fast"
-                onMomentumScrollEnd={handleMinCmScroll}
+                {...wheelHandlers('minCm')}
                 contentContainerStyle={{ paddingVertical: ITEM_HEIGHT }}
                 nestedScrollEnabled
               >
@@ -542,7 +614,7 @@ function HeightWheelPicker({ value, onChange }: { value: HeightFilter; onChange:
                 showsVerticalScrollIndicator={false}
                 snapToInterval={ITEM_HEIGHT}
                 decelerationRate="fast"
-                onMomentumScrollEnd={handleMaxCmScroll}
+                {...wheelHandlers('maxCm')}
                 contentContainerStyle={{ paddingVertical: ITEM_HEIGHT }}
                 nestedScrollEnabled
               >
@@ -848,6 +920,11 @@ export default function FiltersScreen() {
   const [showExclusiveInfo, setShowExclusiveInfo] = useState(false);
   const [showExpandInfo, setShowExpandInfo] = useState(false);
   const [showFloatingBtn, setShowFloatingBtn] = useState(false);
+  // Latest filters for the leave/unmount handlers (state would be a stale closure there)
+  const filtersRef = useRef<FiltersData>(initialFiltersData);
+  // Changed since the last immediate sync? (false until the user edits, so leaving
+  // during the initial load never overwrites the saved filters with defaults)
+  const dirtyRef = useRef(false);
 
   // Load saved filters on mount
   useEffect(() => {
@@ -860,7 +937,9 @@ export default function FiltersScreen() {
       const savedFilters = await getFilters();
       if (savedFilters) {
         // Merge saved filters with initial to handle any new fields
-        setFilters({ ...initialFiltersData, ...savedFilters });
+        const merged = sanitizeSavedFilters(savedFilters);
+        filtersRef.current = merged;
+        setFilters(merged);
       }
     } catch (e) {
       console.error('Error loading filters:', e);
@@ -869,26 +948,62 @@ export default function FiltersScreen() {
     }
   };
 
-  const updateFilter = (key: keyof FiltersData, section: FilterSection) => {
-    const newFilters = { ...filters, [key]: section };
+  // Local-only update (live slider values while dragging)
+  const applyFilters = (newFilters: FiltersData) => {
+    filtersRef.current = newFilters;
+    dirtyRef.current = true;
     setFilters(newFilters);
-    // Auto-save on every change for immediate persistence
-    saveFilters(newFilters);
   };
 
-  // Auto-save helper for non-FilterSection updates (distance, age, height)
+  // Update + persist (the store debounces the network sync)
   const updateAndSave = (newFilters: FiltersData) => {
-    setFilters(newFilters);
-    saveFilters(newFilters);
+    applyFilters(newFilters);
+    void saveFilters(newFilters);
   };
 
-  const handleStart = async () => {
-    await saveFilters(filters);
-    // If coming from profile settings, navigate to profile tab; otherwise go to discover tab
-    if (fromProfile) {
-      router.replace('/(tabs)/profile');
+  const updateFilter = (key: keyof FiltersData, section: FilterSection) => {
+    updateAndSave({ ...filtersRef.current, [key]: section });
+  };
+
+  // Leaving the screen: persist + sync right away instead of waiting for the debounce
+  const flushFilters = useCallback(() => {
+    if (!dirtyRef.current) return;
+    dirtyRef.current = false;
+    void saveFilters(filtersRef.current, { immediate: true });
+  }, []);
+
+  // Android hardware back + any other way of leaving (unmount) flush pending edits
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      flushFilters();
+      return false; // let the stack pop this screen as usual
+    });
+    return () => {
+      sub.remove();
+      flushFilters();
+    };
+  }, [flushFilters]);
+
+  const goBack = () => {
+    flushFilters();
+    if (router.canGoBack()) {
+      router.back();
     } else {
-      router.replace('/(tabs)/discover');
+      router.replace(fromProfile ? '/(tabs)/profile' : '/(tabs)/discover');
+    }
+  };
+
+  const handleStart = () => {
+    // Always persist on Start (also first-time defaults), synced immediately
+    dirtyRef.current = true;
+    flushFilters();
+    if (fromProfile) {
+      // Return to wherever the profile settings were opened from
+      if (router.canGoBack()) router.back();
+      else router.replace('/(tabs)/profile');
+    } else {
+      // Pop back to the existing tabs (no duplicate (tabs) entry in the stack) and show Discover
+      router.dismissTo('/(tabs)/discover');
     }
   };
 
@@ -915,7 +1030,7 @@ export default function FiltersScreen() {
       {/* Header with back button and floating action when scrolled */}
       <View style={styles.headerBar}>
         <View style={styles.headerLeft}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+          <TouchableOpacity style={styles.backBtn} onPress={goBack}>
             <Ionicons name="arrow-back" size={24} color={COLORS.text} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Preferences & Filters</Text>
@@ -990,8 +1105,12 @@ export default function FiltersScreen() {
           <DistanceSliderComponent
             value={filters.distance.radius}
             onChange={(v) => {
-              const newFilters = { ...filters, distance: { ...filters.distance, radius: v } };
-              updateAndSave(newFilters);
+              const cur = filtersRef.current;
+              applyFilters({ ...cur, distance: { ...cur.distance, radius: v } });
+            }}
+            onComplete={(v) => {
+              const cur = filtersRef.current;
+              updateAndSave({ ...cur, distance: { ...cur.distance, radius: v } });
             }}
           />
         </View>
@@ -1033,10 +1152,8 @@ export default function FiltersScreen() {
           </View>
           <AgeRangeSliderComponent
             value={filters.age}
-            onChange={(v) => {
-              const newFilters = { ...filters, age: v };
-              updateAndSave(newFilters);
-            }}
+            onChange={(v) => applyFilters({ ...filtersRef.current, age: v })}
+            onComplete={(v) => updateAndSave({ ...filtersRef.current, age: v })}
           />
         </View>
 
@@ -1077,10 +1194,7 @@ export default function FiltersScreen() {
           </View>
           <HeightWheelPicker
             value={filters.height}
-            onChange={(v) => {
-              const newFilters = { ...filters, height: v };
-              updateAndSave(newFilters);
-            }}
+            onChange={(v) => updateAndSave({ ...filtersRef.current, height: v })}
           />
         </View>
 

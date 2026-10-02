@@ -6,7 +6,8 @@ import { Dimensions } from 'react-native';
 
 export const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-export const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+// Re-exported for older imports only — build URLs with apiUrl() from the store.
+export { API_BASE } from '../../store';
 
 export const COLORS = {
   primary: '#E50914',

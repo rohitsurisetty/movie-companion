@@ -5,7 +5,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, {
   useSharedValue, useAnimatedStyle, withTiming, withDelay,
-  Easing, withSequence,
+  Easing,
 } from 'react-native-reanimated';
 import { COLORS, SPACING, BORDER_RADIUS } from '../src/theme';
 import { shadow } from '../src/utils/shadow';
@@ -78,7 +78,7 @@ export default function SuccessScreen() {
         </Animated.View>
 
         <Animated.View style={[styles.titleContainer, titleStyle]}>
-          <Text style={styles.title}>Let's Begin The Show!</Text>
+          <Text style={styles.title}>{"Let's Begin The Show!"}</Text>
           <View style={styles.goldLine} />
           <Text style={styles.subtitle}>Your movie journey starts now.</Text>
         </Animated.View>

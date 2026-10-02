@@ -14,12 +14,13 @@ import {
   TextInput,
   ActivityIndicator,
   Keyboard,
-  Platform,
-  KeyboardAvoidingView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+// keyboard-controller's KAV (not RN's) — RN's 'height' behavior is unreliable on
+// Android edge-to-edge, and this one also works inside RN <Modal> windows.
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { formatLocationForPrivacy } from '../utils/locationFormatter';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -37,6 +38,35 @@ const formatMatchLevel = (level: string): string => {
     .split(' ')
     .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
     .join(' ');
+};
+
+/**
+ * Photos as the backend sends them: an array of URLs (current), or the legacy
+ * `{ picture_1: url, ..., picture_5: url }` object (older backends/caches).
+ */
+export type PicturesInput = (string | null | undefined)[] | Record<string, string | null | undefined> | null | undefined;
+
+/** Normalizes either picture shape to a clean, ordered list of non-empty URLs. */
+export const normalizePictures = (pics: PicturesInput): string[] => {
+  if (!pics) return [];
+  const list = Array.isArray(pics)
+    ? pics
+    : [1, 2, 3, 4, 5].map((n) => pics[`picture_${n}`]);
+  return list.filter((p): p is string => typeof p === 'string' && p.trim().length > 0);
+};
+
+/**
+ * Ordered photo URLs for a locally stored profile. photos.tsx maintains
+ * `pictures` / `profilePicture`; during onboarding the freshest uploads live in
+ * `uploadedPictures` (pass `preferUploads` there).
+ */
+export const getProfilePhotos = (p: unknown, { preferUploads = false } = {}): string[] => {
+  const d = (p || {}) as { pictures?: PicturesInput; uploadedPictures?: PicturesInput; profilePicture?: unknown };
+  const persisted = normalizePictures(d.pictures);
+  const uploads = normalizePictures(d.uploadedPictures);
+  const primary = normalizePictures([typeof d.profilePicture === 'string' ? d.profilePicture : null]);
+  const candidates = preferUploads ? [uploads, persisted, primary] : [persisted, primary, uploads];
+  return candidates.find((list) => list.length > 0) || [];
 };
 
 const COLORS = {
@@ -82,12 +112,17 @@ interface ProfileData {
   height?: string;
   religion?: string;
   personality?: string;
+  /** Used when the `photos` prop is empty/omitted. */
+  pictures?: PicturesInput;
 }
 
 interface PremiumProfileViewProps {
   visible: boolean;
   profile: ProfileData | null;
-  photos: string[];
+  /** Ordered photo URLs. When empty/omitted, `pictures` (or `profile.pictures`) is used. */
+  photos?: string[];
+  /** Raw backend pictures: string[] (current) or legacy { picture_1..5 } object. */
+  pictures?: PicturesInput;
   mode: 'date' | 'buddy';
   onClose: () => void;
   onSendMessage: (message: string) => Promise<boolean>;
@@ -100,6 +135,11 @@ interface PremiumProfileViewProps {
   closeIconName?: keyof typeof Ionicons.glyphMap;
   /** Hide the match-card / explanation block (used when viewing your own profile). */
   hideMatchCard?: boolean;
+  /**
+   * Viewing your own profile: hides the match card and the Message /
+   * "Request Sent" CTAs (a `bottomCTAOverride` is still rendered).
+   */
+  isOwnProfile?: boolean;
 }
 
 // ============ PHOTO CAROUSEL ============
@@ -438,6 +478,7 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
   visible,
   profile,
   photos,
+  pictures,
   mode,
   onClose,
   onSendMessage,
@@ -446,6 +487,7 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
   bottomCTAOverride,
   closeIconName = 'chevron-down',
   hideMatchCard = false,
+  isOwnProfile = false,
 }) => {
   const insets = useSafeAreaInsets();
   const scrollY = useRef(new Animated.Value(0)).current;
@@ -455,23 +497,6 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
   const [showMessageDialog, setShowMessageDialog] = useState(false);
   const [messageText, setMessageText] = useState('');
   const [requestSent, setRequestSent] = useState(hasAlreadySentRequest);
-
-  // Keyboard handling - listeners to track keyboard state
-  useEffect(() => {
-    const keyboardWillShow = Keyboard.addListener(
-      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
-      () => { /* Keyboard shown - KeyboardAvoidingView handles positioning */ }
-    );
-    const keyboardWillHide = Keyboard.addListener(
-      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
-      () => { /* Keyboard hidden */ }
-    );
-
-    return () => {
-      keyboardWillShow.remove();
-      keyboardWillHide.remove();
-    };
-  }, []);
 
   // Reset state when profile changes
   useEffect(() => {
@@ -507,6 +532,12 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
   );
 
   if (!visible || !profile) return null;
+
+  // Explicit `photos` win; otherwise use the backend `pictures` (array or legacy object).
+  const photoList =
+    photos && photos.length > 0 ? photos : normalizePictures(pictures ?? profile.pictures);
+  // Own profile: no match card, no Message / "Request Sent" CTA (override still shows).
+  const showBottomCTA = !!bottomCTAOverride || !isOwnProfile;
 
   const accentColor = mode === 'date' ? COLORS.primary : COLORS.buddy;
   const formattedLocation = formatLocationForPrivacy(profile.location);
@@ -583,7 +614,7 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
         bounces={true}
       >
         {/* Photo Carousel */}
-        <PhotoCarousel photos={photos} name={profile.name} />
+        <PhotoCarousel photos={photoList} name={profile.name || ''} />
 
         {/* Profile Content */}
         <View style={styles.content}>
@@ -609,7 +640,7 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
           </View>
 
           {/* Match Compatibility */}
-          {!hideMatchCard && profile.match_level && (
+          {!hideMatchCard && !isOwnProfile && profile.match_level && (
             <View style={[styles.matchCard, { borderColor: 'rgba(255, 215, 0, 0.3)' }]}>
               <View style={styles.matchCardHeader}>
                 <Ionicons name="sparkles" size={16} color={COLORS.gold} />
@@ -739,9 +770,9 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
 
       {/* Inline Message Dialog - Overlays on profile with keyboard avoidance */}
       {showMessageDialog && (
-        <KeyboardAvoidingView 
+        <KeyboardAvoidingView
           style={styles.messageDialogOverlay}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          behavior="padding"
           keyboardVerticalOffset={0}
         >
           <TouchableOpacity 
@@ -808,7 +839,7 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
       )}
 
       {/* Fixed Bottom CTA */}
-      {!showMessageDialog && (
+      {!showMessageDialog && showBottomCTA && (
         <View style={[styles.bottomCTA, { paddingBottom: insets.bottom + 12 }]}>
           {bottomCTAOverride ? (
             bottomCTAOverride

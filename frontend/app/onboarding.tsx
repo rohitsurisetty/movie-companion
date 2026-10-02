@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, BackHandler, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COLORS, SPACING, BORDER_RADIUS } from '../src/theme';
 import { ProfileData, initialProfileData } from '../src/types';
-import { saveProfile, setOnboardingComplete, getUserId } from '../src/store';
+import { saveProfile, getProfile, setOnboardingComplete, getUserId, apiUrl } from '../src/store';
 import SelectionStep from '../src/components/SelectionStep';
 import BasicInfoStep from '../src/components/BasicInfoStep';
 import TopMoviesStep from '../src/components/TopMoviesStep';
@@ -17,7 +18,72 @@ import TinaChatScreen from '../src/components/TinaChatScreen';
 import { useTina } from '../src/context/TinaContext';
 import ErrorBoundary from '../src/components/ErrorBoundary';
 
-const API_BASE = process.env.EXPO_PUBLIC_API_URL || '';
+// Resume point ({ userId, step }) so a kill/restart mid-onboarding comes back
+// to the same step; the answers themselves live in the local profile.
+const ONBOARDING_PROGRESS_KEY = '@film_companion_onboarding_progress';
+
+const str = (v: any) => (typeof v === 'string' ? v : '');
+const strList = (v: any): string[] =>
+  Array.isArray(v) ? v.filter((x: any) => typeof x === 'string') : [];
+
+// POST /api/user/profile overwrites every profile field, so always send the
+// whole onboarding profile. The server takes the identity from the session.
+const buildProfilePayload = (userId: string, p: any) => ({
+  user_id: userId,
+  name: str(p.name),
+  age: Number(p.age) || 0,
+  ...(p.dobDay && p.dobMonth && p.dobYear
+    ? { dobDay: String(p.dobDay), dobMonth: String(p.dobMonth), dobYear: String(p.dobYear) }
+    : {}),
+  // ISO date lets the server derive age itself (18+ is enforced server-side).
+  ...(typeof p.dob === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(p.dob) ? { dob: p.dob } : {}),
+  gender: str(p.gender),
+  ...(typeof p.genderIdentity === 'string' && p.genderIdentity.trim()
+    ? { genderIdentity: p.genderIdentity.trim() }
+    : {}),
+  location: str(p.location),
+  ...(typeof p.locationFull === 'string' && p.locationFull ? { locationFull: p.locationFull } : {}),
+  ...(typeof p.coordinates?.lat === 'number' && typeof p.coordinates?.lng === 'number'
+    ? { coordinates: { lat: p.coordinates.lat, lng: p.coordinates.lng } }
+    : {}),
+  partnerPreference: str(p.partnerPreference),
+  relationshipIntent: strList(p.relationshipIntent),
+  genres: strList(p.genres),
+  filmLanguages: strList(p.filmLanguages),
+  languagesSpoken: strList(p.languagesSpoken),
+  topMovies: (Array.isArray(p.topMovies) ? p.topMovies : [])
+    .filter((m: any) => m && typeof m.id === 'number' && m.title)
+    .map((m: any) => ({
+      id: m.id,
+      title: String(m.title),
+      poster_path: str(m.poster_path),
+      release_date: str(m.release_date),
+      vote_average: Number(m.vote_average) || 0,
+      rating: Number(m.rating) || 0,
+      genres: strList(m.genres),
+      reasons: strList(m.reasons),
+    })),
+  movieFrequency: str(p.movieFrequency),
+  ottTheatre: str(p.ottTheatre),
+  height: str(p.height),
+  religion: str(p.religion),
+  maritalStatus: str(p.maritalStatus),
+  foodPreference: str(p.foodPreference),
+  bio: str(p.bio),
+  smoking: str(p.smoking),
+  drinking: str(p.drinking),
+  exercise: str(p.exercise),
+  zodiac: str(p.zodiac),
+  pets: str(p.pets),
+  familyPlanning: str(p.familyPlanning),
+  siblings: str(p.siblings),
+  education: str(p.education),
+  workProfile: str(p.workProfile),
+  travel: str(p.travel),
+  movieBuddyMode: !!p.movieBuddyMode,
+  movieDateMode: !!p.movieDateMode,
+  visibilityToggles: p.visibilityToggles || {},
+});
 
 // Step indices — Tina is now auto-launched at step 2 (no manual choice)
 const STEP_BASIC_INFO = 0;
@@ -109,6 +175,11 @@ export default function OnboardingScreen() {
   const [returningFromMovieSelection, setReturningFromMovieSelection] = useState(false);
   // Ref to ensure Tina auto-launches once when reaching STEP_TINA_AUTO
   const tinaAutoLaunched = useRef(false);
+  // True once saved answers (if any) were restored — gates rendering so a
+  // late restore can't overwrite what the user is typing.
+  const [hydrated, setHydrated] = useState(false);
+  const dataRef = useRef(data);
+  dataRef.current = data;
 
   // USE TINA CONTEXT FOR UNIFIED STATE
   const { 
@@ -124,17 +195,67 @@ export default function OnboardingScreen() {
   // Use messages from TinaContext (single source of truth)
   const tinaMessages = tinaState.messages;
 
-  // Get user ID on mount
+  // Get user ID on mount and restore any answers saved before a kill/restart
   useEffect(() => {
     (async () => {
       const id = await getUserId();
-      setUserId(id || '');
+      if (!id) {
+        // Not signed in — never run onboarding against a fabricated id.
+        router.replace('/');
+        return;
+      }
+      setUserId(id);
+      try {
+        const saved = await getProfile();
+        if (saved && typeof saved === 'object' && (!saved.userId || saved.userId === id)) {
+          // Preview steps .map over these — never restore a non-array value.
+          const restored: any = { ...saved };
+          ['relationshipIntent', 'languagesSpoken', 'filmLanguages', 'genres', 'topMovies'].forEach(k => {
+            if (!Array.isArray(restored[k])) delete restored[k];
+          });
+          setData(prev => ({
+            ...prev,
+            ...restored,
+            visibilityToggles: { ...prev.visibilityToggles, ...(saved.visibilityToggles || {}) },
+          }));
+          const raw = await AsyncStorage.getItem(ONBOARDING_PROGRESS_KEY);
+          const progress = raw ? JSON.parse(raw) : null;
+          const savedStep = Number(progress?.step);
+          if (progress?.userId === id && Number.isInteger(savedStep) && savedStep > 0 && savedStep < TOTAL_STEPS) {
+            if (savedStep > STEP_TINA_AUTO) {
+              // Tina already ran (or was skipped) before the restart.
+              tinaAutoLaunched.current = true;
+              setOnboardingStage('manual_onboarding');
+            }
+            setStep(savedStep);
+          }
+        }
+      } catch (e) {
+        console.warn('[Onboarding] could not restore saved progress:', e);
+      }
+      setHydrated(true);
     })();
     
     // Reset onboarding stage to pre_decision when this screen mounts
     // This ensures floating Tina is hidden until user makes a choice
     setOnboardingStage('pre_decision');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setOnboardingStage]);
+
+  // Persist answers (merged into the local profile) + the current step after
+  // every step change, so a kill/restart doesn't lose them.
+  useEffect(() => {
+    if (!hydrated || !userId) return;
+    (async () => {
+      try {
+        const existing = (await getProfile()) || {};
+        await saveProfile({ ...existing, ...dataRef.current, userId });
+        await AsyncStorage.setItem(ONBOARDING_PROGRESS_KEY, JSON.stringify({ userId, step }));
+      } catch (e) {
+        console.warn('[Onboarding] could not persist progress:', e);
+      }
+    })();
+  }, [step, hydrated, userId]);
 
   // Track when Tina screen is active (for floating button visibility)
   useEffect(() => {
@@ -192,7 +313,7 @@ export default function OnboardingScreen() {
       // For array-typed fields, only accept actual non-empty arrays
       if (ARRAY_FIELDS.has(key)) {
         if (!Array.isArray(value) || value.length === 0) {
-          console.warn(`[Onboarding] Ignoring non-array ${key} from Tina:`, value);
+          console.warn(`[Onboarding] Ignoring non-array ${key} from Tina (got ${typeof value})`);
           return;
         }
       }
@@ -231,6 +352,12 @@ export default function OnboardingScreen() {
   const findNextStep = (currentStep: number, collectedOverride?: string[]): number => {
     let next = currentStep + 1;
 
+    // Tina auto-launches only once. After that, step 2 is a placeholder with
+    // no button (a dead end), so moving forward from Photos skips it.
+    if (next === STEP_TINA_AUTO && tinaAutoLaunched.current) {
+      next++;
+    }
+
     // Skip selection steps that were already collected by Tina
     while (next >= STEP_LOOKING_FOR && next <= STEP_GENRES && shouldSkipSelectionStep(next, collectedOverride)) {
       next++;
@@ -256,6 +383,12 @@ export default function OnboardingScreen() {
   };
 
   const handleBack = () => {
+    if (tinaMovieSelectionMode) {
+      // Picking movies for Tina — back returns to the Tina chat.
+      setTinaMovieSelectionMode(false);
+      setShowTinaChat(true);
+      return;
+    }
     if (step > 0) {
       // Find previous non-skipped step
       let prev = step - 1;
@@ -270,8 +403,33 @@ export default function OnboardingScreen() {
     }
   };
 
+  const finishingRef = useRef(false);
   const handleFinish = async () => {
-    await saveProfile(data);
+    if (finishingRef.current) return; // double-tap on the last step
+    finishingRef.current = true;
+    const finalData = { ...((await getProfile()) || {}), ...data, userId };
+    await saveProfile(finalData);
+    // This is the one place the onboarding profile reaches the backend
+    // (matching + recommendations). Best effort: on failure the Feed shows
+    // its "complete your profile" prompt and the Profile tab re-syncs.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
+    try {
+      const res = await fetch(apiUrl('/api/user/profile'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(buildProfilePayload(userId, finalData)),
+        signal: controller.signal,
+      });
+      // 401: the fetch wrapper already cleared auth and is routing to login.
+      if (res.status === 401) return;
+      if (!res.ok) console.warn('[Onboarding] profile sync failed:', res.status);
+    } catch (e) {
+      console.warn('[Onboarding] profile sync failed:', e);
+    } finally {
+      clearTimeout(timer);
+    }
+    await AsyncStorage.removeItem(ONBOARDING_PROGRESS_KEY).catch(() => undefined);
     await setOnboardingComplete();
     // Mark onboarding as complete in TinaContext
     setOnboardingStage('completed');
@@ -382,15 +540,39 @@ export default function OnboardingScreen() {
   };
 
   // Handle photo upload completion
-  const handlePhotoUploadComplete = (uploadedPictures: string[]) => {
-    updateField('uploadedPictures', uploadedPictures);
+  const handlePhotoUploadComplete = (uploadedPictures?: string[]) => {
+    updateField('uploadedPictures', Array.isArray(uploadedPictures) ? uploadedPictures : []);
     handleNext();
   };
+  const onboardingPictures: string[] | undefined = Array.isArray((data as any).uploadedPictures)
+    ? (data as any).uploadedPictures
+    : undefined;
+
+  // Android hardware back: previous step instead of leaving onboarding.
+  // On the first step there is nothing to go back to, so it does nothing.
+  // While Tina's chat is open it is swallowed too — Tina has her own Skip
+  // control, and leaving here would drop what she collected.
+  const backHandlerRef = useRef<() => boolean>(() => true);
+  backHandlerRef.current = () => {
+    if (showTinaChat) return true;
+    if (tinaMovieSelectionMode || step > 0) handleBack();
+    return true;
+  };
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => backHandlerRef.current());
+    return () => sub.remove();
+  }, []);
+
+  if (!hydrated) {
+    return (
+      <View style={[styles.container, { alignItems: 'center', justifyContent: 'center' }]}>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+      </View>
+    );
+  }
 
   // If showing Tina chat, render it full-screen using TinaContext messages
   if (showTinaChat) {
-    console.log('[Onboarding] Rendering Tina with', tinaMessages.length, 'messages, returning:', returningFromMovieSelection);
-    
     return (
       <TinaChatScreen
         userId={userId}
@@ -415,7 +597,13 @@ export default function OnboardingScreen() {
     if (step === STEP_PHOTO_UPLOAD) {
       // Pass the authenticated userId so PhotoUploadStep doesn't have to
       // race against AsyncStorage settle time to fetch it itself.
-      return <PhotoUploadStep onNext={handlePhotoUploadComplete} userId={userId} />;
+      return (
+        <PhotoUploadStep
+          onComplete={handlePhotoUploadComplete}
+          initialPictures={onboardingPictures}
+          userId={userId}
+        />
+      );
     }
     // Step 2: Tina is auto-launched via useEffect (manual form removed)
     // Show a loading placeholder while transitioning into Tina chat

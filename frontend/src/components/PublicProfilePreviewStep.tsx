@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../theme';
 import { ProfileData } from '../types';
-import { PremiumProfileView } from './PremiumProfileView';
+import { PremiumProfileView, getProfilePhotos } from './PremiumProfileView';
 
 type Props = {
   data: ProfileData;
@@ -27,34 +27,14 @@ export default function PublicProfilePreviewStep({ data, onEdit, onContinue }: P
     return data.visibilityToggles?.[key] !== false;
   };
 
-  // Build photos array: prefer uploaded pictures from this onboarding session,
-  // then fall back to any persisted picture URLs.
-  const photos: string[] = (() => {
-    const anyData = data as unknown as {
-      uploadedPictures?: unknown;
-      pictures?: unknown;
-      profilePicture?: unknown;
-    };
-    // 1. Onboarding session uploads (set by PhotoUploadStep -> handlePhotoUploadComplete)
-    const uploaded = Array.isArray(anyData.uploadedPictures)
-      ? (anyData.uploadedPictures.filter(Boolean) as string[])
-      : [];
-    if (uploaded.length > 0) return uploaded;
-    // 2. Persisted profile pictures array
-    const pics = Array.isArray(anyData.pictures)
-      ? (anyData.pictures.filter(Boolean) as string[])
-      : [];
-    if (pics.length > 0) return pics;
-    // 3. Single primary picture fallback
-    if (typeof anyData.profilePicture === 'string' && anyData.profilePicture) {
-      return [anyData.profilePicture];
-    }
-    return [];
-  })();
+  // Build photos array: prefer uploaded pictures from this onboarding session
+  // (set by PhotoUploadStep -> handlePhotoUploadComplete), then any persisted
+  // `pictures` (array or legacy object), then the single `profilePicture`.
+  const photos: string[] = getProfilePhotos(data, { preferUploads: true });
 
   // Map ProfileData -> PremiumProfileView's expected profile shape, honoring visibility.
   const previewProfile = {
-    user_id: data.userId || 'preview',
+    user_id: data.userId || '',
     name: data.name || 'Your Name',
     age: data.age || 0,
     gender: data.gender || '',
@@ -128,6 +108,7 @@ export default function PublicProfilePreviewStep({ data, onEdit, onContinue }: P
         bottomCTAOverride={bottomCTA}
         closeIconName="chevron-back"
         hideMatchCard
+        isOwnProfile
       />
     </View>
   );

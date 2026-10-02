@@ -19,9 +19,7 @@ import {
   RecordingPresets,
 } from 'expo-audio';
 import TinaAvatar from './TinaAvatar';
-
-const API_BASE =
-  process.env.EXPO_PUBLIC_BACKEND_URL || process.env.EXPO_PUBLIC_API_URL || '';
+import { apiUrl, getSessionToken } from '../store';
 
 // VAD tunables – `metering` is in dBFS (-160 = silence, 0 = peak).
 // Tuned for ZERO perceived gap — user explicitly asked for "immediately
@@ -31,8 +29,20 @@ const SILENCE_THRESHOLD = -42; // dBFS – tighter than -45 to ignore room hum
 const SILENCE_DURATION_MS = 500; // ~0.5s trailing silence to end a turn (was 700)
 const MIN_SPEECH_DURATION_MS = 400; // require ~0.4s of speech (was 500)
 const MAX_TURN_DURATION_MS = 20000; // hard cap per turn
+const MAX_SILENT_TURNS = 3; // hang up after 3 back-to-back turns with no speech (~60s)
 const METERING_INTERVAL_MS = 60; // poll faster — 16 samples/sec (was 80)
 const PRE_REPLY_PAUSE_MS = 0; // ZERO pause — start TTS the instant LLM response arrives
+
+// TTS end is signalled by playbackStatusUpdate.didJustFinish; these only
+// guard against a stream that never starts or stalls.
+const TTS_START_TIMEOUT_MS = 10000; // no audio after 10s → skip this line
+const TTS_SAFETY_BASE_MS = 15000; // overall cap = base + per-char allowance
+const TTS_SAFETY_PER_CHAR_MS = 120; // ~3x normal speaking time
+const TTS_SAFETY_MAX_MS = 90000;
+const END_MESSAGE_MS = 3500; // how long a "call ended" reason stays visible
+
+const RATE_LIMITED_MSG = 'Tina is a little busy — try again shortly.';
+const SESSION_EXPIRED_MSG = 'Your session expired — please sign in again.';
 
 type CallStatus =
   | 'connecting'
@@ -41,6 +51,7 @@ type CallStatus =
   | 'speaking'
   | 'paused'
   | 'permission_denied'
+  | 'ended'
   | 'error';
 
 interface Props {
@@ -83,9 +94,13 @@ export default function TinaCallScreen({
   const lastSpeechAtRef = useRef<number>(0);
   const everHeardSpeechRef = useRef<boolean>(false);
   const mutedRef = useRef(false);
+  const listeningRef = useRef(false); // a recording turn is open (guards double starts)
+  const silentTurnsRef = useRef(0); // consecutive turns that hit the cap with no speech
   const meteringTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const endTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stopTtsRef = useRef<(() => void) | null>(null); // resolves a pending playTtsAndAwait
+  const processTurnRef = useRef<() => Promise<void>>(async () => {});
   const conversationRef = useRef<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
-  const blobUrlsRef = useRef<string[]>([]);
 
   // ---------- Animations ----------
   const pulseAnim = useRef(new Animated.Value(0)).current;
@@ -155,8 +170,7 @@ export default function TinaCallScreen({
       const filename = uri.split('/').pop() || 'tina_voice.m4a';
       const m = /\.(\w+)$/.exec(filename);
       const type = m ? `audio/${m[1] === 'm4a' ? 'mp4' : m[1]}` : 'audio/m4a';
-      // @ts-ignore – React Native FormData file shape
-      form.append('audio', { uri, name: filename, type });
+      form.append('audio', { uri, name: filename, type } as any); // RN FormData file shape
     }
     return form;
   }, []);
@@ -169,76 +183,67 @@ export default function TinaCallScreen({
       // full base64 payload (~1.5s). Backend yields ElevenLabs MP3 chunks
       // directly via FastAPI StreamingResponse.
       //
-      // Auth: <audio src=URL> can't forward Authorization headers, so we
-      // append the session token as a query param. The backend security
-      // middleware accepts ?session_token= specifically for streaming
-      // media endpoints.
-      const { getSessionToken } = await import('../store');
+      // Auth: expo-audio forwards `headers` on remote sources, so the
+      // session token goes in the Authorization header — never in the URL.
+      stopTtsRef.current?.(); // settle any previous line first
       const token = await getSessionToken();
-      const streamUrl =
-        `${API_BASE}/api/tina/voice/speak-stream?text=` +
-        encodeURIComponent(text) +
-        (token ? `&session_token=${encodeURIComponent(token)}` : '');
+      if (!isActiveRef.current) return;
+      const uri = apiUrl(`/api/tina/voice/speak-stream?text=${encodeURIComponent(text)}`);
 
-      // @ts-ignore – replace is on AudioPlayer at runtime
-      player.replace({ uri: streamUrl });
-      try { player.seekTo(0); } catch { /* noop */ }
-      player.play();
-
-      // Wait for playback to finish
+      // Resolves when Tina finished (didJustFinish), the stream failed, or a
+      // safety timeout fired — and in every case PAUSES the player first, so
+      // the mic can never pick Tina up. (Android reports playing=false while
+      // buffering, which the old polling heuristic mistook for "done".)
       await new Promise<void>((resolve) => {
-        const start = Date.now();
-        // Track when the player actually started playing audio. We give the
-        // network up to 4s to deliver the first chunk before treating
-        // !playing as "done" — otherwise on slow networks the very first
-        // poll fires before the buffer has data and we'd cut Tina off
-        // before she even spoke. Once the player IS playing, the grace
-        // window shrinks to ~600ms after the last `playing=true` reading.
-        let hasStartedPlaying = false;
-        let lastPlayingAt = 0;
-        const INITIAL_GRACE_MS = 4000;
-        const POST_PLAY_GRACE_MS = 600;
-        const poll = setInterval(() => {
-          if (!isActiveRef.current) {
-            clearInterval(poll);
-            resolve();
-            return;
+        let settled = false;
+        let loaded = false; // this clip is buffering/playing (filters stale updates)
+        let started = false; // audio actually played
+        let startTimer: ReturnType<typeof setTimeout> | undefined;
+        let safetyTimer: ReturnType<typeof setTimeout> | undefined;
+        let sub: { remove: () => void } | undefined;
+
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          if (startTimer) clearTimeout(startTimer);
+          if (safetyTimer) clearTimeout(safetyTimer);
+          try { sub?.remove(); } catch { /* player already released */ }
+          if (stopTtsRef.current === finish) stopTtsRef.current = null;
+          try { player.pause(); } catch { /* player already released */ }
+          resolve();
+        };
+        stopTtsRef.current = finish;
+
+        sub = player.addListener('playbackStatusUpdate', (s) => {
+          if (s.playing) started = true;
+          if (s.playing || s.isBuffering) loaded = true;
+          if (!loaded) return;
+          // Finished — or the load failed (ExoPlayer drops back to 'idle').
+          if (s.didJustFinish || (!s.playing && !s.isBuffering && s.playbackState === 'idle')) {
+            finish();
           }
+        });
+        startTimer = setTimeout(() => {
+          if (!started) finish();
+        }, TTS_START_TIMEOUT_MS);
+        safetyTimer = setTimeout(
+          finish,
+          Math.min(TTS_SAFETY_MAX_MS, TTS_SAFETY_BASE_MS + text.length * TTS_SAFETY_PER_CHAR_MS)
+        );
+
+        (async () => {
           try {
-            // @ts-ignore
-            const playing = player.playing;
-            // @ts-ignore
-            const cur = player.currentTime;
-            // @ts-ignore
-            const dur = player.duration;
-
-            if (playing) {
-              hasStartedPlaying = true;
-              lastPlayingAt = Date.now();
-            }
-
-            const finished = dur > 0 && cur >= dur - 0.15;
-            const elapsed = Date.now() - start;
-            const sincePlay = lastPlayingAt ? Date.now() - lastPlayingAt : 0;
-
-            // End condition 1: Player reached end of buffer cleanly.
-            // End condition 2: Player was playing, then stopped, and the
-            //   POST_PLAY grace window has elapsed (Tina actually finished).
-            // End condition 3: Player NEVER started, and we've been waiting
-            //   past the INITIAL_GRACE window (stream genuinely failed).
-            if (
-              finished ||
-              (hasStartedPlaying && !playing && sincePlay > POST_PLAY_GRACE_MS) ||
-              (!hasStartedPlaying && elapsed > INITIAL_GRACE_MS)
-            ) {
-              clearInterval(poll);
-              resolve();
-            }
+            player.replace({
+              uri,
+              headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+            });
+            await player.seekTo(0);
+            if (!settled) player.play();
           } catch (e) {
-            clearInterval(poll);
-            resolve();
+            console.warn('[TinaCall] TTS playback failed', e);
+            finish();
           }
-        }, 200);
+        })();
       });
     },
     [player]
@@ -247,7 +252,7 @@ export default function TinaCallScreen({
   const sendChatTurn = useCallback(
     async (userText: string): Promise<string> => {
       const recentContext = conversationRef.current.slice(-6);
-      const res = await fetch(`${API_BASE}/api/tina/chat`, {
+      const res = await fetch(apiUrl('/api/tina/chat'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -262,9 +267,11 @@ export default function TinaCallScreen({
           voice_mode: true,
         }),
       });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.detail || data.error || 'Chat failed');
+      if (res.status === 429) throw new Error(RATE_LIMITED_MSG);
+      if (res.status === 401) throw new Error(SESSION_EXPIRED_MSG);
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        throw new Error("Tina couldn't reply just now.");
       }
       return (data.response || '').toString().trim();
     },
@@ -274,8 +281,8 @@ export default function TinaCallScreen({
   // ---------- Recording lifecycle ----------
   const stopRecorderSafely = useCallback(async () => {
     stopMeteringTimer();
+    listeningRef.current = false;
     try {
-      // @ts-ignore – isRecording is true while recording
       if (recorder.isRecording) {
         await recorder.stop();
       }
@@ -284,10 +291,50 @@ export default function TinaCallScreen({
     }
   }, [recorder, stopMeteringTimer]);
 
+  // Stop the mic + Tina's voice and mark the call inactive (idempotent).
+  const shutdownCall = useCallback(() => {
+    isActiveRef.current = false;
+    stopTtsRef.current?.(); // resolves a pending playTtsAndAwait (pauses the player)
+    stopRecorderSafely();
+    try { player.pause(); } catch { /* player already released */ }
+  }, [player, stopRecorderSafely]);
+
+  // Show why the call ended for a moment, then close the call screen.
+  const endCallWithMessage = useCallback(
+    (message: string, finalStatus: CallStatus = 'ended') => {
+      shutdownCall();
+      setStatus(finalStatus);
+      setStatusLabel(message);
+      setErrorMsg(null);
+      if (endTimerRef.current) clearTimeout(endTimerRef.current);
+      endTimerRef.current = setTimeout(() => {
+        endTimerRef.current = null;
+        onEnd();
+      }, END_MESSAGE_MS);
+    },
+    [shutdownCall, onEnd]
+  );
+
   const startRecordingTurn = useCallback(async () => {
-    if (!isActiveRef.current || isProcessingRef.current || mutedRef.current) return;
+    if (
+      !isActiveRef.current ||
+      isProcessingRef.current ||
+      mutedRef.current ||
+      listeningRef.current
+    ) return;
+    listeningRef.current = true;
+    // Never open the mic while Tina could still be coming out of the speaker.
+    try {
+      if (player.playing || player.isBuffering) player.pause();
+    } catch { /* player already released */ }
     try {
       await recorder.prepareToRecordAsync();
+      if (!isActiveRef.current || mutedRef.current) {
+        // Call ended / muted while the mic was being prepared.
+        listeningRef.current = false;
+        try { await recorder.stop(); } catch { /* prepared only — stop() just resets */ }
+        return;
+      }
       recorder.record();
       turnStartRef.current = Date.now();
       lastSpeechAtRef.current = 0;
@@ -296,10 +343,11 @@ export default function TinaCallScreen({
       setStatusLabel('Listening…');
 
       stopMeteringTimer();
+      let turnOver = false;
       meteringTimerRef.current = setInterval(async () => {
-        if (!isActiveRef.current) return;
+        if (turnOver || !isActiveRef.current) return;
         try {
-          const st = await recorder.getStatus();
+          const st = recorder.getStatus();
           const lvl = typeof st?.metering === 'number' ? st.metering : -160;
           const now = Date.now();
 
@@ -319,22 +367,47 @@ export default function TinaCallScreen({
             silenceFor > SILENCE_DURATION_MS;
           const finishedByCap = elapsed > MAX_TURN_DURATION_MS;
 
-          if (finishedBySilence || finishedByCap) {
-            isProcessingRef.current = true;
-            stopMeteringTimer();
+          if (finishedByCap && !everHeardSpeechRef.current) {
+            // A whole turn of silence: don't upload/transcribe it, just listen
+            // again — and hang up after a few silent turns in a row.
+            turnOver = true;
             await stopRecorderSafely();
-            await processTurn();
+            silentTurnsRef.current += 1;
+            if (silentTurnsRef.current >= MAX_SILENT_TURNS) {
+              endCallWithMessage('Call ended — no audio detected');
+            } else {
+              startRecordingTurn();
+            }
+            return;
+          }
+
+          if (finishedBySilence || finishedByCap) {
+            turnOver = true;
+            isProcessingRef.current = true;
+            await stopRecorderSafely();
+            await processTurnRef.current();
           }
         } catch (e) {
           // continue
         }
       }, METERING_INTERVAL_MS);
     } catch (err: any) {
-      console.error('[TinaCall] startRecording error:', err);
-      setStatus('error');
-      setErrorMsg(err?.message || "Couldn't start microphone.");
+      listeningRef.current = false;
+      console.warn('[TinaCall] startRecording error:', err?.message);
+      if (isActiveRef.current) endCallWithMessage("Couldn't start the microphone.");
     }
-  }, [recorder, stopRecorderSafely, stopMeteringTimer]);
+  }, [player, recorder, stopRecorderSafely, stopMeteringTimer, endCallWithMessage]);
+
+  // After Tina's turn: reopen the mic, or park the call if the user muted.
+  const resumeListening = useCallback(() => {
+    if (!isActiveRef.current) return;
+    if (mutedRef.current) {
+      setStatus('paused');
+      setStatusLabel('Muted');
+    } else {
+      startRecordingTurn();
+    }
+  }, [startRecordingTurn]);
 
   const processTurn = useCallback(async () => {
     if (!isActiveRef.current) {
@@ -348,35 +421,38 @@ export default function TinaCallScreen({
     if (!uri) {
       isProcessingRef.current = false;
       // Just loop again
-      if (isActiveRef.current && !mutedRef.current) startRecordingTurn();
+      resumeListening();
       return;
     }
 
     try {
       // 1) Transcribe
       const form = await buildAudioFormData(uri);
-      const sttRes = await fetch(`${API_BASE}/api/tina/voice/transcribe`, {
+      const sttRes = await fetch(apiUrl('/api/tina/voice/transcribe'), {
         method: 'POST',
         body: form,
       });
-      const sttData = await sttRes.json();
-      if (!sttRes.ok || !sttData.success) {
-        throw new Error(sttData.detail || 'Transcription failed');
+      if (sttRes.status === 429) throw new Error(RATE_LIMITED_MSG);
+      if (sttRes.status === 401) throw new Error(SESSION_EXPIRED_MSG);
+      const sttData = await sttRes.json().catch(() => null);
+      if (!sttRes.ok || !sttData?.success) {
+        throw new Error("Couldn't catch that — please say it again.");
       }
       const userText = (sttData.text || '').toString().trim();
 
       if (!userText) {
-        // Silence / no speech — loop again without saying anything
+        // Noise but no words — loop again without saying anything
         isProcessingRef.current = false;
-        if (isActiveRef.current && !mutedRef.current) startRecordingTurn();
+        resumeListening();
         return;
       }
 
+      silentTurnsRef.current = 0;
       conversationRef.current.push({ role: 'user', content: userText });
 
       // 2) Chat
       const reply = await sendChatTurn(userText);
-      if (!reply) throw new Error('Empty reply from Tina');
+      if (!reply) throw new Error("Tina couldn't reply just now.");
       conversationRef.current.push({ role: 'assistant', content: reply });
 
       if (!isActiveRef.current) return;
@@ -386,38 +462,54 @@ export default function TinaCallScreen({
       await new Promise((r) => setTimeout(r, PRE_REPLY_PAUSE_MS));
       if (!isActiveRef.current) return;
 
+      // Muted while Tina was thinking → the user paused the call: don't
+      // start talking, park in 'Muted' (unmute reopens the mic).
+      if (mutedRef.current) {
+        isProcessingRef.current = false;
+        resumeListening();
+        return;
+      }
+
       // 4) TTS playback
       setStatus('speaking');
       setStatusLabel('Tina is speaking…');
       await playTtsAndAwait(reply);
 
-      // 5) Loop
-      isProcessingRef.current = false;
-      if (isActiveRef.current && !mutedRef.current) {
-        await new Promise((r) => setTimeout(r, 250));
-        startRecordingTurn();
-      }
-    } catch (err: any) {
-      console.error('[TinaCall] processTurn error:', err);
+      // 5) Loop — or park in 'Muted' if the user muted while she spoke
       isProcessingRef.current = false;
       if (!isActiveRef.current) return;
+      if (!mutedRef.current) await new Promise((r) => setTimeout(r, 250));
+      resumeListening();
+    } catch (err: any) {
+      console.warn('[TinaCall] turn failed:', err?.message);
+      isProcessingRef.current = false;
+      if (!isActiveRef.current) return;
+      if (err?.message === SESSION_EXPIRED_MSG) {
+        endCallWithMessage(SESSION_EXPIRED_MSG);
+        return;
+      }
       setStatus('error');
       setErrorMsg(err?.message || 'Something went wrong on the call.');
       // Try to keep the call alive after a short pause
       setTimeout(() => {
-        if (isActiveRef.current && !mutedRef.current) {
-          setErrorMsg(null);
-          startRecordingTurn();
-        }
-      }, 2000);
+        if (!isActiveRef.current) return;
+        setErrorMsg(null);
+        resumeListening();
+      }, err?.message === RATE_LIMITED_MSG ? 5000 : 2000);
     }
-  }, [recorder, buildAudioFormData, sendChatTurn, playTtsAndAwait, startRecordingTurn]);
+  }, [recorder, buildAudioFormData, sendChatTurn, playTtsAndAwait, resumeListening, endCallWithMessage]);
+  processTurnRef.current = processTurn;
 
   // ---------- Init call when becoming visible ----------
   useEffect(() => {
     if (!visible) return;
     isActiveRef.current = true;
+    // Connecting + greeting count as "processing": the mic stays closed (even
+    // on unmute) until Tina has finished her hello.
+    isProcessingRef.current = true;
+    listeningRef.current = false;
     mutedRef.current = false;
+    silentTurnsRef.current = 0;
     conversationRef.current = [];
     setMuted(false);
     setStatus('connecting');
@@ -427,12 +519,13 @@ export default function TinaCallScreen({
     (async () => {
       try {
         const perm = await requestRecordingPermissionsAsync();
+        if (!isActiveRef.current) return;
         if (!perm.granted) {
-          setStatus('permission_denied');
-          setStatusLabel(
+          endCallWithMessage(
             perm.canAskAgain === false
-              ? 'Microphone blocked — tap to open Settings'
-              : 'Microphone permission is required'
+              ? 'Microphone is blocked — allow it in Settings to call Tina.'
+              : 'Microphone permission is needed to call Tina.',
+            'permission_denied'
           );
           return;
         }
@@ -448,6 +541,7 @@ export default function TinaCallScreen({
         } catch (e) {
           console.warn('[TinaCall] setAudioModeAsync failed', e);
         }
+        if (!isActiveRef.current) return;
 
         // Greeting line so the call feels alive
         const greeting = `Hi ${userName?.split(' ')[0] || 'there'}! I'm Tina. What would you like to chat about?`;
@@ -460,67 +554,58 @@ export default function TinaCallScreen({
           console.warn('[TinaCall] greeting TTS failed', e);
         }
 
-        if (isActiveRef.current && !mutedRef.current) {
-          startRecordingTurn();
-        }
+        isProcessingRef.current = false;
+        resumeListening();
       } catch (e: any) {
-        console.error('[TinaCall] init error', e);
-        setStatus('error');
-        setErrorMsg(e?.message || 'Could not start the call.');
+        console.warn('[TinaCall] init error', e?.message);
+        isProcessingRef.current = false;
+        if (isActiveRef.current) endCallWithMessage('Could not start the call.');
       }
     })();
 
     return () => {
-      // Cleanup when visibility flips
-      isActiveRef.current = false;
-      stopMeteringTimer();
-      (async () => {
-        try {
-          // @ts-ignore
-          if (recorder.isRecording) await recorder.stop();
-        } catch { /* noop */ }
-        try { player.pause(); } catch { /* noop */ }
-      })();
-      blobUrlsRef.current.forEach((u) => {
-        try { URL.revokeObjectURL(u); } catch { /* noop */ }
-      });
-      blobUrlsRef.current = [];
+      // Cleanup on unmount / visibility flip
+      shutdownCall();
+      if (endTimerRef.current) {
+        clearTimeout(endTimerRef.current);
+        endTimerRef.current = null;
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
   // ---------- Handlers ----------
   const handleEndCall = useCallback(() => {
-    isActiveRef.current = false;
-    stopMeteringTimer();
-    (async () => {
-      try {
-        // @ts-ignore
-        if (recorder.isRecording) await recorder.stop();
-      } catch { /* noop */ }
-      try { player.pause(); } catch { /* noop */ }
-    })();
+    shutdownCall();
+    if (endTimerRef.current) {
+      clearTimeout(endTimerRef.current);
+      endTimerRef.current = null;
+    }
     onEnd();
-  }, [onEnd, recorder, player, stopMeteringTimer]);
+  }, [onEnd, shutdownCall]);
 
   const handleToggleMute = useCallback(async () => {
-    const nextMuted = !muted;
+    if (!isActiveRef.current) return;
+    const nextMuted = !mutedRef.current;
     setMuted(nextMuted);
     mutedRef.current = nextMuted;
     if (nextMuted) {
-      // Stop current recording
-      stopMeteringTimer();
-      try {
-        // @ts-ignore
-        if (recorder.isRecording) await recorder.stop();
-      } catch { /* noop */ }
-      setStatus('paused');
-      setStatusLabel('Muted');
-    } else if (status === 'paused') {
-      // Resume listening
-      startRecordingTurn();
+      // Mid-listen: drop the current turn and park the call. While Tina is
+      // thinking/speaking the turn finishes first, then parks in 'Muted'.
+      if (!isProcessingRef.current) {
+        setStatus('paused');
+        setStatusLabel('Muted');
+        await stopRecorderSafely();
+      }
+    } else {
+      silentTurnsRef.current = 0;
+      // If a turn is in flight it reopens the mic itself when it finishes.
+      if (!isProcessingRef.current) {
+        setErrorMsg(null);
+        startRecordingTurn();
+      }
     }
-  }, [muted, status, recorder, startRecordingTurn, stopMeteringTimer]);
+  }, [stopRecorderSafely, startRecordingTurn]);
 
   const handleRetryPerm = useCallback(async () => {
     if (status === 'permission_denied') {
@@ -540,7 +625,8 @@ export default function TinaCallScreen({
   const showRipple = status === 'listening' || status === 'speaking';
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }]}>
+    // Rendered below TinaModal's header, so only the bottom inset applies.
+    <View style={[styles.container, { paddingTop: 24, paddingBottom: insets.bottom + 24 }]}>
       {/* Top label */}
       <View style={styles.topBar}>
         <Text style={styles.callLabel}>Voice call</Text>
@@ -593,6 +679,7 @@ export default function TinaCallScreen({
         <TouchableOpacity
           style={[styles.actionBtn, muted && styles.actionBtnActive]}
           onPress={handleToggleMute}
+          disabled={status === 'ended' || status === 'permission_denied'}
           activeOpacity={0.7}
         >
           <Ionicons
@@ -671,20 +758,7 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '600',
     letterSpacing: 0.3,
-  },
-  transcript: {
-    color: 'rgba(255,255,255,0.55)',
-    fontSize: 13,
-    marginTop: 10,
     textAlign: 'center',
-    fontStyle: 'italic',
-  },
-  tinaLine: {
-    color: 'rgba(255,255,255,0.85)',
-    fontSize: 14,
-    marginTop: 10,
-    textAlign: 'center',
-    lineHeight: 20,
   },
   errorText: {
     color: '#FFB4B4',

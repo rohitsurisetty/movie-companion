@@ -1,85 +1,5 @@
 // Location utility functions
-
-// Indian pincode to area/city mapping (expandable)
-const PINCODE_MAP: Record<string, { area: string; city: string }> = {
-  // Bangalore pincodes
-  '560102': { area: 'HSR Layout', city: 'Bangalore' },
-  '560034': { area: 'HSR Layout', city: 'Bangalore' },
-  '560068': { area: 'BTM Layout', city: 'Bangalore' },
-  '560076': { area: 'BTM Layout', city: 'Bangalore' },
-  '560095': { area: 'Whitefield', city: 'Bangalore' },
-  '560066': { area: 'Whitefield', city: 'Bangalore' },
-  '560001': { area: 'MG Road', city: 'Bangalore' },
-  '560002': { area: 'Shivajinagar', city: 'Bangalore' },
-  '560003': { area: 'Ulsoor', city: 'Bangalore' },
-  '560004': { area: 'Frazer Town', city: 'Bangalore' },
-  '560008': { area: 'Shantinagar', city: 'Bangalore' },
-  '560011': { area: 'Malleshwaram', city: 'Bangalore' },
-  '560017': { area: 'Koramangala', city: 'Bangalore' },
-  '560029': { area: 'Banashankari', city: 'Bangalore' },
-  '560030': { area: 'Adugodi', city: 'Bangalore' },
-  '560038': { area: 'Indiranagar', city: 'Bangalore' },
-  '560041': { area: 'Jayanagar', city: 'Bangalore' },
-  '560047': { area: 'HAL', city: 'Bangalore' },
-  '560070': { area: 'Bannerghatta Road', city: 'Bangalore' },
-  '560078': { area: 'Electronic City', city: 'Bangalore' },
-  '560100': { area: 'Sarjapur', city: 'Bangalore' },
-  '560103': { area: 'Bellandur', city: 'Bangalore' },
-  // Mumbai pincodes
-  '400001': { area: 'Fort', city: 'Mumbai' },
-  '400050': { area: 'Bandra West', city: 'Mumbai' },
-  '400051': { area: 'Bandra East', city: 'Mumbai' },
-  '400053': { area: 'Andheri West', city: 'Mumbai' },
-  '400069': { area: 'Andheri East', city: 'Mumbai' },
-  '400076': { area: 'Powai', city: 'Mumbai' },
-  '400097': { area: 'Malad', city: 'Mumbai' },
-  // Delhi pincodes
-  '110001': { area: 'Connaught Place', city: 'Delhi' },
-  '110017': { area: 'Hauz Khas', city: 'Delhi' },
-  '110019': { area: 'Saket', city: 'Delhi' },
-  '110020': { area: 'Greater Kailash', city: 'Delhi' },
-  '110024': { area: 'Defence Colony', city: 'Delhi' },
-  '110025': { area: 'Lajpat Nagar', city: 'Delhi' },
-  '110048': { area: 'Chanakyapuri', city: 'Delhi' },
-  '110049': { area: 'Vasant Vihar', city: 'Delhi' },
-  // Chennai pincodes
-  '600001': { area: 'George Town', city: 'Chennai' },
-  '600004': { area: 'T Nagar', city: 'Chennai' },
-  '600018': { area: 'Adyar', city: 'Chennai' },
-  '600020': { area: 'Nungambakkam', city: 'Chennai' },
-  '600034': { area: 'Anna Nagar', city: 'Chennai' },
-  '600096': { area: 'OMR', city: 'Chennai' },
-  // Hyderabad pincodes
-  '500001': { area: 'Charminar', city: 'Hyderabad' },
-  '500034': { area: 'Jubilee Hills', city: 'Hyderabad' },
-  '500081': { area: 'Madhapur', city: 'Hyderabad' },
-  '500084': { area: 'Gachibowli', city: 'Hyderabad' },
-  // Pune pincodes
-  '411001': { area: 'Camp', city: 'Pune' },
-  '411006': { area: 'Deccan', city: 'Pune' },
-  '411014': { area: 'Koregaon Park', city: 'Pune' },
-  '411057': { area: 'Hinjewadi', city: 'Pune' },
-  // Kolkata pincodes
-  '700001': { area: 'BBD Bagh', city: 'Kolkata' },
-  '700019': { area: 'Park Street', city: 'Kolkata' },
-  '700029': { area: 'Salt Lake', city: 'Kolkata' },
-};
-
-/**
- * Extracts pincode from a location string
- */
-const extractPincode = (location: string): string | null => {
-  // Match 6-digit Indian pincode
-  const pincodeMatch = location.match(/\b(\d{6})\b/);
-  return pincodeMatch ? pincodeMatch[1] : null;
-};
-
-/**
- * Get area and city from pincode
- */
-const getLocationFromPincode = (pincode: string): { area: string; city: string } | null => {
-  return PINCODE_MAP[pincode] || null;
-};
+// (Pincode → area lookup lives in ./locationFormatter — formatLocationForPrivacy.)
 
 /**
  * Extracts partial location (Area, City, State, Country) from a full address string.
@@ -98,23 +18,25 @@ export const getPartialLocation = (fullLocation: string | undefined | null): str
   
   // Patterns to identify private info (house numbers, street names, etc.)
   const privatePatterns = [
-    /^\\d+[\\s,]*/,           // Leading numbers (house numbers)
-    /^#\\d+/,                 // Apartment numbers like #123
-    /^flat\\s*\\d*/i,         // Flat numbers
-    /^apt\\.?\\s*\\d*/i,      // Apartment numbers
-    /^block\\s*[a-z0-9]*/i,   // Block names
-    /^tower\\s*[a-z0-9]*/i,   // Tower names
-    /^building\\s*[a-z0-9]*/i, // Building names
-    /^floor\\s*\\d*/i,        // Floor numbers
-    /\\d{5,6}/,               // Postal codes (5-6 digits)
+    /^\d+[\s,]*/,           // Leading numbers (house numbers)
+    /^#\d+/,                 // Apartment numbers like #123
+    /^flat\s*\d*/i,         // Flat numbers
+    /^apt\.?\s*\d*/i,      // Apartment numbers
+    /^block\s*[a-z0-9]*/i,   // Block names
+    /^tower\s*[a-z0-9]*/i,   // Tower names
+    /^building\s*[a-z0-9]*/i, // Building names
+    /^floor\s*\d*/i,        // Floor numbers
+    /\d{5,6}/,               // Postal codes (5-6 digits)
   ];
-  
-  const streetTerms = /\\b(street|st\\.|road|rd\\.|lane|ln\\.|avenue|ave\\.|drive|dr\\.|way|place|pl\\.|nagar|gali|marg|path|colony|society|complex|apartments?|residency|enclave|layout|sector|phase)\\b/i;
-  
+
+  // NB: "st.", "rd." etc. end in "." so they can't sit before a closing \b —
+  // they get their own (?!\w) alternative.
+  const streetTerms = /\b(?:(?:street|road|lane|avenue|drive|way|place|nagar|gali|marg|path|colony|society|complex|apartments?|residency|enclave|layout|sector|phase)\b|(?:st|rd|ln|ave|dr|pl)\.(?!\w))/i;
+
   // Filter out parts that contain private info
   const filteredParts = parts.filter(part => {
     // Skip parts that are just numbers
-    if (/^\\d+$/.test(part)) return false;
+    if (/^\d+$/.test(part)) return false;
     
     // Skip parts containing street terms
     if (streetTerms.test(part)) return false;
@@ -130,9 +52,10 @@ export const getPartialLocation = (fullLocation: string | undefined | null): str
     return true;
   });
   
-  // If we filtered too much, take last 3-4 parts
+  // If we filtered too much, take the last 3-4 parts that carry no digits
+  // (never re-expose house numbers / pincodes through the fallback).
   if (filteredParts.length === 0) {
-    return parts.slice(-4).join(', ');
+    return parts.filter(p => !/\d/.test(p)).slice(-4).join(', ');
   }
   
   // Return at most 4 parts: Area, City, State, Country

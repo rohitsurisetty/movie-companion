@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback, useState, useRef } from 'react';
+import React, { useEffect, useCallback, useState } from 'react';
 import {
   View,
   StyleSheet,
@@ -7,6 +7,7 @@ import {
   Text,
   Dimensions,
   Animated,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -26,21 +27,11 @@ export default function TinaModal({ onNavigationRequest }: TinaModalProps) {
   const { state, closeTina, minimizeTina, userProfile, setMessages, addMessage } = useTina();
   const slideAnim = React.useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   const fadeAnim = React.useRef(new Animated.Value(0)).current;
-  
-  // Track session open count to trigger new greeting each time modal opens
-  const [sessionOpenCount, setSessionOpenCount] = useState(0);
-  const wasOpen = useRef(false);
 
-  // Animate modal in/out AND trigger new greeting on open
+  // Animate modal in/out. The chat greets once per open on mount (this
+  // component renders null while closed, so every open remounts it).
   useEffect(() => {
     if (state.isOpen) {
-      // Increment session count to trigger a new greeting
-      if (!wasOpen.current) {
-        setSessionOpenCount(prev => prev + 1);
-        console.log('[TinaModal] Modal opened - triggering new greeting session');
-      }
-      wasOpen.current = true;
-      
       Animated.parallel([
         Animated.spring(slideAnim, {
           toValue: 0,
@@ -55,8 +46,6 @@ export default function TinaModal({ onNavigationRequest }: TinaModalProps) {
         }),
       ]).start();
     } else {
-      wasOpen.current = false;
-      
       Animated.parallel([
         Animated.timing(slideAnim, {
           toValue: SCREEN_HEIGHT,
@@ -87,13 +76,27 @@ export default function TinaModal({ onNavigationRequest }: TinaModalProps) {
   // ----- Voice-call sub-screen state + handlers -----
   const [callActive, setCallActive] = useState(false);
 
+  // A call never survives the sheet closing (back, backdrop, minimize, X) —
+  // otherwise the next open would remount the call screen and start the mic
+  // with no user action.
+  useEffect(() => {
+    if (!state.isOpen) setCallActive(false);
+  }, [state.isOpen]);
+
   const handleStartCall = useCallback(() => {
+    Keyboard.dismiss();
     setCallActive(true);
   }, []);
 
   const handleEndCall = useCallback(() => {
     setCallActive(false);
   }, []);
+
+  // Android back: end an active call first, close the sheet on the next press.
+  const handleRequestClose = useCallback(() => {
+    if (callActive) setCallActive(false);
+    else closeTina();
+  }, [callActive, closeTina]);
 
   if (!state.isOpen) return null;
 
@@ -103,7 +106,7 @@ export default function TinaModal({ onNavigationRequest }: TinaModalProps) {
       animationType="none"
       transparent={true}
       statusBarTranslucent
-      onRequestClose={handleClose}
+      onRequestClose={handleRequestClose}
     >
       {/* Backdrop */}
       <Animated.View
@@ -148,15 +151,17 @@ export default function TinaModal({ onNavigationRequest }: TinaModalProps) {
             </View>
             
             <View style={styles.headerRight}>
-              <TouchableOpacity
-                testID="tina-call-button"
-                onPress={handleStartCall}
-                style={[styles.headerButton, styles.callButton]}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                accessibilityLabel="Start voice call with Tina"
-              >
-                <Ionicons name="call" size={20} color="#FFFFFF" />
-              </TouchableOpacity>
+              {!callActive && (
+                <TouchableOpacity
+                  testID="tina-call-button"
+                  onPress={handleStartCall}
+                  style={[styles.headerButton, styles.callButton]}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  accessibilityLabel="Start voice call with Tina"
+                >
+                  <Ionicons name="call" size={20} color="#FFFFFF" />
+                </TouchableOpacity>
+              )}
               <TouchableOpacity
                 testID="tina-close-button"
                 onPress={handleClose}
@@ -178,23 +183,27 @@ export default function TinaModal({ onNavigationRequest }: TinaModalProps) {
               onNavigationRequest={onNavigationRequest}
               isOnboardingComplete={state.isOnboardingComplete}
               userProfile={userProfile}
-              sessionOpenCount={sessionOpenCount}
+              // Constant on purpose: the chat remounts on every open, and its
+              // greeting effect fires once when this exceeds its fresh ref (0).
+              // Incrementing it after mount is what caused the double greeting.
+              sessionOpenCount={1}
             />
+
+            {/* Voice call overlay – covers the chat only, so the header
+                (minimize / close) stays reachable during a call */}
+            {callActive && (
+              <View style={StyleSheet.absoluteFillObject}>
+                <TinaCallScreen
+                  visible={callActive}
+                  onEnd={handleEndCall}
+                  userId={userProfile?.userId || ''}
+                  userName={userProfile?.name || ''}
+                  isOnboardingComplete={state.isOnboardingComplete}
+                />
+              </View>
+            )}
           </View>
         </SafeAreaView>
-
-        {/* Voice call overlay – sits on top of the chat content */}
-        {callActive && (
-          <View style={StyleSheet.absoluteFillObject}>
-            <TinaCallScreen
-              visible={callActive}
-              onEnd={handleEndCall}
-              userId={userProfile?.userId || ''}
-              userName={userProfile?.name || ''}
-              isOnboardingComplete={state.isOnboardingComplete}
-            />
-          </View>
-        )}
       </Animated.View>
     </Modal>
   );

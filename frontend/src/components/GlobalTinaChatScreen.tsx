@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, Image, TextInput,
+  View, Text, StyleSheet, TouchableOpacity, TextInput,
   FlatList, Platform,
-  Dimensions, Animated, Easing, ActivityIndicator,
+  Animated, Easing, ActivityIndicator,
 } from 'react-native';
 // KeyboardEvents from react-native-keyboard-controller fires reliably on
 // Android APK builds with edgeToEdgeEnabled=true — the stock RN Keyboard
@@ -11,10 +11,8 @@ import {
 import { KeyboardEvents } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   useAudioRecorder,
-  useAudioRecorderState,
   useAudioPlayer,
   RecordingPresets,
   setAudioModeAsync,
@@ -23,9 +21,43 @@ import {
 import * as Linking from 'expo-linking';
 import { useTina, UserProfileData, Message } from '../context/TinaContext';
 import TinaAvatar from './TinaAvatar';
+import { apiUrl } from '../store';
 
-const { width, height: SCREEN_HEIGHT } = Dimensions.get('window');
-const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || process.env.EXPO_PUBLIC_API_URL || '';
+const RATE_LIMIT_MSG = 'Tina needs a moment — try again shortly.';
+const CHAT_ERROR_MSG = 'Hmm, I got a bit distracted! Could you say that again? 😅';
+
+// Option chips from show_options: canonical strings, or {key, emoji, label}
+// objects (360° quiz). Objects must render their label — never the object.
+type TinaOption = string | { key?: string; label?: string; emoji?: string };
+
+type OptionsState = {
+  field: string;
+  options: TinaOption[];
+  multiSelect: boolean;
+  mode?: string;
+  question_id?: string;
+};
+
+// Normalize a backend show_options payload (/tina/chat sends multi_select,
+// /tina/welcome-back sends multiSelect).
+const toOptionsState = (so: any): OptionsState | null => {
+  if (!so || !Array.isArray(so.options) || so.options.length === 0) return null;
+  return {
+    field: so.field || '',
+    options: so.options,
+    multiSelect: !!(so.multi_select ?? so.multiSelect),
+    mode: so.mode,
+    question_id: so.question_id,
+  };
+};
+
+// Value used for selection state + sent to the backend (canonical string).
+const optionValue = (o: TinaOption): string =>
+  typeof o === 'string' ? o : (o?.label ?? o?.key ?? '');
+
+// Text shown on the chip / in the user's bubble.
+const optionLabel = (o: TinaOption): string =>
+  typeof o === 'string' ? o : `${o?.emoji ? `${o.emoji} ` : ''}${optionValue(o)}`;
 
 // All profile fields that can be collected (must match TinaContext)
 const ALL_PROFILE_FIELDS = [
@@ -35,17 +67,12 @@ const ALL_PROFILE_FIELDS = [
   'height', 'drinking', 'smoking', 'zodiac', 'bio'
 ];
 
-type DeepLinkAction = {
-  type: 'movies' | 'music' | 'interests';
-  label: string;
-  icon: string;
-};
-
 interface Props {
   userId: string;
   userName: string;
   existingMessages?: Message[];
   onMessagesChange?: (messages: Message[]) => void;
+  // Unused: /tina/chat never returns deep links. Kept so callers still compile.
   onNavigationRequest?: (destination: string, params?: any) => void;
   isOnboardingComplete?: boolean;
   userProfile?: UserProfileData | null;
@@ -57,14 +84,13 @@ export default function GlobalTinaChatScreen({
   userName,
   existingMessages = [],
   onMessagesChange,
-  onNavigationRequest,
   isOnboardingComplete = false,
   userProfile,
   sessionOpenCount = 0,
 }: Props) {
   const insets = useSafeAreaInsets();
-  const { isFieldCollected, markFieldAsCollected, markFieldAsAsked, getMissingFields, state: tinaState } = useTina();
-  
+  const { markFieldAsCollected, markFieldAsAsked, getMissingFields, state: tinaState } = useTina();
+
   // Initialize messages from existing
   const [messages, setMessages] = useState<Message[]>(() => {
     return existingMessages.length > 0 ? existingMessages : [];
@@ -72,37 +98,41 @@ export default function GlobalTinaChatScreen({
   const [inputText, setInputText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [currentOptions, setCurrentOptions] = useState<{
-    field: string;
-    options: string[];
-    multiSelect: boolean;
-  } | null>(null);
+  const [currentOptions, setCurrentOptions] = useState<OptionsState | null>(null);
   const [selectedOptions, setSelectedOptions] = useState<string[]>([]);
   const [showSendButton, setShowSendButton] = useState(false);
-  const [currentDeepLink, setCurrentDeepLink] = useState<DeepLinkAction | null>(null);
   const [hasGreetedThisSession, setHasGreetedThisSession] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
 
   // ===== VOICE STATE =====
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
-  const [voiceModeActive, setVoiceModeActive] = useState(false); // last input was via voice -> autoplay reply
+  // Id of the user's voice-transcript bubble: autoplay the first Tina reply
+  // AFTER it (never an older message). Cleared once played or on error.
+  const [voiceReplyAfterId, setVoiceReplyAfterId] = useState<string | null>(null);
   const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
+  const [ttsLoadingId, setTtsLoadingId] = useState<string | null>(null);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [voiceError, setVoiceError] = useState<string | null>(null);
-  const [currentAudioSource, setCurrentAudioSource] = useState<string | null>(null);
   const durationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const audioBlobUrlsRef = useRef<string[]>([]);
+  // Message whose audio is loaded in the player (replay without re-fetching TTS)
+  const loadedAudioIdRef = useRef<string | null>(null);
+  const playbackFinishedRef = useRef(false);
+  const ttsRequestRef = useRef(0);
 
   // expo-audio hooks – created at top level (required by hooks rules)
   const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
-  const recorderState = useAudioRecorderState(audioRecorder, 250);
   const audioPlayer = useAudioPlayer(null);
-  
+
   const flatListRef = useRef<FlatList>(null);
   const typingAnimation = useRef(new Animated.Value(0)).current;
   const messageAnimations = useRef<{ [key: string]: Animated.Value }>({});
   const mountedRef = useRef(true);
+  // Synchronous in-flight guard (state updates lag a tap): one request at a
+  // time, so replies always apply in the order the user sent them.
+  const busyRef = useRef(false);
+  const isBusy = isTyping || isLoading;
 
   // ========== KEYBOARD HANDLING ==========
   // Use KeyboardEvents from react-native-keyboard-controller so the
@@ -119,10 +149,9 @@ export default function GlobalTinaChatScreen({
       setKeyboardHeight(kbHeight);
 
       // When keyboard opens, scroll to position latest message in visible area
+      // (scrollToEnd on an empty list is a no-op, so no messages check needed)
       setTimeout(() => {
-        if (messages.length > 0 && flatListRef.current) {
-          flatListRef.current.scrollToEnd({ animated: true });
-        }
+        flatListRef.current?.scrollToEnd({ animated: true });
       }, 250);
     });
 
@@ -134,7 +163,7 @@ export default function GlobalTinaChatScreen({
       keyboardShowSub.remove();
       keyboardHideSub.remove();
     };
-  }, [messages.length]);
+  }, []); // subscribe once
 
   // Scroll to show the latest message centered in visible area
   const scrollToLatestMessage = useCallback(() => {
@@ -189,9 +218,13 @@ export default function GlobalTinaChatScreen({
 
   // ========== API CALLS ==========
 
-  const sendToTina = useCallback(async (userMessage: string) => {
+  const sendToTina = useCallback(async (
+    userMessage: string,
+    selected360Option?: { question_id: string; option_key: string },
+  ) => {
     if (!mountedRef.current) return;
-    
+
+    busyRef.current = true;
     setIsTyping(true);
 
     try {
@@ -206,9 +239,7 @@ export default function GlobalTinaChatScreen({
         if (userProfile.filmLanguages?.length) collectedInfo.push(`Film languages: ${userProfile.filmLanguages.join(', ')}`);
       }
 
-      console.log('[GlobalTina] Sending message to Tina:', userMessage?.substring(0, 50));
-
-      const response = await fetch(`${API_BASE}/api/tina/chat`, {
+      const response = await fetch(apiUrl('/api/tina/chat'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -221,48 +252,41 @@ export default function GlobalTinaChatScreen({
             role: m.isUser ? 'user' : 'assistant',
             content: m.text
           })),
+          ...(selected360Option ? { selected_360_option: selected360Option } : {}),
         }),
       });
 
       if (!mountedRef.current) return;
 
-      const data = await response.json();
-      console.log('[GlobalTina] Received response:', data.success, data.response?.substring(0, 50));
+      const data = await response.json().catch(() => null);
+      if (!mountedRef.current) return;
 
-      if (data.success && data.response) {
+      if (response.ok && data?.success && data.response) {
         addMessage(data.response, false);
 
         // Handle options
-        if (data.show_options) {
-          setCurrentOptions(data.show_options);
-          if (data.show_options.field) {
-            markFieldAsAsked(data.show_options.field);
-          }
-        } else {
-          setCurrentOptions(null);
+        const opts = toOptionsState(data.show_options);
+        setCurrentOptions(opts);
+        setSelectedOptions([]);
+        if (opts?.field) {
+          markFieldAsAsked(opts.field);
         }
-
-        // Handle deep links
-        if (data.deep_link) {
-          setCurrentDeepLink(data.deep_link);
-        }
-
-        // Handle collected data
-        if (data.collected_data) {
-          Object.keys(data.collected_data).forEach(field => {
-            markFieldAsCollected(field);
-          });
+        if (data.collected_field) {
+          markFieldAsCollected(data.collected_field);
         }
       } else {
-        // Fallback if response is empty
-        addMessage("I'm here! What would you like to chat about? 😊", false);
+        console.warn('[GlobalTina] chat request failed, status:', response.status);
+        setVoiceReplyAfterId(null); // never read an error bubble aloud
+        addMessage(response.status === 429 ? RATE_LIMIT_MSG : CHAT_ERROR_MSG, false);
       }
-    } catch (error) {
-      console.error('[GlobalTina] Error sending message:', error);
+    } catch (error: any) {
+      console.warn('[GlobalTina] chat request error:', error?.message);
       if (mountedRef.current) {
-        addMessage("Hmm, I got a bit distracted! Could you say that again? 😅", false);
+        setVoiceReplyAfterId(null);
+        addMessage(CHAT_ERROR_MSG, false);
       }
     } finally {
+      busyRef.current = false;
       if (mountedRef.current) {
         setIsTyping(false);
       }
@@ -273,19 +297,24 @@ export default function GlobalTinaChatScreen({
   const fetchTinaGreeting = useCallback(async () => {
     if (!mountedRef.current || hasGreetedThisSession) return;
     
-    console.log('[GlobalTina] Fetching greeting, onboardingComplete:', isOnboardingComplete, tinaState.onboardingStage);
+    // Block sends until the greeting is on screen so it can't land after
+    // (or between) the user's first message and Tina's reply.
+    busyRef.current = true;
     setIsLoading(true);
+
+    const actuallyComplete = isOnboardingComplete || tinaState.onboardingStage === 'completed';
+    // Fallback greeting if welcome-back fails
+    let greeting = actuallyComplete
+      ? `Hey ${userName || 'there'}! 💫 Good to see you! What's on your mind?`
+      : `Hey ${userName || 'there'}! 👋 Let's continue setting up your profile!`;
+    let greetingOptions: OptionsState | null = null;
 
     try {
       // Get collected fields from context to pass to backend
       const missing = getMissingFields();
       const collectedFieldsList = ALL_PROFILE_FIELDS.filter(f => !missing.includes(f));
-      
-      const actuallyComplete = isOnboardingComplete || tinaState.onboardingStage === 'completed';
-      
-      console.log('[GlobalTina] Calling welcome-back API, collected fields:', collectedFieldsList.length, 'complete:', actuallyComplete);
-      
-      const welcomeResponse = await fetch(`${API_BASE}/api/tina/welcome-back`, {
+
+      const welcomeResponse = await fetch(apiUrl('/api/tina/welcome-back'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -296,50 +325,28 @@ export default function GlobalTinaChatScreen({
         }),
       });
 
-      if (!mountedRef.current) return;
-
-      if (welcomeResponse.ok) {
-        const welcomeData = await welcomeResponse.json();
-        console.log('[GlobalTina] Welcome response:', welcomeData.success, welcomeData.message?.substring(0, 50));
-        
-        if (welcomeData.success && welcomeData.message) {
-          // Add a small delay for natural feel
-          setTimeout(() => {
-            if (mountedRef.current) {
-              addMessage(welcomeData.message, false);
-              setHasGreetedThisSession(true);
-              
-              if (welcomeData.show_options) {
-                setCurrentOptions(welcomeData.show_options);
-              }
-            }
-          }, 300);
-        }
+      const welcomeData = welcomeResponse.ok ? await welcomeResponse.json() : null;
+      if (welcomeData?.success && welcomeData.message) {
+        greeting = welcomeData.message;
+        greetingOptions = toOptionsState(welcomeData.show_options);
       } else {
-        // Fallback greeting
-        setTimeout(() => {
-          if (mountedRef.current) {
-            const greeting = actuallyComplete
-              ? `Hey ${userName || 'there'}! 💫 Good to see you! What's on your mind?`
-              : `Hey ${userName || 'there'}! 👋 Let's continue setting up your profile!`;
-            addMessage(greeting, false);
-            setHasGreetedThisSession(true);
-          }
-        }, 300);
+        console.warn('[GlobalTina] welcome-back failed, status:', welcomeResponse.status);
       }
-    } catch (error) {
-      console.error('[GlobalTina] Init error:', error);
-      setTimeout(() => {
-        if (mountedRef.current) {
-          addMessage(`Hey ${userName || 'there'}! 💫 What can I help you with?`, false);
-          setHasGreetedThisSession(true);
-        }
-      }, 300);
-    } finally {
-      if (mountedRef.current) {
-        setIsLoading(false);
-      }
+    } catch (error: any) {
+      console.warn('[GlobalTina] welcome-back error:', error?.message);
     }
+
+    // Small delay for natural feel
+    await new Promise(resolve => setTimeout(resolve, 300));
+    busyRef.current = false;
+    if (!mountedRef.current) return;
+    addMessage(greeting, false);
+    setHasGreetedThisSession(true);
+    if (greetingOptions) {
+      setCurrentOptions(greetingOptions);
+      setSelectedOptions([]);
+    }
+    setIsLoading(false);
   }, [userId, userName, isOnboardingComplete, tinaState.onboardingStage, hasGreetedThisSession, getMissingFields, addMessage]);
 
   // ========== VOICE: RECORDING + PLAYBACK ==========
@@ -372,9 +379,10 @@ export default function GlobalTinaChatScreen({
   }, []);
 
   const handleStartRecording = useCallback(async () => {
-    if (isRecording || isTranscribing) return;
+    if (isRecording || isTranscribing || busyRef.current) return;
     setVoiceError(null);
 
+    let prepared = false;
     try {
       // Ask for mic permission contextually
       const perm = await requestRecordingPermissionsAsync();
@@ -399,18 +407,24 @@ export default function GlobalTinaChatScreen({
 
       // Prepare and start
       await audioRecorder.prepareToRecordAsync();
+      prepared = true;
       audioRecorder.record();
       setIsRecording(true);
       setRecordingDuration(0);
 
-      // Tick a duration timer (fallback to recorderState too)
+      // Tick a duration timer
       if (durationTimerRef.current) clearInterval(durationTimerRef.current);
       durationTimerRef.current = setInterval(() => {
         setRecordingDuration((d) => d + 1);
       }, 1000);
     } catch (err: any) {
-      console.error('[GlobalTina] startRecording error:', err);
-      setVoiceError(err?.message || "Couldn't start recording.");
+      console.warn('[GlobalTina] startRecording error:', err?.message);
+      // A prepared-but-not-started recorder must be released, otherwise every
+      // later prepareToRecordAsync() throws (already prepared).
+      if (prepared) {
+        try { await audioRecorder.stop(); } catch { /* noop */ }
+      }
+      setVoiceError("Couldn't start recording. Please try again.");
       setIsRecording(false);
     }
   }, [audioRecorder, isRecording, isTranscribing]);
@@ -461,29 +475,37 @@ export default function GlobalTinaChatScreen({
     }
 
     setIsTranscribing(true);
-    setVoiceModeActive(true);
 
     try {
       const form = await buildAudioFormData(uri);
-      const res = await fetch(`${API_BASE}/api/tina/voice/transcribe`, {
+      const res = await fetch(apiUrl('/api/tina/voice/transcribe'), {
         method: 'POST',
         body: form,
       });
-      const data = await res.json();
-      if (!res.ok || !data.success || !data.text) {
-        throw new Error(data.detail || data.error || 'Transcription failed');
+      if (res.status === 429) throw new Error(RATE_LIMIT_MSG);
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        throw new Error("Couldn't transcribe your voice.");
       }
 
-      const transcript = (data.text as string).trim();
+      const transcript = String(data.text || '').trim();
       if (!transcript) {
         setVoiceError("I didn't catch that — try again.");
         return;
       }
+      if (busyRef.current) {
+        // A request started meanwhile — don't send concurrently; let the user send it.
+        setInputText(transcript);
+        setShowSendButton(true);
+        return;
+      }
 
-      addMessage(transcript, true);
+      const userMsg = addMessage(transcript, true);
+      // Voice mode starts only now: autoplay the reply that comes AFTER this bubble.
+      setVoiceReplyAfterId(userMsg.id);
       sendToTina(transcript);
     } catch (err: any) {
-      console.error('[GlobalTina] transcribe error:', err);
+      console.warn('[GlobalTina] transcribe error:', err?.message);
       setVoiceError(err?.message || "Couldn't transcribe your voice.");
     } finally {
       setIsTranscribing(false);
@@ -491,30 +513,63 @@ export default function GlobalTinaChatScreen({
     }
   }, [audioRecorder, isRecording, recordingDuration, addMessage, sendToTina, buildAudioFormData]);
 
-  // Play Tina's TTS audio for a given message
+  // Play Tina's TTS audio for a given message.
+  // Tap while playing -> pause. Tap again -> resume (or restart if it had
+  // finished) from the already-loaded audio, without re-fetching TTS.
   const handlePlayTinaMessage = useCallback(async (messageId: string, text: string) => {
     if (!text) return;
 
-    // Tapping the currently playing message -> stop
+    // Tapping the currently playing message -> pause
     if (playingMessageId === messageId) {
       try {
         audioPlayer.pause();
-      } catch (e) { /* noop */ }
+      } catch { /* noop */ }
       setPlayingMessageId(null);
       return;
     }
 
+    // TTS for this message is already being fetched -> ignore the extra tap
+    if (ttsLoadingId === messageId) return;
+
+    // Another message is playing -> stop it first
+    if (playingMessageId) {
+      try { audioPlayer.pause(); } catch { /* noop */ }
+      setPlayingMessageId(null);
+    }
+
+    // This message's audio is already loaded (paused or finished) -> replay it
+    if (loadedAudioIdRef.current === messageId) {
+      ttsRequestRef.current += 1; // supersede any in-flight fetch for another message
+      setTtsLoadingId(null);
+      try {
+        if (playbackFinishedRef.current) {
+          await audioPlayer.seekTo(0);
+        }
+        playbackFinishedRef.current = false;
+        audioPlayer.play();
+        setPlayingMessageId(messageId);
+      } catch (e: any) {
+        console.warn('[GlobalTina] audioPlayer.play error:', e?.message);
+        setPlayingMessageId(null);
+      }
+      return;
+    }
+
+    const requestId = ++ttsRequestRef.current;
+    setTtsLoadingId(messageId);
     try {
-      setPlayingMessageId(messageId);
-      const res = await fetch(`${API_BASE}/api/tina/voice/speak`, {
+      const res = await fetch(apiUrl('/api/tina/voice/speak'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text }),
       });
-      const data = await res.json();
-      if (!res.ok || !data.success || !data.audio) {
-        throw new Error(data.detail || 'TTS failed');
+      if (res.status === 429) throw new Error(RATE_LIMIT_MSG);
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success || !data.audio) {
+        throw new Error("Couldn't play voice reply.");
       }
+      // A newer tap (or unmount) superseded this request
+      if (requestId !== ttsRequestRef.current || !mountedRef.current) return;
 
       let playable: string = data.audio;
       // On web, blob URLs play more reliably than data URIs for some browsers
@@ -525,56 +580,41 @@ export default function GlobalTinaChatScreen({
           const blobUrl = URL.createObjectURL(blob);
           audioBlobUrlsRef.current.push(blobUrl);
           playable = blobUrl;
-        } catch (e) {
-          console.warn('[GlobalTina] blob conversion failed, falling back to data uri', e);
+        } catch {
+          console.warn('[GlobalTina] blob conversion failed, falling back to data uri');
         }
       }
-      setCurrentAudioSource(playable);
-    } catch (err: any) {
-      console.error('[GlobalTina] TTS playback error:', err);
-      setPlayingMessageId(null);
-      setVoiceError(err?.message || "Couldn't play voice reply.");
-    }
-  }, [audioPlayer, playingMessageId]);
+      if (requestId !== ttsRequestRef.current || !mountedRef.current) return;
 
-  // When currentAudioSource changes, swap source and start playback
-  useEffect(() => {
-    if (!currentAudioSource) return;
-    try {
-      // @ts-ignore – replace exists at runtime on AudioPlayer
-      audioPlayer.replace({ uri: currentAudioSource });
-      audioPlayer.seekTo(0);
+      audioPlayer.replace({ uri: playable });
+      loadedAudioIdRef.current = messageId;
+      playbackFinishedRef.current = false;
       audioPlayer.play();
-    } catch (e) {
-      console.warn('[GlobalTina] audioPlayer.play error:', e);
-      setPlayingMessageId(null);
+      // Only now is it actually playing
+      setPlayingMessageId(messageId);
+    } catch (err: any) {
+      console.warn('[GlobalTina] TTS playback error:', err?.message);
+      if (requestId === ttsRequestRef.current && mountedRef.current) {
+        setPlayingMessageId(null);
+        setVoiceError(err?.message || "Couldn't play voice reply.");
+      }
+    } finally {
+      if (requestId === ttsRequestRef.current && mountedRef.current) {
+        setTtsLoadingId(null);
+      }
     }
-  }, [currentAudioSource]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [audioPlayer, playingMessageId, ttsLoadingId]);
 
-  // Auto clear playingMessageId when playback finishes
+  // Clear playingMessageId when playback finishes (event-driven, no polling)
   useEffect(() => {
-    // expo-audio AudioPlayer exposes addListener('playbackStatusUpdate')
-    // but we'll poll via a lightweight effect
-    if (!playingMessageId) return;
-    const interval = setInterval(() => {
-      try {
-        // @ts-ignore – currentTime / duration / playing fields
-        const playing = audioPlayer.playing;
-        // @ts-ignore
-        const didFinish = audioPlayer.currentTime > 0 && audioPlayer.duration > 0
-          // @ts-ignore
-          && audioPlayer.currentTime >= audioPlayer.duration - 0.1;
-        if (!playing || didFinish) {
-          setPlayingMessageId(null);
-          clearInterval(interval);
-        }
-      } catch (e) {
-        clearInterval(interval);
+    const sub = audioPlayer.addListener('playbackStatusUpdate', (status) => {
+      if (status.didJustFinish) {
+        playbackFinishedRef.current = true;
         setPlayingMessageId(null);
       }
-    }, 350);
-    return () => clearInterval(interval);
-  }, [playingMessageId, audioPlayer]);
+    });
+    return () => sub.remove();
+  }, [audioPlayer]);
 
   // Auto-clear voice error after a short window
   useEffect(() => {
@@ -594,18 +634,18 @@ export default function GlobalTinaChatScreen({
     };
   }, []);
 
-  // Auto-play Tina's latest reply when the user used voice mode
-  const lastAutoplayedIdRef = useRef<string | null>(null);
+  // Auto-play Tina's reply to a voice message: only a Tina message NEWER than
+  // the user's transcript bubble (never the previous reply). One-shot — the
+  // next voice message re-arms it.
   useEffect(() => {
-    if (!voiceModeActive || messages.length === 0 || isTyping) return;
-    const last = messages[messages.length - 1];
-    if (last.isUser) return;
-    if (lastAutoplayedIdRef.current === last.id) return;
-    lastAutoplayedIdRef.current = last.id;
-    // Disable voice mode auto-play after one auto-play to require explicit voice each time
-    setVoiceModeActive(false);
-    handlePlayTinaMessage(last.id, last.text);
-  }, [messages, voiceModeActive, isTyping, handlePlayTinaMessage]);
+    if (!voiceReplyAfterId || isTyping) return;
+    const idx = messages.findIndex(m => m.id === voiceReplyAfterId);
+    if (idx === -1) return;
+    const reply = messages.slice(idx + 1).find(m => !m.isUser && !!m.text);
+    if (!reply) return;
+    setVoiceReplyAfterId(null);
+    handlePlayTinaMessage(reply.id, reply.text);
+  }, [messages, voiceReplyAfterId, isTyping, handlePlayTinaMessage]);
 
   // ========== EFFECTS ==========
 
@@ -667,7 +707,7 @@ export default function GlobalTinaChatScreen({
 
   const handleSend = useCallback(() => {
     const text = inputText.trim();
-    if (!text) return;
+    if (!text || busyRef.current) return;
 
     addMessage(text, true);
     setInputText('');
@@ -675,40 +715,38 @@ export default function GlobalTinaChatScreen({
     sendToTina(text);
   }, [inputText, addMessage, sendToTina]);
 
-  const handleOptionSelect = useCallback((option: string) => {
-    if (!currentOptions) return;
+  const handleOptionSelect = useCallback((option: TinaOption) => {
+    if (!currentOptions || busyRef.current || isRecording || isTranscribing) return;
+    const value = optionValue(option);
+    if (!value) return;
 
     if (currentOptions.multiSelect) {
       setSelectedOptions(prev =>
-        prev.includes(option)
-          ? prev.filter(o => o !== option)
-          : [...prev, option]
+        prev.includes(value)
+          ? prev.filter(o => o !== value)
+          : [...prev, value]
       );
-      setShowSendButton(true);
     } else {
-      addMessage(option, true);
+      const label = optionLabel(option);
+      // 360° quiz chips are objects with a key; the backend needs the key + question id
+      const selected360 = typeof option !== 'string' && option.key && currentOptions.question_id
+        ? { question_id: currentOptions.question_id, option_key: option.key }
+        : undefined;
+      addMessage(label, true);
       setCurrentOptions(null);
-      sendToTina(option);
+      sendToTina(label, selected360);
     }
-  }, [currentOptions, addMessage, sendToTina]);
+  }, [currentOptions, isRecording, isTranscribing, addMessage, sendToTina]);
 
   const handleConfirmSelection = useCallback(() => {
-    if (selectedOptions.length === 0) return;
+    if (selectedOptions.length === 0 || busyRef.current) return;
 
     const selectionText = selectedOptions.join(', ');
     addMessage(selectionText, true);
     setSelectedOptions([]);
     setCurrentOptions(null);
-    setShowSendButton(false);
     sendToTina(selectionText);
   }, [selectedOptions, addMessage, sendToTina]);
-
-  const handleDeepLink = useCallback(() => {
-    if (!currentDeepLink || !onNavigationRequest) return;
-    
-    onNavigationRequest(currentDeepLink.type);
-    setCurrentDeepLink(null);
-  }, [currentDeepLink, onNavigationRequest]);
 
   // ========== RENDER ==========
 
@@ -718,6 +756,7 @@ export default function GlobalTinaChatScreen({
     const scale = anim.interpolate({ inputRange: [0, 1], outputRange: [0.8, 1] });
     const translateY = anim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] });
     const isPlayingThis = playingMessageId === item.id;
+    const isLoadingAudio = ttsLoadingId === item.id;
 
     return (
       <Animated.View
@@ -752,7 +791,7 @@ export default function GlobalTinaChatScreen({
                 color="#FF6B6B"
               />
               <Text style={styles.speakerLabel}>
-                {isPlayingThis ? 'Playing…' : 'Play'}
+                {isPlayingThis ? 'Playing…' : isLoadingAudio ? 'Loading…' : 'Play'}
               </Text>
             </TouchableOpacity>
           )}
@@ -812,42 +851,39 @@ export default function GlobalTinaChatScreen({
             </Text>
           </View>
           <View style={styles.optionsScroll}>
-            {currentOptions.options.map((option, idx) => (
-              <TouchableOpacity
-                key={idx}
-                style={[
-                  styles.optionChip,
-                  selectedOptions.includes(option) && styles.optionChipSelected,
-                ]}
-                onPress={() => handleOptionSelect(option)}
-              >
-                <Text
+            {currentOptions.options.map((option, idx) => {
+              const isSelected = selectedOptions.includes(optionValue(option));
+              return (
+                <TouchableOpacity
+                  key={idx}
                   style={[
-                    styles.optionText,
-                    selectedOptions.includes(option) && styles.optionTextSelected,
+                    styles.optionChip,
+                    isSelected && styles.optionChipSelected,
                   ]}
+                  onPress={() => handleOptionSelect(option)}
+                  disabled={isBusy}
                 >
-                  {option}
-                </Text>
-              </TouchableOpacity>
-            ))}
+                  <Text
+                    style={[
+                      styles.optionText,
+                      isSelected && styles.optionTextSelected,
+                    ]}
+                  >
+                    {optionLabel(option)}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
           {currentOptions.multiSelect && selectedOptions.length > 0 && (
-            <TouchableOpacity style={styles.confirmButton} onPress={handleConfirmSelection}>
+            <TouchableOpacity
+              style={[styles.confirmButton, isBusy && styles.btnDisabled]}
+              onPress={handleConfirmSelection}
+              disabled={isBusy}
+            >
               <Text style={styles.confirmButtonText}>Confirm ({selectedOptions.length})</Text>
             </TouchableOpacity>
           )}
-        </View>
-      )}
-
-      {/* Deep Link CTA */}
-      {currentDeepLink && (
-        <View style={styles.deepLinkContainer}>
-          <TouchableOpacity style={styles.deepLinkButton} onPress={handleDeepLink}>
-            <Ionicons name={currentDeepLink.icon as any} size={20} color="#FFFFFF" />
-            <Text style={styles.deepLinkText}>{currentDeepLink.label}</Text>
-            <Ionicons name="chevron-forward" size={18} color="#FFFFFF" />
-          </TouchableOpacity>
         </View>
       )}
 
@@ -912,23 +948,27 @@ export default function GlobalTinaChatScreen({
               placeholderTextColor="rgba(255,255,255,0.4)"
               multiline
               maxLength={500}
+              // Multiline on Android: Enter inserts a newline, so the send
+              // icon is the primary path; onSubmitEditing is a bonus.
               returnKeyType="send"
+              blurOnSubmit={false}
               onSubmitEditing={handleSend}
               editable={!isTranscribing}
             />
             {showSendButton ? (
               <TouchableOpacity
-                style={[styles.sendBtn, styles.sendBtnActive]}
+                style={[styles.sendBtn, styles.sendBtnActive, isBusy && styles.btnDisabled]}
                 onPress={handleSend}
+                disabled={isBusy}
                 activeOpacity={0.7}
               >
                 <Ionicons name="send" size={20} color="#FFFFFF" />
               </TouchableOpacity>
             ) : (
               <TouchableOpacity
-                style={[styles.sendBtn, styles.micBtn]}
+                style={[styles.sendBtn, styles.micBtn, isBusy && !isTranscribing && styles.btnDisabled]}
                 onPress={handleStartRecording}
-                disabled={isTranscribing}
+                disabled={isTranscribing || isBusy}
                 activeOpacity={0.7}
               >
                 {isTranscribing ? (
@@ -949,9 +989,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#0D0D0D',
-  },
-  chatArea: {
-    flex: 1,
   },
   loadingContainer: {
     flex: 1,
@@ -1084,25 +1121,8 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  deepLinkContainer: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.08)',
-  },
-  deepLinkButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#FF6B6B',
-    paddingVertical: 14,
-    borderRadius: 25,
-    gap: 8,
-  },
-  deepLinkText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '600',
+  btnDisabled: {
+    opacity: 0.45,
   },
   composerContainer: {
     backgroundColor: '#0D0D0D',

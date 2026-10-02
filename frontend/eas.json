@@ -1,0 +1,35 @@
+{
+  "cli": {
+    "version": ">= 16.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_BACKEND_URL": "https://REPLACE-WITH-YOUR-BACKEND-URL",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "REPLACE-WITH-WEB-CLIENT-ID.apps.googleusercontent.com"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "android": {
+        "buildType": "app-bundle"
+      },
+      "env": {
+        "EXPO_PUBLIC_BACKEND_URL": "https://REPLACE-WITH-YOUR-BACKEND-URL",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "REPLACE-WITH-WEB-CLIENT-ID.apps.googleusercontent.com"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "android": {
+        "track": "internal"
+      }
+    }
+  }
+}

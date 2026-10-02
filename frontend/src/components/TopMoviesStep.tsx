@@ -1,14 +1,19 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, Image,
-  ScrollView, Modal, ActivityIndicator, Platform, KeyboardAvoidingView,
+  ScrollView, Modal, ActivityIndicator,
   Keyboard, TouchableWithoutFeedback,
 } from 'react-native';
+// RN's own KeyboardAvoidingView breaks in APK builds with edgeToEdgeEnabled.
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, BORDER_RADIUS } from '../theme';
 import { ProfileData, MovieSelection } from '../types';
+import { apiUrl } from '../store';
 
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+// Distance from the top of the screen to this step (onboarding header +
+// progress bar + status bar) so the keyboard padding lines up.
+const KEYBOARD_OFFSET = 100;
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w342';
 const REASONS = ['Good story/plot', 'Great performances', 'Emotional connection', 'Good craftwork'];
 
@@ -26,22 +31,44 @@ export default function TopMoviesStep({ data, onUpdate, onNext }: Props) {
   const [selectedMovie, setSelectedMovie] = useState<any>(null);
   const [rating, setRating] = useState(0);
   const [reasons, setReasons] = useState<string[]>([]);
-  const debounceRef = useRef<any>(null);
+  const [searchError, setSearchError] = useState('');
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Only the response to the latest query is applied (and nothing after unmount).
+  const searchSeqRef = useRef(0);
+
+  useEffect(() => () => {
+    searchSeqRef.current += 1;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+  }, []);
 
   const searchMovies = useCallback((text: string) => {
     setQuery(text);
+    setSearchError('');
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (text.length < 2) { setResults([]); return; }
+    const seq = ++searchSeqRef.current;
+    if (text.trim().length < 2) { setResults([]); setSearching(false); return; }
     debounceRef.current = setTimeout(async () => {
       setSearching(true);
       try {
-        const resp = await fetch(`${BACKEND_URL}/api/tmdb/search?query=${encodeURIComponent(text)}`);
+        const resp = await fetch(apiUrl(`/api/tmdb/search?query=${encodeURIComponent(text.trim())}`));
+        if (seq !== searchSeqRef.current) return; // superseded by newer input
+        if (!resp.ok) {
+          setResults([]);
+          setSearchError(resp.status === 429
+            ? 'Too many searches — please try again shortly.'
+            : 'Movie search is unavailable right now. Please try again.');
+          return;
+        }
         const data = await resp.json();
-        setResults(data.results || []);
-      } catch (e) {
-        console.error('TMDB search error:', e);
+        if (seq !== searchSeqRef.current) return;
+        setResults(Array.isArray(data?.results) ? data.results : []);
+      } catch {
+        if (seq === searchSeqRef.current) {
+          setResults([]);
+          setSearchError('Could not search movies. Check your connection.');
+        }
       } finally {
-        setSearching(false);
+        if (seq === searchSeqRef.current) setSearching(false);
       }
     }, 400);
   }, []);
@@ -64,12 +91,18 @@ export default function TopMoviesStep({ data, onUpdate, onNext }: Props) {
       id: selectedMovie.id,
       title: selectedMovie.title,
       poster_path: selectedMovie.poster_path,
+      release_date: selectedMovie.release_date || '',
+      vote_average: Number(selectedMovie.vote_average) || 0,
       rating,
       reasons,
     };
     onUpdate('topMovies', [...topMovies, newMovie]);
     setShowRatingModal(false);
     setSelectedMovie(null);
+    // Drop any pending/in-flight search so stale results don't reappear.
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    searchSeqRef.current += 1;
+    setSearching(false);
     setQuery('');
     setResults([]);
   };
@@ -85,7 +118,8 @@ export default function TopMoviesStep({ data, onUpdate, onNext }: Props) {
   return (
     <KeyboardAvoidingView
       style={styles.flex}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior="padding"
+      keyboardVerticalOffset={KEYBOARD_OFFSET}
     >
       <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
         <ScrollView style={styles.flex} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
@@ -139,6 +173,7 @@ export default function TopMoviesStep({ data, onUpdate, onNext }: Props) {
               />
               {searching && <ActivityIndicator size="small" color={COLORS.primary} />}
             </View>
+            {!!searchError && <Text style={styles.searchError}>{searchError}</Text>}
 
             {results.length > 0 && (
               <View style={styles.resultsGrid}>
@@ -178,7 +213,12 @@ export default function TopMoviesStep({ data, onUpdate, onNext }: Props) {
       </TouchableWithoutFeedback>
 
       {/* Rating Modal */}
-      <Modal visible={showRatingModal} transparent animationType="fade">
+      <Modal
+        visible={showRatingModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowRatingModal(false)}
+      >
         <View style={styles.modalOverlay}>
           <View style={styles.ratingContent}>
             <Text style={styles.ratingTitle} numberOfLines={2}>{selectedMovie?.title}</Text>
@@ -243,7 +283,8 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.m, paddingHorizontal: SPACING.m, gap: SPACING.s,
     marginBottom: SPACING.m,
   },
-  searchInput: { 
+  searchError: { fontSize: 13, color: COLORS.textMuted, marginTop: -SPACING.s, marginBottom: SPACING.m },
+  searchInput: {
     flex: 1, 
     paddingVertical: 14, 
     color: COLORS.text, 

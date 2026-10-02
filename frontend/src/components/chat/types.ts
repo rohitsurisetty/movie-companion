@@ -49,7 +49,8 @@ export interface FullUserProfile {
   bio?: string;
   genres?: string[];
   topMovies?: { title: string; poster?: string }[];
-  pictures?: string[];
+  /** string[] (current) or the legacy { picture_1 … picture_5 } object — use normalizePictures(). */
+  pictures?: (string | null)[] | Record<string, string | null | undefined>;
 }
 
 export interface BackendMessage {
