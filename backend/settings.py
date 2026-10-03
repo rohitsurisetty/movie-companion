@@ -46,6 +46,14 @@ def _list(name: str, default: List[str]) -> List[str]:
     return [x.strip() for x in raw.split(",") if x.strip()]
 
 
+def _str(name: str, default: str) -> str:
+    """Stripped env value; unset or blank falls back to `default`."""
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return raw.strip()
+
+
 @dataclass(frozen=True)
 class Settings:
     # --- Core infrastructure (required) ---
@@ -116,6 +124,22 @@ class Settings:
     # Expose /api/dev/* helper routes.
     enable_dev_routes: bool = field(default_factory=lambda: _bool("ENABLE_DEV_ROUTES", False))
 
+    # --- Legal & support pages (legal_pages.py, served at /legal/*) ---
+    # The bracketed defaults are placeholders: set the real values before
+    # publishing the app (Google Play links to these pages).
+    app_display_name: str = field(default_factory=lambda: _str("APP_DISPLAY_NAME", "Film Companion"))
+    legal_company_name: str = field(default_factory=lambda: _str("LEGAL_COMPANY_NAME", "[Company legal name]"))
+    legal_company_address: str = field(default_factory=lambda: _str("LEGAL_COMPANY_ADDRESS", "[Registered address]"))
+    support_email: str = field(default_factory=lambda: _str("SUPPORT_EMAIL", "support@example.com"))
+    grievance_officer_name: str = field(
+        default_factory=lambda: _str("GRIEVANCE_OFFICER_NAME", "[Grievance Officer name]")
+    )
+    # Defaults to SUPPORT_EMAIL when unset.
+    grievance_officer_email: str = field(
+        default_factory=lambda: _str("GRIEVANCE_OFFICER_EMAIL", _str("SUPPORT_EMAIL", "support@example.com"))
+    )
+    legal_effective_date: str = field(default_factory=lambda: _str("LEGAL_EFFECTIVE_DATE", "3 October 2026"))
+
     @property
     def is_production(self) -> bool:
         return self.environment.strip().lower() in ("prod", "production")
@@ -159,3 +183,18 @@ def validate_required_env() -> None:
             logger.error("APP_ENV=production but ADMIN_PASSWORD_HASH is empty — admin login is disabled.")
         if settings.mock_feed_only or settings.mock_seed_chats:
             logger.warning("APP_ENV=production with mock flags enabled (MOCK_FEED_ONLY/MOCK_SEED_CHATS).")
+        placeholders = [
+            name
+            for name, value in (
+                ("LEGAL_COMPANY_NAME", settings.legal_company_name),
+                ("LEGAL_COMPANY_ADDRESS", settings.legal_company_address),
+                ("GRIEVANCE_OFFICER_NAME", settings.grievance_officer_name),
+                ("SUPPORT_EMAIL", settings.support_email),
+            )
+            if value.startswith("[") or value.endswith("@example.com")
+        ]
+        if placeholders:
+            logger.warning(
+                "APP_ENV=production but the /legal pages still show placeholder values for: %s",
+                ", ".join(placeholders),
+            )

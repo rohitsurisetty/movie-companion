@@ -140,6 +140,11 @@ interface PremiumProfileViewProps {
    * "Request Sent" CTAs (a `bottomCTAOverride` is still rendered).
    */
   isOwnProfile?: boolean;
+  /**
+   * Opens the Report / Block options for this profile. When provided (and not
+   * `isOwnProfile`), a "more" button is shown in the top corner opposite close.
+   */
+  onMoreActions?: () => void;
 }
 
 // ============ PHOTO CAROUSEL ============
@@ -488,6 +493,7 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
   closeIconName = 'chevron-down',
   hideMatchCard = false,
   isOwnProfile = false,
+  onMoreActions,
 }) => {
   const insets = useSafeAreaInsets();
   const scrollY = useRef(new Animated.Value(0)).current;
@@ -538,6 +544,8 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
     photos && photos.length > 0 ? photos : normalizePictures(pictures ?? profile.pictures);
   // Own profile: no match card, no Message / "Request Sent" CTA (override still shows).
   const showBottomCTA = !!bottomCTAOverride || !isOwnProfile;
+  // Report / Block entry point — never on your own profile.
+  const showMoreActions = !!onMoreActions && !isOwnProfile;
 
   const accentColor = mode === 'date' ? COLORS.primary : COLORS.buddy;
   const formattedLocation = formatLocationForPrivacy(profile.location);
@@ -577,8 +585,20 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
         <TouchableOpacity style={styles.headerButton} onPress={onClose}>
           <Ionicons name={closeIconName} size={26} color="#FFF" />
         </TouchableOpacity>
-        {/* Empty view for spacing */}
-        <View style={{ width: 40 }} />
+        {showMoreActions ? (
+          <TouchableOpacity
+            style={styles.headerButton}
+            onPress={onMoreActions}
+            accessibilityRole="button"
+            accessibilityLabel="More options"
+            testID="profile-more-actions"
+          >
+            <Ionicons name="ellipsis-horizontal" size={24} color="#FFF" />
+          </TouchableOpacity>
+        ) : (
+          /* Empty view for spacing */
+          <View style={{ width: 40 }} />
+        )}
       </Animated.View>
 
       {/* Sticky Header (appears on scroll) - only name, no message button */}
@@ -601,7 +621,19 @@ export const PremiumProfileView: React.FC<PremiumProfileViewProps> = ({
           <Text style={styles.stickyDetails}>{shortLocation}</Text>
         </View>
         {/* Removed message button - using fixed bottom CTA instead */}
-        <View style={{ width: 36 }} />
+        {showMoreActions ? (
+          // Same Report / Block entry point once the floating header has faded out.
+          <TouchableOpacity
+            style={styles.stickyMessageBtn}
+            onPress={onMoreActions}
+            accessibilityRole="button"
+            accessibilityLabel="More options"
+          >
+            <Ionicons name="ellipsis-horizontal" size={22} color={COLORS.text} />
+          </TouchableOpacity>
+        ) : (
+          <View style={{ width: 36 }} />
+        )}
       </Animated.View>
 
       {/* Scrollable Content */}

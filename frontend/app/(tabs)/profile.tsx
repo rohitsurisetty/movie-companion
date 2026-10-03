@@ -13,6 +13,7 @@ import { apiUrl, getUserId, getProfile, saveProfile, clearAll, logout } from '..
 import { getPartialLocation, getSimplifiedLocation } from '../../src/utils/location';
 import { SharedHeader, useAppMode } from '../../src/components/SharedHeader';
 import { PremiumProfileView, normalizePictures, getProfilePhotos } from '../../src/components/PremiumProfileView';
+import { LEGAL_URLS, openLegal } from '../../src/legal';
 import {
   AVATAR_OPTIONS, RELATIONSHIP_INTENTS, PARTNER_PREFS, LANGUAGES,
   MOVIE_FREQUENCIES, FILM_LANGUAGES, GENRES, RELIGIONS, MARITAL_STATUSES,
@@ -1581,6 +1582,75 @@ function ProfileScreenInner() {
           </TouchableOpacity>
         </View>
 
+        {/* ========== LEGAL & SUPPORT (opens in the in-app browser) ========== */}
+        <View style={styles.settingsSection}>
+          <Text style={styles.settingsGroupTitle}>Legal & support</Text>
+
+          <TouchableOpacity
+            style={styles.settingsCard}
+            onPress={() => openLegal(LEGAL_URLS.terms)}
+            activeOpacity={0.7}
+            testID="legal-terms"
+          >
+            <View style={[styles.settingsCardIcon, { backgroundColor: 'rgba(158, 158, 158, 0.15)' }]}>
+              <Ionicons name="document-text-outline" size={24} color="#9E9E9E" />
+            </View>
+            <View style={styles.settingsCardContent}>
+              <Text style={styles.settingsCardTitle}>Terms of Use</Text>
+              <Text style={styles.settingsCardDesc}>The rules for using filmydating</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={22} color={COLORS.textMuted} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.settingsCard}
+            onPress={() => openLegal(LEGAL_URLS.guidelines)}
+            activeOpacity={0.7}
+            testID="legal-guidelines"
+          >
+            <View style={[styles.settingsCardIcon, { backgroundColor: 'rgba(255, 152, 0, 0.15)' }]}>
+              <Ionicons name="people-outline" size={24} color="#FF9800" />
+            </View>
+            <View style={styles.settingsCardContent}>
+              <Text style={styles.settingsCardTitle}>Community Guidelines</Text>
+              <Text style={styles.settingsCardDesc}>How we keep the community safe</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={22} color={COLORS.textMuted} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.settingsCard}
+            onPress={() => openLegal(LEGAL_URLS.privacy)}
+            activeOpacity={0.7}
+            testID="legal-privacy"
+          >
+            <View style={[styles.settingsCardIcon, { backgroundColor: 'rgba(96, 125, 139, 0.15)' }]}>
+              <Ionicons name="lock-closed-outline" size={24} color="#607D8B" />
+            </View>
+            <View style={styles.settingsCardContent}>
+              <Text style={styles.settingsCardTitle}>Privacy Policy</Text>
+              <Text style={styles.settingsCardDesc}>How we use and protect your data</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={22} color={COLORS.textMuted} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.settingsCard}
+            onPress={() => openLegal(LEGAL_URLS.contact)}
+            activeOpacity={0.7}
+            testID="legal-contact"
+          >
+            <View style={[styles.settingsCardIcon, { backgroundColor: 'rgba(3, 169, 244, 0.15)' }]}>
+              <Ionicons name="help-circle-outline" size={24} color="#03A9F4" />
+            </View>
+            <View style={styles.settingsCardContent}>
+              <Text style={styles.settingsCardTitle}>Help & Support</Text>
+              <Text style={styles.settingsCardDesc}>Contact us or report a problem</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={22} color={COLORS.textMuted} />
+          </TouchableOpacity>
+        </View>
+
         {/* Log out (keeps the account) */}
         <TouchableOpacity style={styles.logoutBtnNew} onPress={handleLogout} activeOpacity={0.8} testID="logout-button">
           <Ionicons name="log-out-outline" size={20} color={COLORS.textSecondary} />
@@ -1793,6 +1863,15 @@ const styles = StyleSheet.create({
   settingsCardDesc: {
     fontSize: 13,
     color: COLORS.textMuted,
+  },
+  settingsGroupTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.textMuted,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginLeft: SPACING.xs,
+    marginBottom: SPACING.xs,
   },
   
   // ========== LOGOUT BUTTON ==========

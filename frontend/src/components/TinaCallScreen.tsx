@@ -20,6 +20,7 @@ import {
 } from 'expo-audio';
 import TinaAvatar from './TinaAvatar';
 import { apiUrl, getSessionToken } from '../store';
+import { reportTinaReply } from '../utils/tinaReport';
 
 // VAD tunables – `metering` is in dBFS (-160 = silence, 0 = peak).
 // Tuned for ZERO perceived gap — user explicitly asked for "immediately
@@ -613,6 +614,15 @@ export default function TinaCallScreen({
     }
   }, [status]);
 
+  // Play AI-content policy: report what Tina said most recently on this call
+  // (the call has no visible transcript, so use the conversation context).
+  const handleReportReply = useCallback(() => {
+    const lastTina = [...conversationRef.current]
+      .reverse()
+      .find((m) => m.role === 'assistant' && !!m.content?.trim());
+    reportTinaReply(lastTina?.content.trim() || '(voice call)', 'call');
+  }, []);
+
   // ---------- Render ----------
   if (!visible) return null;
 
@@ -632,6 +642,20 @@ export default function TinaCallScreen({
         <Text style={styles.callLabel}>Voice call</Text>
         <Text style={styles.tinaName}>Tina</Text>
       </View>
+
+      {/* Report Tina's latest reply */}
+      <TouchableOpacity
+        style={styles.reportBtn}
+        onPress={handleReportReply}
+        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityLabel="Report Tina's reply"
+        testID="tina-call-report-button"
+      >
+        <Ionicons name="flag-outline" size={14} color="rgba(255,255,255,0.55)" />
+        <Text style={styles.reportBtnText}>Report</Text>
+      </TouchableOpacity>
 
       {/* Avatar with animated rings */}
       <View style={styles.avatarWrap}>
@@ -720,6 +744,23 @@ const styles = StyleSheet.create({
   },
   topBar: {
     alignItems: 'center',
+  },
+  reportBtn: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  reportBtnText: {
+    color: 'rgba(255,255,255,0.55)',
+    fontSize: 12,
+    fontWeight: '600',
   },
   callLabel: {
     color: 'rgba(255,255,255,0.55)',

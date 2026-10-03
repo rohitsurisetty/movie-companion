@@ -4,12 +4,16 @@ from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import ConnectionFailure
+import asyncio
+import contextlib
 import hmac
 import logging
+import re
+import sys
 import httpx
 import bcrypt
 from pathlib import Path
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 import uuid
 from datetime import datetime, timezone, timedelta, date
@@ -52,6 +56,7 @@ from chat_service import (
     decline_message_request,
     unmatch_user,
     report_user,
+    block_user,
     set_meeting_status,
     mark_messages_read,
     generate_ice_breakers,
@@ -128,11 +133,16 @@ from security_deps import (
     LLM_LIMITER,
     LOGIN_ATTEMPT_LIMITER,
     RateLimiter,
+    RedactSecretsFilter,
     client_ip,
 )
 
 # Auth routes (Google Sign-In, phone OTP, /auth/me, /auth/logout)
 from auth_routes import router as auth_router, configure as configure_auth
+from auth_providers import mask_phone
+
+# Public legal & support pages (/legal/*, HTML, no auth)
+from legal_pages import router as legal_router
 
 # Import mock-data seeder for unmatched flow testing
 from mock_unmatched_data import seed_unmatched_for_user
@@ -159,6 +169,8 @@ api_router = APIRouter(prefix="/api")
 STT_LIMITER = RateLimiter(max_calls=20, window_seconds=60)              # /tina/voice/transcribe
 EXTERNAL_API_LIMITER = RateLimiter(max_calls=120, window_seconds=60)    # /tmdb/* + /places/*
 MATCH_REFRESH_LIMITER = RateLimiter(max_calls=3, window_seconds=60 * 10)  # /matches force_refresh
+TINA_REPORT_LIMITER = RateLimiter(max_calls=20, window_seconds=600)       # /tina/report (per user)
+DELETION_REQUEST_LIMITER = RateLimiter(max_calls=5, window_seconds=3600)  # /account-deletion-request (public, per IP)
 PICTURE_MAX_B64_CHARS = 7_000_000  # ≈5 MB decoded; reject before base64-decoding
 STT_MAX_AUDIO_BYTES = 10 * 1024 * 1024  # voice clips for /tina/voice/transcribe
 
@@ -507,6 +519,8 @@ async def root():
 # Auth flow:
 #   • /api/auth/*  → public (login/signup paths)
 #   • /api/admin/login → public (issues an admin token)
+#   • /api/account-deletion-request → public (web form on /legal/delete-account,
+#     rate-limited per IP); the /legal/* pages themselves are outside /api
 #   • /api/admin/*  → requires admin token (get_current_admin)
 #   • everything else under /api/ → requires user session (get_current_user_id)
 #
@@ -528,6 +542,8 @@ _PUBLIC_EXACT = {
     "/api/tina/voice/status",
     "/api/movie/catalog/stats",
     "/api/admin/login",
+    # Web form on /legal/delete-account for people who can't open the app.
+    "/api/account-deletion-request",
 }
 
 
@@ -1854,8 +1870,10 @@ async def reset_user_completely(user_id: str, request: Request):
     Removed: the account + every session, profile, taste vector, swipes,
     shown/unwatched history, library, filters, photos (Mongo record AND the
     files in Supabase Storage), conversations + messages + requests the user
-    is part of, Tina sessions/personality, match caches, pending OTPs, and
-    the user's rows in the Supabase analytics tables.
+    is part of, Tina sessions/personality, the Tina-reply reports they filed
+    (tina_ai_reports), blocks in both directions (user_blocks rows where they
+    are the blocker or the blocked), match caches, pending OTPs, and the
+    user's rows in the Supabase analytics tables.
     Kept on purpose: chat_reports / meeting_reports (trust & safety records).
 
     AUTH: Caller must own this user_id.
@@ -1919,6 +1937,8 @@ async def reset_user_completely(user_id: str, request: Request):
     ):
         await _purge(collection, {"user_id": uid})
     await _purge("match_cache", {"$or": [{"user_id": uid}, {"owner_id": uid}]})
+    await _purge("tina_ai_reports", {"user_id": uid})
+    await _purge("user_blocks", {"$or": [{"blocker_id": uid}, {"blocked_id": uid}]})
     if user_doc.get("phone"):
         await _purge("otp_codes", {"identifier": user_doc["phone"]})
 
@@ -1959,6 +1979,60 @@ async def reset_user_completely(user_id: str, request: Request):
         "success": True,
         "message": "Your account and data have been deleted.",
         "deleted": deleted,
+    }
+
+
+class AccountDeletionRequestBody(BaseModel):
+    """Body of the web form on /legal/delete-account."""
+    contact: str = Field(..., min_length=3, max_length=100)  # phone or email used to sign up
+    reason: Optional[str] = Field(None, max_length=500)
+
+
+def _mask_contact(contact: str) -> str:
+    """Log-safe form of a phone number / email ("a***@gmail.com", "+91******3210")."""
+    contact = (contact or "").strip()
+    if "@" in contact:
+        local, _, domain = contact.rpartition("@")
+        return f"{local[:1]}***@{domain}"
+    if len(re.sub(r"\D", "", contact)) >= 6:
+        return mask_phone(contact)
+    return "***"
+
+
+@api_router.post("/account-deletion-request")
+async def account_deletion_request(req: AccountDeletionRequestBody, request: Request):
+    """Deletion request from someone who can't use the in-app
+    Profile → Delete account path (Google Play requires a web option).
+
+    PUBLIC (in _PUBLIC_EXACT) and rate-limited per IP (5 / hour). Stores
+    {request_id, contact, reason, created_at, status: "pending"} in Mongo
+    `account_deletion_requests`; the team verifies ownership and deletes
+    the account within 30 days. The contact is only ever logged masked.
+    """
+    DELETION_REQUEST_LIMITER.check_or_raise(f"deletion_request:{client_ip(request)}")
+    contact = req.contact.strip()
+    if len(contact) < 3:
+        raise HTTPException(status_code=400, detail="Enter the phone number or email address you signed up with")
+    doc = {
+        "request_id": f"delreq_{uuid.uuid4().hex}",
+        "contact": contact,
+        "reason": (req.reason or "").strip() or None,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "status": "pending",
+    }
+    try:
+        await db.account_deletion_requests.insert_one(dict(doc))
+    except Exception:
+        logger.exception("[deletion-request] could not save request")
+        raise HTTPException(status_code=500, detail="Could not save your request. Please email us instead.")
+    logger.info("[deletion-request] %s received for %s", doc["request_id"], _mask_contact(contact))
+    return {
+        "success": True,
+        "message": (
+            "Thanks, we've received your request. We'll confirm that the account belongs to you "
+            "and delete it within 30 days. We may contact you at the phone number or email you "
+            "entered to verify the request."
+        ),
     }
 
 
@@ -3031,6 +3105,10 @@ class ReportRequest(BaseModel):
     reason: str
     details: Optional[str] = None
 
+class BlockRequest(BaseModel):
+    blocked_user_id: str = Field(..., min_length=1, max_length=64)
+    reason: Optional[str] = Field(None, max_length=200)
+
 class MeetingStatusRequest(BaseModel):
     user_id: str = ""
     other_user_id: str
@@ -3190,8 +3268,6 @@ async def api_get_messages(conversation_id: str, request: Request, limit: int = 
 
 
 # Helper function for AI auto-reply (runs in background)
-import asyncio
-
 async def trigger_ai_auto_reply(
     conversation_id: str,
     user_message: str,
@@ -3395,6 +3471,29 @@ async def api_report_user(req: ReportRequest, request: Request):
     except Exception:
         logger.exception("Report user error")
         raise HTTPException(status_code=500, detail="Could not submit report")
+
+
+@api_router.post("/user/block")
+async def api_block_user(req: BlockRequest, request: Request):
+    """Block another user (from their profile ⋯ menu or a chat).
+
+    Effect: both users drop out of each other's feeds (matchmaking excludes
+    `user_blocks` in both directions, cached feeds included), the
+    conversation between them is closed with status "blocked" (created when
+    they never chatted) so neither can message the other, and any pending
+    message request between them is withdrawn. The blocked user is not told.
+
+    AUTH: the blocker is always the session user. Self-block → 400.
+    """
+    try:
+        await block_user(request.state.user_id, req.blocked_user_id.strip(), req.reason)
+    except ValueError as e:
+        # chat_service's own validation messages (e.g. "Cannot block yourself")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        logger.exception("Block user error")
+        raise HTTPException(status_code=500, detail="Could not block user")
+    return {"success": True}
 
 
 @api_router.post("/chat/meeting-status")
@@ -3776,6 +3875,46 @@ async def tina_chat_endpoint(req: TinaChatRequest, request: Request):
     except Exception:
         logger.exception("Tina chat error")
         raise HTTPException(status_code=500, detail="Tina is unavailable right now")
+
+
+class TinaReportRequest(BaseModel):
+    """A Tina (AI) reply the user flagged — Google Play AI-generated content policy."""
+    message: str = Field(..., min_length=1, max_length=4000)  # the reported reply text
+    reason: str = Field(..., min_length=1, max_length=32)     # offensive | harmful | inaccurate | other
+    details: Optional[str] = Field(None, max_length=1000)
+    source: Optional[str] = Field(None, max_length=16)        # chat | call | global
+
+
+@api_router.post("/tina/report")
+async def tina_report_endpoint(req: TinaReportRequest, request: Request):
+    """Report an AI-generated Tina reply (long-press / flag icon in the Tina
+    chats, flag button in a voice call). Stored in Mongo `tina_ai_reports`
+    with status "pending" for review. The reported text is never logged.
+
+    AUTH: the reporter is the session user. Rate-limited per user (20 / 10 min).
+    """
+    user_id = request.state.user_id
+    TINA_REPORT_LIMITER.check_or_raise(f"tina_report:{user_id}")
+    report = {
+        "report_id": f"tina_report_{uuid.uuid4().hex}",
+        "user_id": user_id,
+        "message": req.message,
+        "reason": req.reason.strip() or "other",
+        "details": (req.details or "").strip() or None,
+        "source": (req.source or "").strip() or None,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "status": "pending",
+    }
+    try:
+        await db.tina_ai_reports.insert_one(dict(report))
+    except Exception:
+        logger.exception("Tina report save error")
+        raise HTTPException(status_code=500, detail="Could not submit report")
+    logger.info(
+        "Tina reply reported: %s by %s (reason=%r, source=%r, %d chars)",
+        report["report_id"], user_id, report["reason"], report["source"], len(req.message),
+    )
+    return {"success": True}
 
 
 @api_router.get("/tina/greeting")
@@ -4181,6 +4320,9 @@ api_router.include_router(auth_router)
 # Include router after all routes are defined
 app.include_router(api_router)
 
+# Public legal & support pages live outside /api (the auth gate ignores them).
+app.include_router(legal_router)
+
 
 # Mount Socket.IO server
 socket_app = socketio.ASGIApp(sio, app)
@@ -4210,6 +4352,19 @@ app.add_middleware(
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+# httpx logs every request URL at INFO — including the Google Maps `key=`
+# query parameter (seen in production logs) — so only warnings and up.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+# Defence in depth: scrub keys / tokens from everything that reaches the root
+# handlers and from uvicorn's own loggers (the access log prints full request
+# paths incl. query strings, e.g. the TTS `?text=` or a legacy
+# `?session_token=`). See security_deps.redact_secrets.
+_log_redactor = RedactSecretsFilter()
+for _handler in logging.getLogger().handlers:
+    _handler.addFilter(_log_redactor)
+for _logger_name in ("uvicorn.access", "uvicorn.error"):
+    logging.getLogger(_logger_name).addFilter(_log_redactor)
 logger = logging.getLogger(__name__)
 
 
@@ -4241,6 +4396,10 @@ _MONGO_INDEXES = [
     ("tina_profiles", [("user_id", 1)], {}),
     ("user_pictures", [("user_id", 1)], {}),
     ("user_filters", [("user_id", 1)], {"unique": True}),
+    ("user_blocks", [("blocker_id", 1)], {}),
+    ("user_blocks", [("blocked_id", 1)], {}),
+    ("tina_ai_reports", [("user_id", 1)], {}),
+    ("account_deletion_requests", [("created_at", 1)], {}),
 ]
 
 
@@ -4257,6 +4416,39 @@ async def _ensure_indexes() -> None:
             logger.warning(
                 f"Index {coll}{[k for k, _ in keys]} not created: {type(exc).__name__}: {exc}"
             )
+
+
+# Free Supabase projects are paused after ~7 days without activity (it
+# happened once already). A tiny query every 12 h keeps the project awake.
+SUPABASE_KEEPALIVE_INTERVAL_SECONDS = 12 * 60 * 60
+_supabase_keepalive_task: Optional[asyncio.Task] = None
+
+
+def _supabase_keepalive_query() -> None:
+    from supabase_service import get_supabase_client
+    get_supabase_client().table("user_pictures").select("id").limit(1).execute()
+
+
+async def _supabase_keepalive_loop() -> None:
+    while True:
+        await asyncio.sleep(SUPABASE_KEEPALIVE_INTERVAL_SECONDS)
+        try:
+            await asyncio.wait_for(asyncio.to_thread(_supabase_keepalive_query), timeout=60)
+            logger.debug("Supabase keep-alive ping ok")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # best-effort: never let the loop die
+            logger.debug("Supabase keep-alive ping failed: %s", type(exc).__name__)
+
+
+def _start_supabase_keepalive() -> None:
+    """Start the keep-alive task — not without SUPABASE_URL, and never under pytest."""
+    global _supabase_keepalive_task
+    if not supabase.SUPABASE_URL or "pytest" in sys.modules:
+        return
+    if _supabase_keepalive_task is None or _supabase_keepalive_task.done():
+        _supabase_keepalive_task = asyncio.create_task(_supabase_keepalive_loop())
+        logger.info("Supabase keep-alive started (every %d h)", SUPABASE_KEEPALIVE_INTERVAL_SECONDS // 3600)
 
 
 @app.on_event("startup")
@@ -4303,7 +4495,15 @@ async def startup_event():
     except Exception as _e:
         logger.warning(f"Supabase bootstrap raised (non-fatal): {_e}")
 
+    _start_supabase_keepalive()
+
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
+    global _supabase_keepalive_task
+    task, _supabase_keepalive_task = _supabase_keepalive_task, None
+    if task is not None and not task.done():
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task
     client.close()

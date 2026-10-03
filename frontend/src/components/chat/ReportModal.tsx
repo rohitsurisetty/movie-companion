@@ -16,11 +16,18 @@ interface Props {
   userName: string;
   /** Resolves once the report is filed; rejects (Error.message = user-facing copy) on failure. */
   onReport: (reason: string, details?: string) => Promise<void>;
-  onUnmatchInstead: () => void;
+  /** Secondary "… instead" action on the intro step; hidden when omitted. */
+  onUnmatchInstead?: () => void;
+  /** Label of that secondary action (default "Unmatch instead"). */
+  secondaryActionLabel?: string;
+  /** Icon of that secondary action (default "heart-dislike-outline"). */
+  secondaryActionIcon?: keyof typeof Ionicons.glyphMap;
 }
 
 export const ReportModal: React.FC<Props> = ({
   visible, onClose, userName, onReport, onUnmatchInstead,
+  secondaryActionLabel = 'Unmatch instead',
+  secondaryActionIcon = 'heart-dislike-outline',
 }) => {
   const [step, setStep] = useState<'intro' | 'reasons' | 'details' | 'confirmation'>('intro');
   const [selectedReason, setSelectedReason] = useState<string | null>(null);
@@ -66,7 +73,7 @@ export const ReportModal: React.FC<Props> = ({
 
   const handleUnmatchInstead = () => {
     handleClose();
-    onUnmatchInstead();
+    onUnmatchInstead?.();
   };
 
   return (
@@ -102,20 +109,24 @@ export const ReportModal: React.FC<Props> = ({
                   </View>
                 </View>
 
-                <TouchableOpacity style={styles.unmatchOption} onPress={handleUnmatchInstead}>
-                  <Ionicons name="heart-dislike-outline" size={22} color={COLORS.textSecondary} />
-                  <View style={styles.unmatchOptionText}>
-                    <Text style={styles.unmatchOptionTitle}>{"Don't think they've broken our guidelines?"}</Text>
-                    <Text style={styles.unmatchOptionSubtitle}>Unmatch instead</Text>
-                  </View>
-                </TouchableOpacity>
+                {onUnmatchInstead ? (
+                  <TouchableOpacity style={styles.unmatchOption} onPress={handleUnmatchInstead}>
+                    <Ionicons name={secondaryActionIcon} size={22} color={COLORS.textSecondary} />
+                    <View style={styles.unmatchOptionText}>
+                      <Text style={styles.unmatchOptionTitle}>{"Don't think they've broken our guidelines?"}</Text>
+                      <Text style={styles.unmatchOptionSubtitle}>{secondaryActionLabel}</Text>
+                    </View>
+                  </TouchableOpacity>
+                ) : null}
 
                 <TouchableOpacity style={styles.startBtn} onPress={handleStartReport}>
                   <Text style={styles.startBtnText}>Start report</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.unmatchBtn} onPress={handleUnmatchInstead}>
-                  <Text style={styles.unmatchBtnText}>Unmatch instead</Text>
-                </TouchableOpacity>
+                {onUnmatchInstead ? (
+                  <TouchableOpacity style={styles.unmatchBtn} onPress={handleUnmatchInstead}>
+                    <Text style={styles.unmatchBtnText}>{secondaryActionLabel}</Text>
+                  </TouchableOpacity>
+                ) : null}
               </>
             )}
 

@@ -752,6 +752,37 @@ def test_google_sign_in_creates_then_reuses_user(env, monkeypatch):
     assert env.logged[0]["login_method"] == "google"
 
 
+def test_google_sign_in_records_accepted_terms_version(env, monkeypatch):
+    async def fake_verify(token):
+        return {"sub": "google-sub-terms", "email": "terms@example.com", "name": "Terms Fan",
+                "picture": None, "email_verified": True}
+
+    monkeypatch.setattr(auth_routes, "verify_google_id_token", fake_verify)
+    c = env.client
+
+    r = c.post("/api/auth/google", json={"id_token": "good-token", "accepted_terms_version": "2026-10-03"})
+    assert r.status_code == 200, r.text
+    assert "terms_version" not in r.json()  # stored on the user, not echoed
+    user = env.db.users.docs[0]
+    assert user["terms_version"] == "2026-10-03"
+    accepted_at = user["terms_accepted_at"]
+    assert datetime.fromisoformat(accepted_at).tzinfo is not None
+
+    # The same version again, or no version at all, rewrites nothing.
+    assert c.post("/api/auth/google", json={"id_token": "good-token",
+                                            "accepted_terms_version": "2026-10-03"}).status_code == 200
+    assert c.post("/api/auth/google", json={"id_token": "good-token"}).status_code == 200
+    assert (env.db.users.docs[0]["terms_version"], env.db.users.docs[0]["terms_accepted_at"]) == (
+        "2026-10-03", accepted_at)
+
+    # A newer version is recorded.
+    assert c.post("/api/auth/google", json={"id_token": "good-token",
+                                            "accepted_terms_version": "2027-01-01"}).status_code == 200
+    assert env.db.users.docs[0]["terms_version"] == "2027-01-01"
+    assert c.post("/api/auth/google", json={"id_token": "good-token",
+                                            "accepted_terms_version": "x" * 33}).status_code == 422
+
+
 def test_google_links_existing_email_account_and_respects_bans(env, monkeypatch):
     env.db.users.docs.append({"_id": "legacy", "user_id": "user_cccccccccccc", "name": "",
                               "email": "fan@example.com", "picture": "",

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput,
-  FlatList, Platform,
+  FlatList, Platform, Pressable, Keyboard,
   Animated, Easing, ActivityIndicator,
 } from 'react-native';
 // KeyboardEvents from react-native-keyboard-controller fires reliably on
@@ -22,6 +22,7 @@ import * as Linking from 'expo-linking';
 import { useTina, UserProfileData, Message } from '../context/TinaContext';
 import TinaAvatar from './TinaAvatar';
 import { apiUrl } from '../store';
+import { reportTinaReply } from '../utils/tinaReport';
 
 const RATE_LIMIT_MSG = 'Tina needs a moment — try again shortly.';
 const CHAT_ERROR_MSG = 'Hmm, I got a bit distracted! Could you say that again? 😅';
@@ -757,6 +758,11 @@ export default function GlobalTinaChatScreen({
     const translateY = anim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] });
     const isPlayingThis = playingMessageId === item.id;
     const isLoadingAudio = ttsLoadingId === item.id;
+    // Tina's replies can be reported (Play AI-content policy) — not the user's
+    // own bubbles, nor the app's local error bubbles (not AI-generated). The
+    // typing indicator lives in the list footer.
+    const canReport =
+      !item.isUser && !!item.text && item.text !== CHAT_ERROR_MSG && item.text !== RATE_LIMIT_MSG;
 
     return (
       <Animated.View
@@ -769,11 +775,18 @@ export default function GlobalTinaChatScreen({
         {!item.isUser && (
           <TinaAvatar size={32} style={styles.avatar} />
         )}
-        <View
+        <Pressable
           style={[
             styles.messageBubble,
             item.isUser ? styles.userBubble : styles.tinaBubble,
           ]}
+          onLongPress={canReport ? () => reportTinaReply(item.text, 'global') : undefined}
+          // A tap still closes the keyboard, as it did before this was pressable.
+          onPress={canReport ? () => Keyboard.dismiss() : undefined}
+          disabled={!canReport}
+          // Not a single accessibility element, so the Play button stays
+          // separately focusable; the flag button is the accessible report path.
+          accessible={false}
         >
           <Text style={[styles.messageText, item.isUser && styles.userMessageText]}>
             {item.text}
@@ -795,7 +808,18 @@ export default function GlobalTinaChatScreen({
               </Text>
             </TouchableOpacity>
           )}
-        </View>
+        </Pressable>
+        {canReport && (
+          <TouchableOpacity
+            style={styles.reportReplyBtn}
+            onPress={() => reportTinaReply(item.text, 'global')}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityRole="button"
+            accessibilityLabel="Report Tina's reply"
+          >
+            <Ionicons name="flag-outline" size={14} color="rgba(255,255,255,0.3)" />
+          </TouchableOpacity>
+        )}
       </Animated.View>
     );
   };
@@ -1176,6 +1200,11 @@ const styles = StyleSheet.create({
     color: '#FF6B6B',
     fontSize: 12,
     fontWeight: '600',
+  },
+  // Small "report this reply" flag beside each Tina bubble
+  reportReplyBtn: {
+    marginLeft: 6,
+    marginBottom: 6,
   },
   voiceErrorContainer: {
     flexDirection: 'row',

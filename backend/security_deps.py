@@ -16,6 +16,8 @@ Centralizes:
   • `INSECURE_DEV_AUTH` — opt-in flag that, when set to "true", restores the
     old "OTP in response body + universal 123456" behavior for QA. OFF by
     default so production deploys are safe.
+  • `redact_secrets` / `RedactSecretsFilter` — scrub API keys and tokens
+    (`?key=`, `session_token=`, Bearer, sk-/AIza keys, JWTs) out of log lines.
 
 NOTE: The auth model here is the existing session_token approach (a server-
 generated opaque string stored in Mongo). NOT switching to JWT/Bearer-only
@@ -25,7 +27,9 @@ to minimize surface change. Cookie path stays supported alongside the
 
 from __future__ import annotations
 
+import logging
 import os
+import re
 import time
 from collections import defaultdict, deque
 from datetime import datetime, timezone
@@ -274,3 +278,69 @@ def client_ip(request: Request) -> str:
             n = 1
         return hops[-n] if len(hops) >= n else hops[0]
     return request.client.host if request.client else "unknown"
+
+
+# ----------------------------------------------------------------------
+# Log redaction
+# ----------------------------------------------------------------------
+
+# Query parameters whose values never belong in logs: API keys (the Google
+# Maps `key=`), session / OAuth tokens, OTP codes, and the TTS `text=` of
+# /tina/voice/speak-stream (Tina's reply to the user - conversation content).
+_SECRET_PARAM_RE = re.compile(
+    r"(?i)([?&;](?:key|api_?key|authkey|access_token|refresh_token|id_token|session_token"
+    r"|token|otp|code|text)=)[^&\s\"'#]+"
+)
+_BEARER_RE = re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9\-._~+/]{8,}=*")
+# OpenAI / ElevenLabs style keys (also OpenAI's own partially-masked echo in
+# 401 errors), Google API keys and JWTs (e.g. a Supabase service key).
+_KEY_LITERAL_RE = re.compile(
+    r"\b(?:sk[-_][A-Za-z0-9_\-*]{6,}|AIza[0-9A-Za-z_\-]{20,}"
+    r"|eyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,})"
+)
+_REDACTED = "[REDACTED]"
+
+
+def redact_secrets(text: Any) -> str:
+    """`text` as a string with API keys / tokens replaced by [REDACTED]."""
+    out = str(text)
+    if not out:
+        return out
+    out = _SECRET_PARAM_RE.sub(lambda m: m.group(1) + _REDACTED, out)
+    out = _BEARER_RE.sub(lambda m: m.group(1) + _REDACTED, out)
+    return _KEY_LITERAL_RE.sub(_REDACTED, out)
+
+
+def _redact_log_arg(arg: Any) -> Any:
+    if arg is None or isinstance(arg, (bool, int, float)):
+        return arg
+    if isinstance(arg, str):
+        return redact_secrets(arg)
+    text = str(arg)  # e.g. an httpx.URL
+    cleaned = redact_secrets(text)
+    return arg if cleaned == text else cleaned
+
+
+class RedactSecretsFilter(logging.Filter):
+    """Logging filter that scrubs secrets from a record's message, its
+    %-style args (each arg separately, so formatters that unpack
+    `record.args` - uvicorn's access log - keep working) and its traceback.
+    Attach it to handlers (covers every logger that propagates to them) or
+    to a logger. Never drops a record and never raises."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            if record.args:
+                if isinstance(record.args, tuple):
+                    record.args = tuple(_redact_log_arg(a) for a in record.args)
+                elif isinstance(record.args, dict):
+                    record.args = {k: _redact_log_arg(v) for k, v in record.args.items()}
+            elif isinstance(record.msg, str):
+                record.msg = redact_secrets(record.msg)
+            if record.exc_info and not record.exc_text:
+                # Exception messages can embed request URLs; pre-render the
+                # traceback (Formatter.format reuses exc_text) and scrub it.
+                record.exc_text = redact_secrets(logging.Formatter().formatException(record.exc_info))
+        except Exception:  # pragma: no cover - logging must never break the app
+            pass
+        return True

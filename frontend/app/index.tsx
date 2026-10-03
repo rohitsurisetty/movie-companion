@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, TextInput,
-  ActivityIndicator, Alert, BackHandler, Image,
+  ActivityIndicator, Alert, BackHandler, Image, AccessibilityInfo,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -10,6 +10,7 @@ import { useRouter } from 'expo-router';
 // keyboard-controller one, which reads native WindowInsets.
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COLORS, SPACING, BORDER_RADIUS } from '../src/theme';
 import { useTina } from '../src/context/TinaContext';
 import {
@@ -17,6 +18,7 @@ import {
   isOnboardingComplete, setOnboardingComplete,
   getProfile, saveProfile, getUserId,
 } from '../src/store';
+import { TERMS_VERSION, TERMS_ACCEPTED_KEY, LEGAL_URLS, openLegal } from '../src/legal';
 
 type AuthMode = 'main' | 'phone' | 'phone-otp';
 
@@ -83,6 +85,11 @@ export default function AuthScreen() {
   const [otp, setOtp] = useState('');
   const [isNewUser, setIsNewUser] = useState(false);
   const [resendIn, setResendIn] = useState(0);
+  // Google Play policy: the user must confirm they're 18+ and accept the
+  // Terms / Community Guidelines / Privacy Policy before any sign-in request.
+  // Pre-ticked when this device already accepted the current TERMS_VERSION.
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [showTermsHint, setShowTermsHint] = useState(false);
 
   const hasResetTina = useRef(false);
   // Set once we've handed off to another route so the `finally` blocks below
@@ -92,6 +99,9 @@ export default function AuthScreen() {
   const lastSentToRef = useRef<string | null>(null);
 
   useEffect(() => {
+    AsyncStorage.getItem(TERMS_ACCEPTED_KEY)
+      .then((v) => { if (v === TERMS_VERSION) setTermsAccepted(true); })
+      .catch(() => undefined);
     checkExistingAuth();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -232,7 +242,29 @@ export default function AuthScreen() {
     );
   };
 
+  const toggleTerms = () => {
+    const next = !termsAccepted;
+    setTermsAccepted(next);
+    if (next) setShowTermsHint(false);
+    // Remembered on this device so the box is pre-ticked on the next login.
+    (next
+      ? AsyncStorage.setItem(TERMS_ACCEPTED_KEY, TERMS_VERSION)
+      : AsyncStorage.removeItem(TERMS_ACCEPTED_KEY)
+    ).catch(() => undefined);
+  };
+
+  // Every sign-in path checks this first: without consent nothing is sent.
+  // (The gated buttons only *look* disabled so a tap can explain why.)
+  const requireTerms = (): boolean => {
+    if (termsAccepted) return true;
+    setShowTermsHint(true);
+    setAuthMode('main'); // the consent row lives on the main screen
+    AccessibilityInfo.announceForAccessibility('Please accept the Terms to continue');
+    return false;
+  };
+
   const handleGoogleAuth = async () => {
+    if (!requireTerms()) return;
     const mod = loadGoogleSignin();
     if (!mod) {
       Alert.alert(
@@ -255,7 +287,7 @@ export default function AuthScreen() {
       const resp = await fetch(apiUrl('/api/auth/google'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id_token: idToken }),
+        body: JSON.stringify({ id_token: idToken, accepted_terms_version: TERMS_VERSION }),
       });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok) {
@@ -284,6 +316,7 @@ export default function AuthScreen() {
 
   // Send OTP for phone
   const handleSendPhoneOTP = async () => {
+    if (!requireTerms()) return;
     const e164 = toE164(phone);
     if (!e164) {
       Alert.alert('Error', 'Please enter a valid 10-digit mobile number');
@@ -335,6 +368,7 @@ export default function AuthScreen() {
 
   // Verify OTP and login/signup
   const handleVerifyOTP = async () => {
+    if (!requireTerms()) return;
     const code = otp.trim();
     if (!/^\d{6}$/.test(code)) {
       Alert.alert('Error', `Please enter the ${OTP_LENGTH}-digit code`);
@@ -357,6 +391,7 @@ export default function AuthScreen() {
           type: 'phone',
           identifier: e164,
           otp: code,
+          accepted_terms_version: TERMS_VERSION,
         }),
       });
       const data = await resp.json().catch(() => ({}));
@@ -427,9 +462,63 @@ export default function AuthScreen() {
           </View>
 
           <View style={styles.buttons}>
+            {/* Required consent — the sign-in buttons stay disabled until ticked */}
+            <View style={styles.consentBlock}>
+              <View style={styles.consentRow}>
+                <TouchableOpacity
+                  onPress={toggleTerms}
+                  style={styles.consentCheckbox}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: termsAccepted }}
+                  accessibilityLabel="I'm 18 or older and agree to the Terms of Use, Community Guidelines and Privacy Policy"
+                  testID="terms-checkbox"
+                >
+                  <Ionicons
+                    name={termsAccepted ? 'checkbox' : 'square-outline'}
+                    size={22}
+                    color={termsAccepted ? COLORS.primary : COLORS.textSecondary}
+                  />
+                </TouchableOpacity>
+                <Text style={styles.consentText} onPress={toggleTerms}>
+                  I&apos;m 18 or older and agree to the{' '}
+                  <Text
+                    style={styles.consentLink}
+                    onPress={() => openLegal(LEGAL_URLS.terms)}
+                    accessibilityRole="link"
+                  >
+                    Terms of Use
+                  </Text>
+                  ,{' '}
+                  <Text
+                    style={styles.consentLink}
+                    onPress={() => openLegal(LEGAL_URLS.guidelines)}
+                    accessibilityRole="link"
+                  >
+                    Community Guidelines
+                  </Text>
+                  {' '}and{' '}
+                  <Text
+                    style={styles.consentLink}
+                    onPress={() => openLegal(LEGAL_URLS.privacy)}
+                    accessibilityRole="link"
+                  >
+                    Privacy Policy
+                  </Text>
+                </Text>
+              </View>
+              {showTermsHint && !termsAccepted ? (
+                <Text style={styles.termsHint}>Please accept the Terms to continue</Text>
+              ) : null}
+            </View>
+
             <TouchableOpacity
-              style={styles.primaryBtn}
-              onPress={() => { resetForm(); setAuthMode('phone'); }}
+              style={[styles.primaryBtn, !termsAccepted && styles.btnDisabled]}
+              onPress={() => {
+                if (!requireTerms()) return;
+                resetForm();
+                setAuthMode('phone');
+              }}
               testID="phone-auth-btn"
               activeOpacity={0.8}
             >
@@ -438,7 +527,7 @@ export default function AuthScreen() {
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={styles.googleBtn}
+              style={[styles.googleBtn, !termsAccepted && styles.btnDisabled]}
               onPress={handleGoogleAuth}
               testID="google-auth-btn"
               activeOpacity={0.8}
@@ -491,7 +580,7 @@ export default function AuthScreen() {
             </View>
 
             <TouchableOpacity
-              style={[styles.primaryBtn, !phoneValid && styles.btnDisabled]}
+              style={[styles.primaryBtn, (!phoneValid || !termsAccepted) && styles.btnDisabled]}
               onPress={handleSendPhoneOTP}
               disabled={!phoneValid}
             >
@@ -537,7 +626,7 @@ export default function AuthScreen() {
             />
 
             <TouchableOpacity
-              style={[styles.primaryBtn, !otpValid && styles.btnDisabled]}
+              style={[styles.primaryBtn, (!otpValid || !termsAccepted) && styles.btnDisabled]}
               onPress={handleVerifyOTP}
               disabled={!otpValid}
             >
@@ -655,6 +744,34 @@ const styles = StyleSheet.create({
   },
   btnDisabled: {
     opacity: 0.5,
+  },
+  // Consent row (18+ / Terms / Community Guidelines / Privacy Policy)
+  consentBlock: {
+    gap: SPACING.xs,
+  },
+  consentRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: SPACING.s,
+  },
+  consentCheckbox: {
+    paddingTop: 1,
+  },
+  consentText: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 20,
+    color: COLORS.textSecondary,
+  },
+  consentLink: {
+    color: COLORS.text,
+    fontWeight: '600',
+    textDecorationLine: 'underline',
+  },
+  termsHint: {
+    fontSize: 13,
+    color: COLORS.error,
+    marginLeft: 22 + SPACING.s, // aligned with the consent text
   },
   // Form styles
   formContainer: {

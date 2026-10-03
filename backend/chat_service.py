@@ -5,7 +5,7 @@ Handles:
 - Messages (send, receive, list)
 - Message requests (accept, decline)
 - Conversations management
-- Unmatch & Report
+- Unmatch, Block & Report
 - Meeting verification
 - AI ice breakers & reply suggestions
 
@@ -234,6 +234,7 @@ async def get_conversations(user_id: str) -> List[Dict]:
         user as a read-only entry so they can still review history,
         report, or mark "did you meet?"). Conversations the user themself
         unmatched are NOT returned here.
+    Blocked conversations are never returned, to either participant.
     """
     # 1. Active conversations
     active_conversations = await _db.chat_conversations.find(
@@ -579,13 +580,19 @@ async def decline_message_request(user_id: str, conversation_id: str) -> bool:
 
 async def unmatch_user(user_id: str, other_user_id: str, reason: Optional[str] = None) -> bool:
     """Unmatch with a user. Only touches a conversation both users are
-    participants of; returns False if there is none."""
+    participants of; returns False if there is none or it is blocked (a
+    block is final — unmatching must not turn it back into a visible
+    "unmatched" conversation)."""
     if not user_id or not other_user_id:
         return False
     conv_id = get_conversation_id(user_id, other_user_id)
 
     result = await _db.chat_conversations.update_one(
-        {"conversation_id": conv_id, "participants": {"$all": [user_id, other_user_id]}},
+        {
+            "conversation_id": conv_id,
+            "participants": {"$all": [user_id, other_user_id]},
+            "status": {"$ne": "blocked"},
+        },
         {"$set": {
             "status": "unmatched",
             "unmatched_by": user_id,
@@ -607,6 +614,72 @@ async def unmatch_user(user_id: str, other_user_id: str, reason: Optional[str] =
             logger.debug(f"audit (unmatch) skipped: {_e}")
 
     return result.modified_count > 0
+
+
+async def block_user(user_id: str, other_user_id: str, reason: Optional[str] = None) -> bool:
+    """`user_id` blocks `other_user_id`. Raises ValueError for an empty id or
+    a self-block.
+
+    The pair's conversation is upserted with status "blocked" (created with
+    the same base fields as get_or_create_conversation when they never
+    chatted), so it can't be reopened: send_message refuses closed
+    conversations in both directions, accept/decline only act on "pending"
+    and unmatch_user skips blocked ones. A pending message request between
+    them is withdrawn, and the block is recorded in `user_blocks`
+    (matchmaking excludes both directions)."""
+    user_id = (user_id or "").strip()
+    other_user_id = (other_user_id or "").strip()
+    if not user_id or not other_user_id:
+        raise ValueError("A user to block is required")
+    if user_id == other_user_id:
+        raise ValueError("Cannot block yourself")
+    reason = (reason or "").strip() or None
+    now = datetime.utcnow().isoformat()
+    conv_id = get_conversation_id(user_id, other_user_id)
+
+    await _db.chat_conversations.update_one(
+        {"conversation_id": conv_id},
+        {
+            "$set": {
+                "status": "blocked",
+                "blocked_by": user_id,
+                "block_reason": reason,
+                "blocked_at": now,
+            },
+            "$setOnInsert": {
+                "participants": [user_id, other_user_id],
+                "created_at": now,
+                "initiated_by": user_id,
+                "last_message": None,
+                "last_message_at": None,
+                "unread_count": {user_id: 0, other_user_id: 0},
+                "meeting_status": None,
+                "verification_status": None,
+            },
+        },
+        upsert=True,
+    )
+    # A pending request between them must not linger in either inbox.
+    await _db.chat_requests.delete_many({"conversation_id": conv_id})
+    await _db.user_blocks.update_one(
+        {"blocker_id": user_id, "blocked_id": other_user_id},
+        {"$set": {"reason": reason}, "$setOnInsert": {"created_at": now}},
+        upsert=True,
+    )
+    logger.info(f"User {user_id} blocked {other_user_id}")
+
+    # Audit log (best-effort) — reuses the unmatch_events table.
+    if supa_audit is not None:
+        try:
+            await supa_audit.log_unmatch_event(
+                user_id=user_id,
+                other_user_id=other_user_id,
+                conversation_id=conv_id,
+                reason=f"blocked: {reason}" if reason else "blocked",
+            )
+        except Exception as _e:
+            logger.debug(f"audit (block) skipped: {_e}")
+    return True
 
 
 async def report_user(
@@ -1103,6 +1176,10 @@ async def get_unmatched_conversation(user_id: str, conversation_id: str) -> Opti
     # Verify user is a participant
     if not user_id or user_id not in conv.get("participants", []):
         return None
+    # Blocked conversations are closed to both sides (and must not reveal
+    # who blocked whom).
+    if conv.get("status") == "blocked":
+        return None
 
     other_user_id = next((p for p in conv["participants"] if p != user_id), None)
     if other_user_id is None:
@@ -1188,5 +1265,9 @@ async def can_user_view_conversation(user_id: str, conversation_id: str) -> Dict
         else:
             # User was unmatched BY the other person - read-only access
             return {"can_view": True, "is_read_only": True, "reason": "User has unmatched with you"}
-    
+
+    if status == "blocked":
+        # Same answer for both sides: never reveal who blocked whom.
+        return {"can_view": False, "is_read_only": False, "reason": "Conversation unavailable"}
+
     return {"can_view": False, "is_read_only": False, "reason": "Unknown status"}

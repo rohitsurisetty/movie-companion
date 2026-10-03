@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import {
   View, Text, StyleSheet, TouchableOpacity, Image, ScrollView,
   ActivityIndicator, RefreshControl,
-  Modal,
+  Modal, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -12,6 +12,7 @@ import { useAppMode } from '../../src/components/SharedHeader';
 import { apiUrl, getUserId } from '../../src/store';
 import { formatLocationForPrivacy } from '../../src/utils/locationFormatter';
 import { PremiumProfileView, normalizePictures } from '../../src/components/PremiumProfileView';
+import { ReportModal } from '../../src/components/chat/ReportModal';
 
 const TILE_GAP = 12;
 
@@ -20,6 +21,12 @@ const matchesErrorMessage = (status?: number) =>
   status === 429
     ? 'Too many requests. Please try again shortly.'
     : "We couldn't load your matches. Check your connection and try again.";
+
+// Friendly copy for a failed report / block request (429 = rate limited).
+const safetyActionErrorMessage = (status?: number) =>
+  status === 429
+    ? 'Too many requests. Please try again shortly.'
+    : 'Something went wrong. Check your connection and try again.';
 
 const COLORS = {
   primary: '#E50914',
@@ -499,6 +506,99 @@ export default function FeedScreen() {
     setSelectedProfile(null);
   };
 
+  // ============ REPORT / BLOCK (from the profile's "more" button) ============
+  const [showReportModal, setShowReportModal] = useState(false);
+  // Profile being reported. Kept after the sheet closes so its title doesn't
+  // change while it animates out; replaced when the next report starts.
+  const [reportTarget, setReportTarget] = useState<MatchProfile | null>(null);
+  const reportFiledRef = useRef(false);
+
+  // A reported / blocked profile leaves the grid right away (the backend also
+  // drops it from future /api/matches results) and its profile sheet closes.
+  const removeFromFeed = (userId: string) => {
+    setMatches((prev) => prev.filter((m) => m.user_id !== userId));
+    closeProfile();
+  };
+
+  const blockProfile = async (profile: MatchProfile) => {
+    let failure: string | null = null;
+    try {
+      const response = await fetch(apiUrl('/api/user/block'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ blocked_user_id: profile.user_id }),
+      });
+      if (!response.ok) failure = safetyActionErrorMessage(response.status);
+    } catch {
+      failure = safetyActionErrorMessage();
+    }
+    if (failure) {
+      Alert.alert('Could not block', failure);
+      return;
+    }
+    removeFromFeed(profile.user_id);
+  };
+
+  const confirmBlock = (profile: MatchProfile) => {
+    Alert.alert(
+      `Block ${profile.name}?`,
+      "They won't see your profile or be able to message you. They won't be told.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Block', style: 'destructive', onPress: () => { void blockProfile(profile); } },
+      ],
+    );
+  };
+
+  const startReport = (profile: MatchProfile) => {
+    reportFiledRef.current = false;
+    setReportTarget(profile);
+    setShowReportModal(true);
+  };
+
+  const handleMoreActions = (profile: MatchProfile) => {
+    Alert.alert(profile.name, undefined, [
+      { text: 'Report', onPress: () => startReport(profile) },
+      { text: 'Block', style: 'destructive', onPress: () => confirmBlock(profile) },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
+  // Resolves once the report is filed (ReportModal then shows "Thank you");
+  // rejects with user-facing copy so the modal shows it and stays open.
+  // Works without a conversation, so any feed profile can be reported.
+  const handleReport = async (reason: string, details?: string) => {
+    const target = reportTarget;
+    if (!target) throw new Error(safetyActionErrorMessage());
+    const reporterId = await getUserId();
+    let response: Response;
+    try {
+      response = await fetch(apiUrl('/api/chat/report'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reporter_id: reporterId,
+          reported_id: target.user_id,
+          reason,
+          details: details || null,
+        }),
+      });
+    } catch {
+      throw new Error(safetyActionErrorMessage());
+    }
+    if (!response.ok) throw new Error(safetyActionErrorMessage(response.status));
+    reportFiledRef.current = true;
+  };
+
+  // After a filed report, closing the sheet also removes the profile.
+  const handleReportClose = () => {
+    setShowReportModal(false);
+    if (reportFiledRef.current && reportTarget) {
+      reportFiledRef.current = false;
+      removeFromFeed(reportTarget.user_id);
+    }
+  };
+
   const [sendingMessage, setSendingMessage] = useState(false);
   const [sentRequestUserIds, setSentRequestUserIds] = useState<Set<string>>(new Set());
 
@@ -690,8 +790,21 @@ export default function FeedScreen() {
               onSendMessage={handleSendMessage}
               hasAlreadySentRequest={hasAlreadySentRequest(selectedProfile.user_id)}
               isSendingMessage={sendingMessage}
+              onMoreActions={() => handleMoreActions(selectedProfile)}
             />
           )}
+          {/* Inside the profile Modal's subtree so it stacks above the profile */}
+          <ReportModal
+            visible={showReportModal}
+            onClose={handleReportClose}
+            userName={reportTarget?.name || 'this user'}
+            onReport={handleReport}
+            secondaryActionLabel="Block instead"
+            secondaryActionIcon="ban-outline"
+            onUnmatchInstead={() => {
+              if (reportTarget) confirmBlock(reportTarget);
+            }}
+          />
           </View>
         </Modal>
       </SafeAreaView>

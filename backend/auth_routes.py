@@ -8,7 +8,10 @@ The auth_gate middleware treats /api/auth/* as public, so /auth/me and
 (Google OAuth clients, MSG91 / Twilio, TEST_OTP_NUMBERS) are in the
 auth_providers module docstring.
 
-Both logins return
+Both logins accept an optional `accepted_terms_version` (the Terms /
+Privacy version the user agreed to on the login screen); when it differs from
+the stored one it is recorded on the user as `terms_version` +
+`terms_accepted_at`. Both return
     {success, session_token, user_id, is_new_user, onboarding_complete,
      name, email, phone, picture}
 """
@@ -19,6 +22,7 @@ import asyncio
 import hmac
 import logging
 import re
+from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, Optional, Union
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Response
@@ -109,6 +113,8 @@ async def _otp_store() -> OTPStore:
 
 class GoogleLoginRequest(BaseModel):
     id_token: str = Field(..., min_length=1, max_length=8192)
+    # Version of the Terms / Privacy Policy accepted on the login screen.
+    accepted_terms_version: Optional[str] = Field(None, max_length=32)
 
 
 class SendPhoneOTPRequest(BaseModel):
@@ -119,6 +125,8 @@ class VerifyOTPRequest(BaseModel):
     type: str = Field("phone", max_length=16)
     identifier: str = Field(..., min_length=1, max_length=32)
     otp: Union[str, int]
+    # Version of the Terms / Privacy Policy accepted on the login screen.
+    accepted_terms_version: Optional[str] = Field(None, max_length=32)
 
 
 # ----------------------------------------------------------------------
@@ -144,6 +152,21 @@ async def _notify_new_user(hook: Callable[[Dict[str, Any]], Awaitable[Any]], use
         logger.warning("on_new_user hook failed: %s", type(exc).__name__)
 
 
+async def _record_terms_acceptance(db, user: Dict[str, Any], version: Optional[str]) -> None:  # noqa: ANN001
+    """Store the accepted Terms version (+ UTC timestamp) on the user when
+    it is new for them; a repeat login with the same version writes nothing."""
+    version = (version or "").strip()
+    if not version or user.get("terms_version") == version:
+        return
+    accepted_at = datetime.now(timezone.utc).isoformat()
+    await db.users.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {"terms_version": version, "terms_accepted_at": accepted_at}},
+    )
+    user["terms_version"] = version
+    user["terms_accepted_at"] = accepted_at
+
+
 async def _complete_login(
     db,  # noqa: ANN001
     user: Dict[str, Any],
@@ -151,10 +174,12 @@ async def _complete_login(
     background_tasks: BackgroundTasks,
     *,
     method: str,
+    accepted_terms_version: Optional[str] = None,
 ) -> Dict[str, Any]:
     if user.get("status") == "banned":
         raise HTTPException(status_code=403, detail="Account suspended")
     uid = user["user_id"]
+    await _record_terms_acceptance(db, user, accepted_terms_version)
     session = await create_session(db, uid)
     onboarding_complete = await is_onboarding_complete(db, uid)
 
@@ -204,7 +229,10 @@ async def login_with_google(req: GoogleLoginRequest, request: Request, backgroun
         raise HTTPException(status_code=401, detail="Google sign-in failed")
     db = _require_db()
     user, is_new_user = await upsert_user_from_google(db, info)
-    return await _complete_login(db, user, is_new_user, background_tasks, method="google")
+    return await _complete_login(
+        db, user, is_new_user, background_tasks,
+        method="google", accepted_terms_version=req.accepted_terms_version,
+    )
 
 
 # ----------------------------------------------------------------------
@@ -285,7 +313,10 @@ async def verify_otp(req: VerifyOTPRequest, request: Request, background_tasks: 
 
     db = _require_db()
     user, is_new_user = await upsert_user_from_phone(db, phone)
-    return await _complete_login(db, user, is_new_user, background_tasks, method="phone")
+    return await _complete_login(
+        db, user, is_new_user, background_tasks,
+        method="phone", accepted_terms_version=req.accepted_terms_version,
+    )
 
 
 # ----------------------------------------------------------------------

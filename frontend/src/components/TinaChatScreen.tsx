@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Image, TextInput,
-  FlatList, Platform,
+  FlatList, Platform, Pressable,
   ScrollView, Animated, Easing, ActivityIndicator,
 } from 'react-native';
 // Use react-native-keyboard-controller's KeyboardAvoidingView — the RN one
@@ -13,6 +13,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons';
 import { ProfileData } from '../types';
 import { apiUrl } from '../store';
+import { reportTinaReply } from '../utils/tinaReport';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Tina avatar - bundled app logo (no hotlinked stock photo of a real person)
@@ -853,6 +854,10 @@ export default function TinaChatScreen({
     const anim = getMessageAnimation(item.id);
     const scale = anim.interpolate({ inputRange: [0, 1], outputRange: [0.8, 1] });
     const opacity = anim.interpolate({ inputRange: [0, 1], outputRange: [0, 1] });
+    // Tina's replies can be reported (Play AI-content policy). Never the
+    // user's own bubbles; typing / error placeholders are rendered in the list
+    // footer, not in `messages`.
+    const canReport = !item.isUser && !!item.text;
     
     return (
       <Animated.View 
@@ -865,11 +870,32 @@ export default function TinaChatScreen({
         {!item.isUser && (
           <Image source={TINA_AVATAR} style={styles.msgAvatar} />
         )}
-        <View style={[styles.bubble, item.isUser ? styles.userBubble : styles.tinaBubble]}>
-          <Text style={[styles.bubbleText, item.isUser && styles.userBubbleText]}>
-            {item.text}
-          </Text>
-        </View>
+        {canReport ? (
+          <Pressable
+            style={[styles.bubble, styles.tinaBubble]}
+            onLongPress={() => reportTinaReply(item.text, 'chat')}
+            accessibilityHint="Long-press to report this reply"
+          >
+            <Text style={styles.bubbleText}>{item.text}</Text>
+          </Pressable>
+        ) : (
+          <View style={[styles.bubble, item.isUser ? styles.userBubble : styles.tinaBubble]}>
+            <Text style={[styles.bubbleText, item.isUser && styles.userBubbleText]}>
+              {item.text}
+            </Text>
+          </View>
+        )}
+        {canReport && (
+          <TouchableOpacity
+            style={styles.reportReplyBtn}
+            onPress={() => reportTinaReply(item.text, 'chat')}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityRole="button"
+            accessibilityLabel="Report Tina's reply"
+          >
+            <Ionicons name="flag-outline" size={14} color="rgba(255,255,255,0.3)" />
+          </TouchableOpacity>
+        )}
       </Animated.View>
     );
   };
@@ -1324,6 +1350,11 @@ const styles = StyleSheet.create({
   },
   userBubbleText: {
     color: '#FFFFFF',
+  },
+  // Small "report this reply" flag beside each Tina bubble
+  reportReplyBtn: {
+    marginLeft: 6,
+    marginBottom: 6,
   },
   // Failed-request bubble + Retry
   errorBubble: {

@@ -96,6 +96,7 @@ const ConversationChat: React.FC<Props> = ({
   const suggestionsReqRef = useRef(0);
   const reportedRef = useRef(false);
   const reportUnmatchFailedRef = useRef(false);
+  const blockingRef = useRef(false);
 
   const conversationId = conversation.conversation_id;
   const otherUser = conversation.other_user;
@@ -309,6 +310,54 @@ const ConversationChat: React.FC<Props> = ({
     if (!response.ok && response.status !== 404) throw new Error(actionErrorMessage(response.status));
     stopPolling();
     onBack();
+  };
+
+  // Block: the server closes this conversation for both sides, hides each
+  // user from the other's feed and stops all messaging between them.
+  // Rejects with user-facing copy (shown in an Alert by handleBlockPress).
+  const handleBlock = async () => {
+    let response: Response;
+    try {
+      response = await fetch(apiUrl('/api/user/block'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ blocked_user_id: otherUserId }),
+      });
+    } catch {
+      throw new Error(actionErrorMessage());
+    }
+    if (!response.ok) throw new Error(actionErrorMessage(response.status));
+    stopPolling();
+    onBack();
+  };
+
+  const handleBlockPress = () => {
+    setShowMenu(false);
+    const name = otherUserNameOverride || otherUser?.name || 'this user';
+    Alert.alert(
+      `Block ${name}?`,
+      "They won't see your profile or be able to message you. They won't be told.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Block',
+          style: 'destructive',
+          onPress: () => {
+            if (blockingRef.current) return;
+            blockingRef.current = true;
+            handleBlock()
+              .catch((e) => {
+                if (!mountedRef.current) return;
+                Alert.alert(
+                  'Could not block',
+                  e instanceof Error && e.message ? e.message : actionErrorMessage(),
+                );
+              })
+              .finally(() => { blockingRef.current = false; });
+          },
+        },
+      ],
+    );
   };
 
   // Resolves once the report is filed (ReportModal then shows "Thank you"),
@@ -646,6 +695,10 @@ const ConversationChat: React.FC<Props> = ({
                   <Text style={styles.menuItemText}>Did you meet?</Text>
                 </TouchableOpacity>
                 <View style={styles.menuDivider} />
+                <TouchableOpacity style={styles.menuItem} onPress={handleBlockPress}>
+                  <Ionicons name="ban-outline" size={22} color={COLORS.primary} />
+                  <Text style={[styles.menuItemText, { color: COLORS.primary }]}>Block</Text>
+                </TouchableOpacity>
                 <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); setShowReportModal(true); }}>
                   <Ionicons name="flag-outline" size={22} color={COLORS.primary} />
                   <Text style={[styles.menuItemText, { color: COLORS.primary }]}>Report</Text>
@@ -665,6 +718,10 @@ const ConversationChat: React.FC<Props> = ({
                 <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); setShowUnmatchModal(true); }}>
                   <Ionicons name="heart-dislike-outline" size={22} color={COLORS.warning} />
                   <Text style={[styles.menuItemText, { color: COLORS.warning }]}>Unmatch</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.menuItem} onPress={handleBlockPress}>
+                  <Ionicons name="ban-outline" size={22} color={COLORS.primary} />
+                  <Text style={[styles.menuItemText, { color: COLORS.primary }]}>Block</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); setShowReportModal(true); }}>
                   <Ionicons name="flag-outline" size={22} color={COLORS.primary} />

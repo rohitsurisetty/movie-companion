@@ -18,6 +18,7 @@ from datetime import datetime, timedelta
 
 from settings import settings
 from llm_client import llm_chat_json, llm_available, LLMError, LLMUnavailable
+from security_deps import redact_secrets
 from enums import OPTIONS, normalize as normalize_enum, normalize_list as normalize_enum_list, canonical_field
 
 logger = logging.getLogger(__name__)
@@ -1865,6 +1866,7 @@ async def build_exclusion_set(user_id: str) -> Set[str]:
     - the user themselves
     - people they share an unmatched / declined / blocked / deleted
       conversation with (incl. chats this user soft-deleted from history)
+    - people they blocked AND people who blocked them (`user_blocks`)
     - people they reported
     - banned accounts
     Uses `$in` queries only — never iterates the whole user base in Python.
@@ -1890,6 +1892,18 @@ async def build_exclusion_set(user_id: str) -> Set[str]:
                     excluded.add(pid)
     except Exception as exc:  # noqa: BLE001 - non-blocking
         logger.warning("[matchmaking] conversation exclusion lookup failed: %s", exc)
+
+    try:
+        blocks = await _db.user_blocks.find(
+            {"$or": [{"blocker_id": user_id}, {"blocked_id": user_id}]},
+            {"_id": 0, "blocker_id": 1, "blocked_id": 1},
+        ).to_list(length=None)
+        for block in blocks:
+            for pid in (block.get("blocker_id"), block.get("blocked_id")):
+                if pid and pid != user_id:
+                    excluded.add(pid)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[matchmaking] block exclusion lookup failed: %s", exc)
 
     try:
         reports = await _db.chat_reports.find(
@@ -2683,7 +2697,10 @@ Return ONLY a JSON object of this shape, with "matches" ordered from most to lea
         logger.info("[matchmaking] LLM not configured; using heuristic ranking")
         return shortlist + rest
     except LLMError as exc:
-        logger.warning("[matchmaking] AI ranking failed (%s); using heuristic ranking", str(exc)[:160])
+        # OpenAI's 401 text echoes part of the API key — scrub before logging.
+        logger.warning(
+            "[matchmaking] AI ranking failed (%s); using heuristic ranking", redact_secrets(exc)[:160]
+        )
         return shortlist + rest
     except Exception as exc:  # noqa: BLE001 - the feed must never break on the LLM
         logger.warning("[matchmaking] AI ranking error (%s); using heuristic ranking", type(exc).__name__)
@@ -2893,9 +2910,10 @@ async def get_matches_for_user(
        are dropped from cached results immediately.
     2. Candidate pool: real user_profiles whenever settings.mock_feed_only is
        False — the exclusion set (self, unmatched/declined/blocked/deleted
-       conversations, reported, banned) and both gender preferences are part
-       of the Mongo query — plus the curated mocks only when `use_mock_data`
-       is True (and mock_feed_profiles / mock_feed_only allow them).
+       conversations, user_blocks in both directions, reported, banned) and
+       both gender preferences are part of the Mongo query — plus the
+       curated mocks only when `use_mock_data` is True (and
+       mock_feed_profiles / mock_feed_only allow them).
     3. apply_hard_filters: mode, mutual gender, saved user_filters (+ request
        overrides) — exclusive = hard, others = soft boost, relaxation when
        fewer than MIN_MATCHES_BEFORE_EXPAND remain.

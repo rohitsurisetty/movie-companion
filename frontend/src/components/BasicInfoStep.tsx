@@ -275,7 +275,9 @@ export default function BasicInfoStep({ data, onUpdate, onNext }: Props) {
         Alert.alert('Permission Denied', 'Enable location services.');
         return;
       }
-      const loc = await Location.getCurrentPositionAsync({});
+      // Approximate (network) location is all we need for "Area, City" and
+      // distance filters; the app only holds ACCESS_COARSE_LOCATION.
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       const resp = await fetch(
         apiUrl(`/api/places/geocode?lat=${loc.coords.latitude}&lng=${loc.coords.longitude}`)
       );

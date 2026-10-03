@@ -704,12 +704,28 @@ async def save_visibility_toggles(user_id: str, toggles: Dict[str, bool], sessio
 # Stores full movie details for movies users have interacted with
 # This is NOT user-specific - it's a global movie reference table
 
+# Set once an insert proves the movie_library table lacks the extended
+# columns (supabase_migration_movie_library_extended.sql not applied). Later
+# saves then go straight to the base insert instead of failing + warning on
+# every swipe. Resets on restart, so applying the migration takes effect then.
+_movie_library_extended_missing = False
+
+
+def _is_missing_column_error(e: BaseException) -> bool:
+    """PostgREST PGRST204: "Could not find the '<col>' column of '<table>' in the schema cache"."""
+    if str(getattr(e, "code", "") or "") == "PGRST204":
+        return True
+    text = f"{getattr(e, 'message', '') or ''} {e}"
+    return "Could not find the" in text and "column" in text
+
+
 async def save_movie_to_library(movie_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Save comprehensive movie information to the global movie library.
     Only stores movies that users have interacted with (searched, liked, disliked).
     This creates a curated catalog for analytics.
     """
+    global _movie_library_extended_missing
     try:
         client = get_supabase_client()
         
@@ -843,17 +859,27 @@ async def save_movie_to_library(movie_data: Dict[str, Any]) -> Dict[str, Any]:
         }
         
         # Try inserting with extended columns first, fall back to base columns if needed
-        try:
-            merged_data = {**data, **extended_data}
-            result = await _run(lambda: client.table("movie_library").insert(merged_data).execute())
-            logger.info(f"Saved movie to library with extended data: {movie_data.get('title')} (ID: {movie_id})")
-            return {"success": True, "data": result.data}
-        except Exception as ext_err:
-            # Extended columns don't exist, use base data only
-            logger.warning(f"Extended columns not available, using base data: {_err(ext_err)}")
-            result = await _run(lambda: client.table("movie_library").insert(data).execute())
-            logger.info(f"Saved movie to library: {movie_data.get('title')} (ID: {movie_id})")
-            return {"success": True, "data": result.data}
+        if not _movie_library_extended_missing:
+            try:
+                merged_data = {**data, **extended_data}
+                result = await _run(lambda: client.table("movie_library").insert(merged_data).execute())
+                logger.info(f"Saved movie to library with extended data: {movie_data.get('title')} (ID: {movie_id})")
+                return {"success": True, "data": result.data}
+            except Exception as ext_err:
+                if _is_missing_column_error(ext_err):
+                    # Schema lacks the extended columns: say so once, then
+                    # always use the base insert.
+                    _movie_library_extended_missing = True
+                    logger.warning(
+                        "movie_library has no extended columns (%s); saving base columns only from now on. "
+                        "Apply supabase_migration_movie_library_extended.sql to store full details.",
+                        _err(ext_err),
+                    )
+                else:
+                    logger.warning(f"Extended columns not available, using base data: {_err(ext_err)}")
+        result = await _run(lambda: client.table("movie_library").insert(data).execute())
+        logger.info(f"Saved movie to library: {movie_data.get('title')} (ID: {movie_id})")
+        return {"success": True, "data": result.data}
         
     except Exception as e:
         logger.error(f"Error saving movie to library: {_err(e)}")
